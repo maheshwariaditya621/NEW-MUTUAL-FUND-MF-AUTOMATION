@@ -19,7 +19,7 @@ FILE_COUNT_MAX = 120
 # RETRY CONFIGURATION
 # ============================================================================
 # Maximum number of retries for failed downloads
-MAX_RETRIES = 2
+MAX_RETRIES = 3
 
 # Backoff delays in seconds for each retry
-RETRY_BACKOFF = [5, 15]  # Retry 1: 5s, Retry 2: 15s
+RETRY_BACKOFF = [5, 15, 30]  # Retry 1: 5s, Retry 2: 15s, Retry 3: 30s
