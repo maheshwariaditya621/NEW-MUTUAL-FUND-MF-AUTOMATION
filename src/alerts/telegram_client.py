@@ -5,6 +5,7 @@ Low-level HTTP client - no business logic.
 """
 
 import requests
+import time
 from typing import Optional
 from src.config import logger
 
@@ -20,6 +21,10 @@ except ImportError:
     TELEGRAM_CHAT_ID = None
     TELEGRAM_ENABLED = False
     logger.warning("Telegram config not found - alerts disabled")
+
+# Retry configuration (matches downloader retry logic)
+MAX_RETRIES = 2  # Total 3 attempts (1 initial + 2 retries)
+RETRY_BACKOFF = [5, 10]  # Retry 1: 5s, Retry 2: 10s
 
 
 class TelegramClient:
@@ -39,7 +44,7 @@ class TelegramClient:
     
     def send_message(self, text: str, parse_mode: str = "Markdown") -> bool:
         """
-        Send a message to Telegram.
+        Send a message to Telegram with retry logic.
         
         Args:
             text: Message text
@@ -59,12 +64,37 @@ class TelegramClient:
             "parse_mode": parse_mode
         }
         
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
-            logger.debug("Telegram message sent successfully")
-            return True
+        # Retry loop
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = requests.post(url, json=payload, timeout=10)
+                response.raise_for_status()
+                logger.debug("Telegram message sent successfully")
+                return True
+            
+            except (requests.Timeout, requests.ConnectionError) as e:
+                # Retry on timeout and connection errors
+                if attempt < MAX_RETRIES:
+                    backoff = RETRY_BACKOFF[attempt]
+                    logger.warning(
+                        f"Telegram send failed (attempt {attempt + 1}/{MAX_RETRIES + 1}): {type(e).__name__}. "
+                        f"Retrying in {backoff}s..."
+                    )
+                    time.sleep(backoff)
+                else:
+                    logger.error(
+                        f"Failed to send Telegram message after {MAX_RETRIES + 1} attempts: {str(e)}"
+                    )
+                    return False
+            
+            except requests.HTTPError as e:
+                # Don't retry on HTTP errors (4xx, 5xx from Telegram API)
+                logger.error(f"Telegram API error (non-retryable): {str(e)}")
+                return False
+            
+            except Exception as e:
+                # Catch-all for unexpected errors
+                logger.error(f"Unexpected error sending Telegram message: {str(e)}")
+                return False
         
-        except requests.RequestException as e:
-            logger.error(f"Failed to send Telegram message: {str(e)}")
-            return False
+        return False
