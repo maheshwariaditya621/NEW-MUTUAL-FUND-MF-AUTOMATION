@@ -367,6 +367,12 @@ class ABSLDownloader(BaseDownloader):
             if not pdf_url:
                 raise Exception(f"No pdfUrl found for: {resource_link}")
             
+            # FIX: Replace outdated domain with current domain
+            # ABSL API still returns old azureedge.net domain, but files are now hosted on mutualfund.adityabirlacapital.com
+            if "abcscprod.azureedge.net" in pdf_url:
+                pdf_url = pdf_url.replace("abcscprod.azureedge.net", "mutualfund.adityabirlacapital.com")
+                logger.info(f"Corrected URL domain: azureedge.net → adityabirlacapital.com")
+            
             # Extract filename from URL
             filename = pdf_url.split("/")[-1]
             file_path = target_dir / filename
@@ -379,9 +385,14 @@ class ABSLDownloader(BaseDownloader):
                 logger.info(f"[DRY RUN] Would download to: {file_path}")
             else:
                 # Download with streaming and retry logic
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "*/*"
+                }
+                
                 for attempt in range(MAX_RETRIES + 1):
                     try:
-                        response = requests.get(pdf_url, stream=True, timeout=60)
+                        response = requests.get(pdf_url, stream=True, headers=headers, timeout=60)
                         response.raise_for_status()
                         
                         with open(file_path, "wb") as f:

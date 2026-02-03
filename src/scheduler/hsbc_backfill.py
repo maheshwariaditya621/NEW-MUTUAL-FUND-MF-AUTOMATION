@@ -1,5 +1,5 @@
 """
-ABSL Auto Backfill Module.
+HSBC Auto Backfill Module.
 
 Supports two modes:
 1. Manual range mode: User-defined date range
@@ -9,13 +9,11 @@ Uses _SUCCESS.json marker as source of truth for completion.
 """
 
 import time
-import json
 from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple, Optional
-from src.downloaders.absl_downloader import ABSLDownloader
+from src.downloaders.hsbc_downloader import HSBCDownloader
 from src.config import logger
-from src.alerts.telegram_notifier import get_notifier
 
 # Import dry-run config
 try:
@@ -84,67 +82,20 @@ def is_month_complete(year: int, month: int) -> bool:
     Returns:
         True if _SUCCESS.json exists, False otherwise
     """
-    folder_path = Path(f"data/raw/absl/{year}_{month:02d}")
+    folder_path = Path(f"data/raw/hsbc/{year}_{month:02d}")
     success_marker = folder_path / "_SUCCESS.json"
     
     return success_marker.exists()
 
 
-def has_not_published_marker(year: int, month: int) -> bool:
-    """
-    Check if NOT_PUBLISHED marker exists for this month.
-    
-    Args:
-        year: Year
-        month: Month (1-12)
-        
-    Returns:
-        True if _NOT_PUBLISHED.json exists, False otherwise
-    """
-    folder_path = Path(f"data/raw/absl/{year}_{month:02d}")
-    not_published_marker = folder_path / "_NOT_PUBLISHED.json"
-    
-    return not_published_marker.exists()
-
-
-def create_not_published_marker(year: int, month: int):
-    """
-    Create NOT_PUBLISHED marker atomically.
-    
-    Args:
-        year: Year
-        month: Month (1-12)
-    """
-    folder_path = Path(f"data/raw/absl/{year}_{month:02d}")
-    folder_path.mkdir(parents=True, exist_ok=True)
-    
-    marker_path = folder_path / "_NOT_PUBLISHED.json"
-    tmp_marker_path = folder_path / "_NOT_PUBLISHED.json.tmp"
-    
-    marker_data = {
-        "amc": "absl",
-        "year": year,
-        "month": month,
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    # Atomic write: write to tmp, then rename
-    with open(tmp_marker_path, "w") as f:
-        json.dump(marker_data, f, indent=2)
-    
-    tmp_marker_path.rename(marker_path)
-    
-    logger.info(f"Created NOT_PUBLISHED marker: {marker_path.name}")
-
-
-def run_absl_backfill(
+def run_hsbc_backfill(
     start_year: Optional[int] = None,
     start_month: Optional[int] = None,
     end_year: Optional[int] = None,
     end_month: Optional[int] = None
 ) -> dict:
     """
-    Run ABSL backfill.
+    Run HSBC backfill.
     
     Two modes:
     
@@ -173,15 +124,15 @@ def run_absl_backfill(
     start_time = time.time()
     
     logger.info("=" * 70)
-    logger.info("ABSL BACKFILL STARTED")
+    logger.info("HSBC BACKFILL STARTED")
     if DRY_RUN:
         logger.info("MODE: DRY RUN (no network calls)")
     logger.info("=" * 70)
     
     # Determine mode
-    if start_year is not None and start_month is not None and end_year is not None and end_month is not None:
+    if all([start_year, start_month, end_year, end_month]):
         # MODE 1: Manual range
-        mode = "MANUAL"
+        mode = "MANUAL_RANGE"
         logger.info(f"Mode: {mode}")
         logger.info(f"Range: {start_year}-{start_month:02d} to {end_year}-{end_month:02d}")
         
@@ -198,16 +149,13 @@ def run_absl_backfill(
         months = [(latest_year, latest_month)]
     
     # Initialize downloader
-    downloader = ABSLDownloader()
-    
-    # Initialize notifier
-    notifier = get_notifier()
+    downloader = HSBCDownloader()
     
     # Track results
     skipped = 0
     downloaded_months = []
     failed_months = []
-    corruption_recoveries = 0
+    not_published_count = 0
     
     # Process each month
     for year, month in months:
@@ -226,59 +174,32 @@ def run_absl_backfill(
             
             try:
                 result = downloader.download(year=year, month=month)
+                status = result["status"]
                 
-                if result["status"] == "success":
+                if status == "success":
                     downloaded_months.append((year, month))
                     month_duration = time.time() - month_start_time
                     logger.success(f"[SUCCESS] {year}-{month:02d} - Downloaded {result['files_downloaded']} file(s) in {month_duration:.2f}s")
-                    
-                    # Send success alert
-                    notifier.notify_success(
-                        amc="absl",
-                        year=year,
-                        month=month,
-                        files_downloaded=result['files_downloaded'],
-                        duration=month_duration
-                    )
-                elif result["status"] == "skipped":
-                    # Already complete (handled by downloader's _SUCCESS.json check)
+                
+                elif status == "skipped":
                     skipped += 1
                     logger.info(f"[SKIP] {year}-{month:02d} - Already complete")
-                elif result["status"] == "not_published":
-                    # Data not yet available - treat as skipped, not failed
-                    skipped += 1
-                    logger.info(f"[SKIP] {year}-{month:02d} - Not yet published")
-                    
-                    # Send Telegram alert ONLY on first detection
-                    if not has_not_published_marker(year, month):
-                        logger.info(f"First NOT_PUBLISHED detection for {year}-{month:02d} - sending Telegram alert")
-                        notifier.notify_not_published(
-                            amc="absl",
-                            year=year,
-                            month=month
-                        )
-                        create_not_published_marker(year, month)
-                    else:
-                        logger.info(f"NOT_PUBLISHED marker already exists for {year}-{month:02d} - skipping alert")
-                elif result["status"] == "failed":
-                    # Actual failure
+                
+                elif status == "not_published":
+                    not_published_count += 1
+                    logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not yet available")
+                
+                elif status == "failed":
                     reason = result.get("reason", "Unknown error")
                     failed_months.append((year, month, reason))
                     logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
-                    
-                    # Send failure alert
-                    notifier.notify_error(
-                        amc="absl",
-                        year=year,
-                        month=month,
-                        error_type="Download Failed",
-                        reason=reason
-                    )
+                
                 else:
-                    # Unknown status - treat as failure
-                    reason = f"Unknown status: {result['status']}"
+                    # Unknown status - treat as failed
+                    reason = result.get("reason", f"Unknown status: {status}")
                     failed_months.append((year, month, reason))
                     logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+                    
             except Exception as e:
                 error_msg = str(e)
                 failed_months.append((year, month, error_msg))
@@ -315,6 +236,7 @@ def run_absl_backfill(
         "skipped": skipped,
         "downloaded": len(downloaded_months),
         "failed": len(failed_months),
+        "not_published": not_published_count,
         "downloaded_months": downloaded_months,
         "failed_months": failed_months,
         "duration": total_duration
@@ -322,50 +244,9 @@ def run_absl_backfill(
 
 
 if __name__ == "__main__":
-    import argparse
+    # For testing - runs in auto mode
+    result = run_hsbc_backfill()
     
-    parser = argparse.ArgumentParser(description="ABSL Mutual Fund Backfill")
-    parser.add_argument("--start-year", type=int, help="Start year (YYYY)")
-    parser.add_argument("--start-month", type=int, help="Start month (1-12)")
-    parser.add_argument("--end-year", type=int, help="End year (YYYY)")
-    parser.add_argument("--end-month", type=int, help="End month (1-12)")
-    
-    args = parser.parse_args()
-    
-    # Check for partial ranges (not allowed)
-    provided_args = [args.start_year, args.start_month, args.end_year, args.end_month]
-    non_none_count = sum(1 for arg in provided_args if arg is not None)
-    
-    if non_none_count > 0 and non_none_count < 4:
-        logger.error("Error: All four arguments (--start-year, --start-month, --end-year, --end-month) must be provided together")
-        logger.error("For AUTO mode, omit all arguments")
-        exit(1)
-    
-    # Validate month ranges if provided
-    if args.start_month is not None:
-        if args.start_month < 1 or args.start_month > 12:
-            logger.error(f"Invalid start month: {args.start_month}. Must be between 1 and 12.")
-            exit(1)
-    
-    if args.end_month is not None:
-        if args.end_month < 1 or args.end_month > 12:
-            logger.error(f"Invalid end month: {args.end_month}. Must be between 1 and 12.")
-            exit(1)
-    
-    # Run backfill
-    if non_none_count == 4:
-        # Manual range mode
-        result = run_absl_backfill(
-            start_year=args.start_year,
-            start_month=args.start_month,
-            end_year=args.end_year,
-            end_month=args.end_month
-        )
-    else:
-        # Auto mode
-        result = run_absl_backfill()
-    
-    # Summary
     if result["downloaded"] > 0:
         logger.success(f"✅ Backfill completed - {result['downloaded']} month(s) downloaded")
     elif result["skipped"] == result["total_checked"]:

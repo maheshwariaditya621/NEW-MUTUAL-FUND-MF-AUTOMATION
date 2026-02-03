@@ -1,36 +1,22 @@
 """
-ABSL Scheduler Module.
+HSBC Scheduler Module.
 
-Runs ABSL backfill in TWO STAGES at fixed times:
+Runs HSBC backfill at fixed times:
 - 07:00 AM
 - 03:00 PM (15:00)
 - 11:45 PM (23:45)
 
-STAGE 1: Scheduled range backfill (optional, if configured)
-STAGE 2: Auto eligible month check (always)
-
+AUTO MODE ONLY: Downloads latest eligible month only.
 Pure Python, cross-platform, no external schedulers.
 """
 
 import time
 from datetime import datetime, time as dt_time
-from typing import Optional, Tuple, Dict
-from src.scheduler.absl_backfill import run_absl_backfill
+from typing import Optional, Tuple
+from src.scheduler.hsbc_backfill import run_hsbc_backfill
 from src.config import logger
 from src.alerts.telegram_notifier import get_notifier
 
-
-# ============================================================================
-# SCHEDULED RANGE CONFIGURATION (OPTIONAL)
-# ============================================================================
-# Format: {"start": (year, month), "end": (year, month)}
-# If None or incomplete, scheduled range backfill is skipped
-# ============================================================================
-
-SCHEDULE_RANGE: Optional[Dict] = None
-
-# To disable scheduled range, set to None:
-# SCHEDULE_RANGE = None
 
 # ============================================================================
 # SCHEDULE TIMES
@@ -90,34 +76,6 @@ class SchedulerState:
         self.last_execution = (execution_date, scheduled_hour)
 
 
-def has_scheduled_range_config() -> bool:
-    """
-    Check if scheduled range is configured.
-    
-    Returns:
-        True if SCHEDULE_RANGE is properly configured, False otherwise
-    """
-    if SCHEDULE_RANGE is None:
-        return False
-    
-    if not isinstance(SCHEDULE_RANGE, dict):
-        return False
-    
-    if "start" not in SCHEDULE_RANGE or "end" not in SCHEDULE_RANGE:
-        return False
-    
-    start = SCHEDULE_RANGE["start"]
-    end = SCHEDULE_RANGE["end"]
-    
-    if not (isinstance(start, tuple) and len(start) == 2):
-        return False
-    
-    if not (isinstance(end, tuple) and len(end) == 2):
-        return False
-    
-    return True
-
-
 def get_next_scheduled_time(current_time: datetime) -> dt_time:
     """
     Get the next scheduled time after current time.
@@ -164,119 +122,24 @@ def wait_for_scheduled_time(state: SchedulerState):
     if wait_seconds > 0:
         logger.info(f"Waiting for next scheduled time: {next_time.strftime('%H:%M')}")
         logger.info(f"Will execute in {wait_seconds/60:.1f} minutes")
-        time.sleep(wait_seconds)
-
-
-def run_two_stage_backfill() -> dict:
-    """
-    Run two-stage backfill.
-    
-    STAGE 1 (Optional): Scheduled range backfill
-    STAGE 2 (Always): Auto eligible month check
-    
-    Returns:
-        Summary dictionary with results from both stages
-    """
-    logger.info("=" * 70)
-    logger.info("TWO-STAGE BACKFILL EXECUTION")
-    logger.info("=" * 70)
-    
-    stage1_result = None
-    stage2_result = None
-    
-    # STAGE 1: Scheduled range backfill (if configured)
-    if has_scheduled_range_config():
-        start_year, start_month = SCHEDULE_RANGE["start"]
-        end_year, end_month = SCHEDULE_RANGE["end"]
-        
-        logger.info("🔁 STAGE 1: SCHEDULED RANGE BACKFILL")
-        logger.info(f"Range: {start_year}-{start_month:02d} to {end_year}-{end_month:02d}")
-        
-        try:
-            stage1_result = run_absl_backfill(
-                start_year=start_year,
-                start_month=start_month,
-                end_year=end_year,
-                end_month=end_month
-            )
-            
-            if stage1_result["downloaded"] > 0:
-                logger.success(f"Stage 1: Downloaded {stage1_result['downloaded']} month(s)")
-            elif stage1_result["skipped"] > 0:
-                logger.info(f"Stage 1: All {stage1_result['skipped']} month(s) already complete")
-            
-        except Exception as e:
-            logger.error(f"Stage 1 failed: {str(e)}")
-    else:
-        logger.info("🔁 STAGE 1: SKIPPED (no scheduled range configured)")
-    
-    logger.info("-" * 70)
-    
-    # STAGE 2: Auto eligible month check (always)
-    logger.info("🔄 STAGE 2: AUTO ELIGIBLE MONTH CHECK")
-    
-    try:
-        stage2_result = run_absl_backfill()  # No arguments = auto mode
-        
-        if stage2_result["downloaded"] > 0:
-            logger.success(f"Stage 2: Downloaded latest month")
-        elif stage2_result["skipped"] > 0:
-            logger.info(f"Stage 2: Latest month already complete")
-        elif stage2_result["failed"] > 0:
-            logger.warning(f"Stage 2: No data available yet for latest month")
-        
-    except Exception as e:
-        logger.error(f"Stage 2 failed: {str(e)}")
-    
-    logger.info("=" * 70)
-    
-    # Combined summary
-    total_downloaded = 0
-    total_failed = 0
-    
-    if stage1_result:
-        total_downloaded += stage1_result["downloaded"]
-        total_failed += stage1_result["failed"]
-    
-    if stage2_result:
-        total_downloaded += stage2_result["downloaded"]
-        total_failed += stage2_result["failed"]
-    
-    return {
-        "stage1": stage1_result,
-        "stage2": stage2_result,
-        "total_downloaded": total_downloaded,
-        "total_failed": total_failed
-    }
 
 
 def run_scheduler():
     """
-    Run ABSL scheduler.
+    Run HSBC scheduler.
     
-    Infinite loop that runs two-stage backfill at scheduled times.
+    Infinite loop that runs HSBC backfill (auto mode) at scheduled times.
     Waits for exact scheduled time before executing.
     """
     logger.info("=" * 70)
-    logger.info("ABSL TWO-STAGE SCHEDULER STARTED")
+    logger.info("HSBC SCHEDULER STARTED")
     logger.info("=" * 70)
     logger.info("Schedule:")
     for schedule_time in SCHEDULE_TIMES:
         logger.info(f"  - {schedule_time.strftime('%H:%M')}")
     logger.info(f"Check interval: {SLEEP_INTERVAL} seconds")
     logger.info("")
-    logger.info("Execution stages:")
-    logger.info("  Stage 1: Scheduled range backfill (if configured)")
-    logger.info("  Stage 2: Auto eligible month check (always)")
-    logger.info("")
-    
-    if has_scheduled_range_config():
-        start_year, start_month = SCHEDULE_RANGE["start"]
-        end_year, end_month = SCHEDULE_RANGE["end"]
-        logger.info(f"Scheduled range: {start_year}-{start_month:02d} to {end_year}-{end_month:02d}")
-    else:
-        logger.info("Scheduled range: NOT CONFIGURED (Stage 1 will be skipped)")
-    
+    logger.info("Mode: AUTO (latest eligible month only)")
     logger.info("=" * 70)
     
     state = SchedulerState()
@@ -303,8 +166,8 @@ def run_scheduler():
                         logger.info("=" * 70)
                         
                         try:
-                            # Run two-stage backfill
-                            result = run_two_stage_backfill()
+                            # Run backfill in AUTO MODE (no arguments)
+                            result = run_hsbc_backfill()
                             
                             # Mark as executed
                             state.mark_executed(now, scheduled_hour)
@@ -314,26 +177,27 @@ def run_scheduler():
                             logger.info("SCHEDULED RUN SUMMARY")
                             logger.info("=" * 70)
                             
-                            if result["total_downloaded"] > 0:
-                                logger.success(f"✅ Downloaded {result['total_downloaded']} month(s) total")
-                            
-                            if result["total_failed"] > 0:
-                                logger.warning(f"⚠️  {result['total_failed']} month(s) failed (data may not be available yet)")
-                            
-                            if result["total_downloaded"] == 0 and result["total_failed"] == 0:
-                                logger.info("ℹ️  All months up to date")
-                            
-                            # Emit scheduler summary alert
-                            notifier = get_notifier()
-                            if result["total_downloaded"] > 0 or result["total_failed"] > 0:
+                            if result["downloaded"] > 0:
+                                logger.success(f"✅ Downloaded {result['downloaded']} month(s)")
+                                
+                                # Send Telegram notification only if downloaded
+                                notifier = get_notifier()
                                 notifier.notify_scheduler(
-                                    event="ABSL Scheduled Run Complete",
-                                    message=f"AMC: ABSL | Mode: AUTO | Time: {now.strftime('%H:%M')}",
+                                    event="HSBC Scheduled Run Complete",
+                                    message=f"AMC: HSBC | Time: {now.strftime('%H:%M')}",
                                     stats={
-                                        "downloaded": result["total_downloaded"],
-                                        "failed": result["total_failed"]
+                                        "downloaded": result["downloaded"],
+                                        "skipped": result["skipped"],
+                                        "failed": result["failed"]
                                     }
                                 )
+                            
+                            elif result["skipped"] > 0:
+                                logger.info("ℹ️  Latest month already complete")
+                            
+                            else:
+                                # No downloads, no skips (likely not_published)
+                                logger.info("ℹ️  No new data available")
                         
                         except Exception as e:
                             logger.error(f"❌ Scheduled run failed: {str(e)}")
@@ -341,7 +205,7 @@ def run_scheduler():
                             # Emit error event
                             notifier = get_notifier()
                             notifier.notify_scheduler(
-                                event="Scheduled Run Failed",
+                                event="HSBC Scheduled Run Failed",
                                 message=f"Error: {str(e)[:100]}",
                                 stats={}
                             )
