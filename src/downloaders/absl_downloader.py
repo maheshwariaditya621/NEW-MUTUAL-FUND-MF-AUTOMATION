@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
+from src.utils.file_validator import validate_and_fix_extension
 
 # Import downloader config
 try:
@@ -399,8 +400,13 @@ class ABSLDownloader(BaseDownloader):
                             for chunk in response.iter_content(chunk_size=8192):
                                 f.write(chunk)
                         
+                        # Validate file format and fix extension if needed
+                        validated_path = validate_and_fix_extension(file_path)
+                        if validated_path != file_path:
+                            file_path = validated_path
+                        
                         file_size = file_path.stat().st_size
-                        logger.info(f"Downloaded: {filename} ({file_size:,} bytes)")
+                        logger.info(f"Downloaded: {file_path.name} ({file_size:,} bytes)")
                         break
                         
                     except (requests.Timeout, requests.ConnectionError) as e:

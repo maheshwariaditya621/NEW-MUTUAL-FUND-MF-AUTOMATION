@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
+from src.utils.file_validator import validate_and_fix_extension
 
 # Import downloader config
 try:
@@ -339,8 +340,13 @@ class AxisDownloader(BaseDownloader):
                         if chunk:
                             fp.write(chunk)
                 
+                # Validate file format and fix extension if needed
+                validated_path = validate_and_fix_extension(file_dest)
+                if validated_path != file_dest:
+                    file_dest = validated_path
+                
                 saved_files.append(str(file_dest))
-                logger.success(f"Saved: {filename}")
+                logger.success(f"Saved: {file_dest.name}")
             
             # File count sanity check (logging only)
             self._check_file_count(len(saved_files), year, month)

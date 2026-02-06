@@ -16,6 +16,7 @@ from urllib.parse import urljoin
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
 from src.alerts.telegram_notifier import get_notifier
+from src.utils.file_validator import validate_and_fix_extension
 
 try:
     from src.config.downloader_config import DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
@@ -199,6 +200,12 @@ class HSBCDownloader(BaseDownloader):
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+                
+                # Validate file format and fix extension if needed
+                validated_path = validate_and_fix_extension(file_path)
+                if validated_path != file_path:
+                    # File was renamed, update the path
+                    file_path = validated_path
                 
                 return True
                 
