@@ -43,6 +43,10 @@ class KotakDownloader(BaseDownloader):
         super().__init__("Kotak Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "kotak"
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -79,6 +83,46 @@ class KotakDownloader(BaseDownloader):
             error_type="Corruption Recovery",
             reason=f"Incomplete download detected and moved to quarantine. Reason: {reason}"
         )
+
+    def open_session(self):
+        """Open a persistent browser session."""
+        if self._page:
+            return
+            
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(
+            headless=False,
+            args=[
+                "--window-size=1920,1080",
+                "--start-maximized",
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+            ],
+            slow_mo=500
+        )
+        self._context = self._browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            accept_downloads=True
+        )
+        self._page = self._context.new_page()
+        Stealth().apply_stealth_sync(self._page)
+        logger.info("Persistent Chrome session opened.")
+
+    def close_session(self):
+        """Close the persistent browser session."""
+        if self._page:
+            self._page.close()
+        if self._browser:
+            self._browser.close()
+        if self._playwright:
+            self._playwright.stop()
+            
+        self._page = None
+        self._context = None
+        self._browser = None
+        self._playwright = None
+        logger.info("Persistent Chrome session closed.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -127,7 +171,7 @@ class KotakDownloader(BaseDownloader):
                     logger.info("=" * 60)
                     return {"amc": "Kotak", "year": year, "month": month, "status": "success", "dry_run": True}
 
-                file_path = self._download_via_playwright(year, month_name, target_dir)
+                file_path = self._download_via_playwright(year, month_name, target_dir, page=self._page)
                 
                 if not file_path:
                     # Not Published Handling
@@ -203,8 +247,11 @@ class KotakDownloader(BaseDownloader):
             "duration": duration
         }
 
-    def _download_via_playwright(self, target_year: int, target_month_name: str, download_folder: Path) -> Optional[Path]:
+    def _download_via_playwright(self, target_year: int, target_month_name: str, download_folder: Path, page=None) -> Optional[Path]:
         """Playwright flow for Kotak."""
+        if page:
+            return self._run_download_flow(page, target_year, target_month_name, download_folder)
+
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=False,
@@ -227,78 +274,87 @@ class KotakDownloader(BaseDownloader):
             Stealth().apply_stealth_sync(page)
             
             try:
-                url = "https://www.kotakmf.com/Information/forms-and-downloads"
-                logger.info(f"Navigating to {url}...")
-                page.goto(url, wait_until="domcontentloaded", timeout=120000)
-                
-                # Check for blocking
-                if "Anomaly Detected" in page.content() or "Captcha" in page.title():
-                    logger.error("Headless access blocked by security.")
-                    return None
-
-                # Apply Filters
-                page.wait_for_selector("select", state="visible", timeout=30000)
-                logger.info("Applying 'Portfolio Monthly' filter...")
-                page.get_by_role("combobox").nth(2).select_option("51")
-                time.sleep(5) # Wait for table refresh
-
-                # Search Logic
-                current_page = 1
-                while current_page <= 5: # Limit pagination search
-                    rows = page.locator("div, tr, p", has_text=re.compile(r"Consolidated Portfolio", re.I)).all()
-                    
-                    for row in rows:
-                        try:
-                            text = row.inner_text().strip()
-                            if not text: continue
-                            
-                            lines = text.splitlines()
-                            title = lines[0].strip()
-                            
-                            # Match rules: Consolidated Portfolio, Full Month Name, and Year
-                            if "consolidated portfolio" in title.lower() and "fortnightly" not in title.lower():
-                                if target_month_name.lower() in title.lower() and str(target_year) in title:
-                                    logger.info(f"Match found: {title}")
-                                    
-                                    dl_link = row.locator("text=Download").first
-                                    if dl_link.count() > 0:
-                                        with page.expect_download(timeout=60000) as download_info:
-                                            try:
-                                                with page.expect_popup(timeout=3000) as popup_info:
-                                                    dl_link.click()
-                                                popup = popup_info.value
-                                                popup.close()
-                                            except:
-                                                if not download_info.is_done():
-                                                    dl_link.click()
-
-                                        download = download_info.value
-                                        final_path = download_folder / download.suggested_filename
-                                        download.save_as(str(final_path))
-                                        logger.info(f"Downloaded: {final_path.name}")
-                                        return final_path
-                        except:
-                            continue
-                    
-                    # Pagination
-                    next_page = current_page + 1
-                    next_btn = page.get_by_text(f"page {next_page}", exact=True).first
-                    if not (next_btn.count() > 0 and next_btn.is_visible()):
-                         next_btn = page.get_by_role("link", name=str(next_page), exact=True).first
-                    
-                    if next_btn.count() > 0 and next_btn.is_visible():
-                        logger.info(f"Moving to Page {next_page}...")
-                        next_btn.scroll_into_view_if_needed()
-                        next_btn.click()
-                        time.sleep(5)
-                        current_page = next_page
-                    else:
-                        break
-
-                return None
-                
+                return self._run_download_flow(page, target_year, target_month_name, download_folder)
             finally:
                 browser.close()
+
+    def _run_download_flow(self, page, target_year: int, target_month_name: str, download_folder: Path) -> Optional[Path]:
+        """Internal flow using an active page."""
+        try:
+            url = "https://www.kotakmf.com/Information/forms-and-downloads"
+            logger.info(f"Navigating to {url}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            
+            # Check for blocking
+            if "Anomaly Detected" in page.content() or "Captcha" in page.title():
+                logger.error("Access blocked by security.")
+                return None
+
+            # Apply Filters
+            page.wait_for_selector("select", state="visible", timeout=30000)
+            logger.info("Applying 'Portfolio Monthly' filter...")
+            page.get_by_role("combobox").nth(2).select_option("51")
+            time.sleep(5) # Wait for table refresh
+
+            # Search Logic
+            current_page = 1
+            while current_page <= 5: # Limit pagination search
+                rows = page.locator("div, tr, p", has_text=re.compile(r"Consolidated Portfolio", re.I)).all()
+                
+                for row in rows:
+                    try:
+                        text = row.inner_text().strip()
+                        if not text: continue
+                        
+                        lines = text.splitlines()
+                        title = lines[0].strip()
+                        
+                        # Match rules: Consolidated Portfolio, Full Month Name, and Year
+                        if "consolidated portfolio" in title.lower() and "fortnightly" not in title.lower():
+                            if target_month_name.lower() in title.lower() and str(target_year) in title:
+                                logger.info(f"Match found: {title}")
+                                
+                                dl_link = row.locator("text=Download").first
+                                if dl_link.count() > 0:
+                                    with page.expect_download(timeout=60000) as download_info:
+                                        try:
+                                            # Kotak sometimes opens download in new tab, handling both
+                                            with page.context.expect_page(timeout=3000) as popup_info:
+                                                dl_link.click()
+                                            popup = popup_info.value
+                                            popup.close()
+                                        except:
+                                            # If no popup, just wait for download on same page
+                                            if not download_info.is_done():
+                                                dl_link.click()
+
+                                    download = download_info.value
+                                    final_path = download_folder / download.suggested_filename
+                                    download.save_as(str(final_path))
+                                    logger.info(f"Downloaded: {final_path.name}")
+                                    return final_path
+                    except:
+                        continue
+                
+                # Pagination
+                next_page = current_page + 1
+                next_btn = page.get_by_text(f"page {next_page}", exact=True).first
+                if not (next_btn.count() > 0 and next_btn.is_visible()):
+                     next_btn = page.get_by_role("link", name=str(next_page), exact=True).first
+                
+                if next_btn.count() > 0 and next_btn.is_visible():
+                    logger.info(f"Moving to Page {next_page}...")
+                    next_btn.scroll_into_view_if_needed()
+                    next_btn.click()
+                    time.sleep(5)
+                    current_page = next_page
+                else:
+                    break
+
+            return None
+        except Exception as e:
+            logger.error(f"Error in download flow: {e}")
+            return None
 
 
 if __name__ == "__main__":

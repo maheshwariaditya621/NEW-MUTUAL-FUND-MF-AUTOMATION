@@ -82,32 +82,38 @@ def run_kotak_backfill(
     downloader = KotakDownloader()
     notifier = get_notifier()
     
-    skipped = 0
-    downloaded_months = []
-    failed_months = []
-    not_published_count = 0
+    # Use persistent session for backfills
+    downloader.open_session()
     
-    for year, month in months:
-        if is_month_complete(year, month):
-            logger.info(f"[SKIP] {year}-{month:02d} - Complete (_SUCCESS.json exists)")
-            skipped += 1
-        else:
-            logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
-            try:
-                result = downloader.download(year=year, month=month)
-                status = result["status"]
-                
-                if status == "success":
-                    downloaded_months.append((year, month))
-                elif status == "skipped":
-                    skipped += 1
-                elif status == "not_published":
-                    not_published_count += 1
-                else:
-                    reason = result.get("reason", "Unknown error")
-                    failed_months.append((year, month, reason))
-            except Exception as e:
-                failed_months.append((year, month, str(e)))
+    try:
+        skipped = 0
+        downloaded_months = []
+        failed_months = []
+        not_published_count = 0
+        
+        for year, month in months:
+            if is_month_complete(year, month):
+                logger.info(f"[SKIP] {year}-{month:02d} - Complete (_SUCCESS.json exists)")
+                skipped += 1
+            else:
+                logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
+                try:
+                    result = downloader.download(year=year, month=month)
+                    status = result["status"]
+                    
+                    if status == "success":
+                        downloaded_months.append((year, month))
+                    elif status == "skipped":
+                        skipped += 1
+                    elif status == "not_published":
+                        not_published_count += 1
+                    else:
+                        reason = result.get("reason", "Unknown error")
+                        failed_months.append((year, month, reason))
+                except Exception as e:
+                    failed_months.append((year, month, str(e)))
+    finally:
+        downloader.close_session()
     
     total_duration = time.time() - start_time
     logger.info("=" * 70)
