@@ -1,0 +1,33 @@
+# src/scheduler/lic_scheduler.py
+
+import time
+from datetime import datetime, time as dt_time
+from src.scheduler.lic_backfill import run_lic_backfill
+from src.config import logger
+from src.alerts.telegram_notifier import get_notifier
+
+SCHEDULE_TIMES = ["08:45", "16:45", "00:41"]
+
+def run_scheduler():
+    logger.info("LIC Scheduler Service Started")
+    logger.info(f"Targeting times: {SCHEDULE_TIMES}")
+    
+    while True:
+        now = datetime.now()
+        current_time = now.strftime("%H:%M")
+        
+        if current_time in SCHEDULE_TIMES:
+            logger.info(f"Scheduled time reached: {current_time}. Triggering backfill...")
+            try:
+                run_lic_backfill()
+            except Exception as e:
+                logger.error(f"Scheduler backfill failed: {e}")
+                get_notifier().notify_error("LIC", now.year, now.month, "Scheduler Failure", str(e)[:100])
+            
+            logger.info("Sleeping for 61 seconds to avoid double triggers...")
+            time.sleep(61)
+            
+        time.sleep(30)
+
+if __name__ == "__main__":
+    run_scheduler()
