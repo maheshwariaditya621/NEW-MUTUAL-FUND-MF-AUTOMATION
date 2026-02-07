@@ -23,3 +23,6 @@ MAX_RETRIES = 3
 
 # Backoff delays in seconds for each retry
 RETRY_BACKOFF = [5, 15, 30]  # Retry 1: 5s, Retry 2: 15s, Retry 3: 30s
+
+# Browser Headless mode
+HEADLESS = False
