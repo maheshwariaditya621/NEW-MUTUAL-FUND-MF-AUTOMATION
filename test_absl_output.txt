@@ -1,3 +1,0 @@
-
-=== RESULT ===
-{'amc': 'absl', 'year': 2024, 'month': 11, 'status': 'success', 'files_downloaded': 1, 'duration': 1.2071363925933838}
