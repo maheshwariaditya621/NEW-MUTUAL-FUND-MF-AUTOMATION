@@ -51,10 +51,6 @@ class MiraeAssetDownloader(BaseDownloader):
         super().__init__("Mirae Asset Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "mirae_asset"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -81,34 +77,6 @@ class MiraeAssetDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("MIRAE_ASSET", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session for MIRAE_ASSET."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent browser session opened for Mirae Asset.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent browser session closed for Mirae Asset.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -164,18 +132,27 @@ class MiraeAssetDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_abbr: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.miraeassetmf.co.in/downloads/portfolio"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to Mirae Asset Downloads page...")
             page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(3)
+            time.sleep(5)
 
             # Accept cookies
             try:
@@ -186,26 +163,67 @@ class MiraeAssetDownloader(BaseDownloader):
             except:
                 pass
 
-            search_pattern = f"{month_name} {target_year}"
-            logger.info(f"Searching for portfolios matching: {search_pattern}")
+            search_pattern = rf"{month_name}\s*,?\s*{target_year}"
+            logger.info(f"Searching for portfolios matching regex: {search_pattern}")
             
             downloaded_funds = set()
             download_count = 0
             page_number = 1
+            max_pages = 40 # Sanity limit
+            matching_found_once = False # To help decide when to stop
 
-            while True:
+            while page_number <= max_pages:
                 logger.info(f"Processing Page {page_number}...")
-                time.sleep(2)
+                time.sleep(3)
                 
-                # Find all links matching this month/year
-                all_links = page.get_by_role("link").all()
+                # Use a specific container if possible for better performance
+                container = page.locator("#nav-portfolio-tab1")
+                if container.count() > 0:
+                    all_links = container.locator("a").all()
+                else:
+                    all_links = page.get_by_role("link").all()
+                
                 download_links_metadata = []
+                newer_records_on_page = 0
+                older_records_on_page = 0
+                matches_on_page = 0
                 
+                # Date detection logic
+                months_list = ["January", "February", "March", "April", "May", "June", 
+                               "July", "August", "September", "October", "November", "December"]
+                target_month_idx = target_month - 1
+
                 for link in all_links:
                     try:
                         text = link.text_content()
-                        if text and search_pattern in text and "Portfolio Details" in text:
-                            # Extract fund name to use as ID
+                        if not text or "Portfolio Details" not in text: continue
+                        
+                        text = text.strip()
+                        # Date detection logic
+                        is_older = False
+                        is_match = False
+                        
+                        if re.search(search_pattern, text, re.I):
+                            is_match = True
+                            matches_on_page += 1
+                            matching_found_once = True
+                        else:
+                            # Check if it's strictly older or newer
+                            year_match = re.search(r"(\d{4})", text)
+                            if year_match:
+                                yr = int(year_match.group(1))
+                                if yr < target_year:
+                                    is_older = True
+                                elif yr == target_year:
+                                    # Same year, check month
+                                    for idx, m in enumerate(months_list):
+                                        if re.search(rf"\b{m}\b", text, re.I):
+                                            if idx < target_month_idx:
+                                                is_older = True
+                                            break
+                        
+                        if is_match:
+                            # Extract fund name
                             fund_name = "Unknown"
                             if "for Mirae Asset " in text:
                                 fund_name = text.split("for Mirae Asset ")[1].strip()
@@ -213,105 +231,111 @@ class MiraeAssetDownloader(BaseDownloader):
                                 fund_name = text.strip()
                             
                             if fund_name not in downloaded_funds:
-                                download_links_metadata.append({"text": text, "fund_name": fund_name})
+                                download_links_metadata.append({"text": text, "fund_name": fund_name, "locator": link})
+                        elif is_older:
+                            older_records_on_page += 1
+                        else:
+                            newer_records_on_page += 1
+                            if page_number > 15: # Only log skip details on deeper pages to avoid spam
+                                logger.debug(f"    Skipping (Newer): {text[:60]}")
                     except:
                         continue
                 
-                if not download_links_metadata:
-                    logger.info(f"No new matching portfolio links on page {page_number}")
-                    break
+                logger.info(f"  Page {page_number} stats: Newer: {newer_records_on_page}, Matches: {matches_on_page}, Older: {older_records_on_page}")
                 
-                logger.info(f"Found {len(download_links_metadata)} portfolio links on page {page_number}")
-                
-                for meta in download_links_metadata:
-                    fund_name = meta["fund_name"]
-                    link_text = meta["text"]
-                    
-                    if fund_name in downloaded_funds:
-                        continue
+                # Process downloads on this page
+                if download_links_metadata:
+                    logger.info(f"Found {len(download_links_metadata)} NEW portfolio links on page {page_number}")
+                    for meta in download_links_metadata:
+                        fund_name = meta["fund_name"]
+                        link_text = meta["text"]
+                        link = meta["locator"]
                         
-                    logger.info(f"  Downloading: {fund_name[:60]}...")
-                    
-                    try:
-                        # Re-locate the link to avoid detachment
-                        link = page.get_by_role("link", name=link_text, exact=True).first
-                        if link.count() == 0:
-                            # Try broad match if exact failed
-                            link = page.locator("a").filter(has_text=link_text).first
-                            
-                        if link.count() == 0:
-                            logger.warning(f"    ⚠ Could not re-locate link: {fund_name}")
-                            continue
-
-                        # Mirae opens a popup for some downloads, or triggers direct download.
-                        # The reference script handles expect_popup.
+                        logger.info(f"  Downloading: {fund_name[:60]}...")
+                        
                         try:
-                            with page.expect_download(timeout=30000) as download_info:
-                                with page.expect_popup(timeout=10000) as popup_info:
+                            # Re-locate the link within the container to avoid detachment
+                            # We use a more specific selector to be sure
+                            try:
+                                with page.expect_download(timeout=60000) as download_info:
+                                    # Mirae Asset often triggers download AND opens a wrapper popup
+                                    try:
+                                        with page.expect_popup(timeout=8000) as popup_info:
+                                            link.click(force=True)
+                                        popup = popup_info.value
+                                        popup.close()
+                                    except:
+                                        # No popup, but expect_download is still waiting
+                                        pass
+                                
+                                download = download_info.value
+                                download_count += 1
+                                # Keep original filename but prefix with count for sorting
+                                safe_fund_name = fund_name[:30].replace(" ", "_").replace("/", "_")
+                                filename = f"{safe_fund_name}_{download.suggested_filename}"
+                                save_path = download_folder / filename
+                                
+                                download.save_as(save_path)
+                                logger.info(f"    ✓ Saved: {filename}")
+                                downloaded_funds.add(fund_name)
+                                time.sleep(1)
+                            except Exception as dl_inner:
+                                logger.debug(f"    Simplified download attempt for {fund_name}...")
+                                with page.expect_download(timeout=45000) as dl_info:
                                     link.click(force=True)
-                                popup = popup_info.value
-                                popup.close()
-                            
-                            download = download_info.value
-                            orig_ext = os.path.splitext(download.suggested_filename)[1] or ".pdf"
-                            
-                            download_count += 1
-                            filename = f"MIRAE_ASSET_{month_abbr}_{target_year}_{download_count:02d}{orig_ext}"
-                            save_path = download_folder / filename
-                            
-                            download.save_as(save_path)
-                            logger.info(f"    ✓ Saved: {filename}")
-                            downloaded_funds.add(fund_name)
-                            time.sleep(1.5)
-                        except PlaywrightTimeout:
-                            # Sometimes no popup, just direct download
-                            with page.expect_download(timeout=30000) as download_info:
-                                link.click(force=True)
-                            download = download_info.value
-                            orig_ext = os.path.splitext(download.suggested_filename)[1] or ".pdf"
-                            download_count += 1
-                            filename = f"MIRAE_ASSET_{month_abbr}_{target_year}_{download_count:02d}{orig_ext}"
-                            save_path = download_folder / filename
-                            download.save_as(save_path)
-                            logger.info(f"    ✓ Saved: {filename}")
-                            downloaded_funds.add(fund_name)
-                            time.sleep(1.5)
-                            
-                    except Exception as e:
-                        logger.error(f"    ✗ Download failed for {fund_name}: {str(e)[:100]}")
+                                dl = dl_info.value
+                                dl_path = download_folder / dl.suggested_filename
+                                if not dl_path.exists():
+                                    dl.save_as(dl_path)
+                                downloaded_funds.add(fund_name)
+                                download_count += 1
+
+                        except Exception as e:
+                            logger.error(f"    ✗ Download failed for {fund_name}: {str(e)[:100]}")
+                # Decide if we can stop
+                if older_records_on_page >= 3:
+                     # We've reached the end of the target period records
+                    if matching_found_once:
+                        logger.info("Reached end of target period (older records detected). Stopping.")
+                        break
+                    else:
+                        # This should only happen if the target month was never published
+                        # but we saw older ones.
+                        logger.warning("Reached older records without finding any matches. Target month might be missing.")
+                        break
 
                 # Pagination
                 page_number += 1
                 try:
-                    # Look for numbered button
-                    next_page_btn = page.get_by_role("link", name=str(page_number), exact=True)
-                    if next_page_btn.count() > 0:
+                    # Look for next page number button specifically in the active tab's pagination
+                    page.mouse.wheel(0, 1000)
+                    time.sleep(2)
+
+                    pagination_container = container.locator(".pagination, .paging").first
+                    if pagination_container.count() == 0:
+                        pagination_container = page.locator(".pagination, .paging").first
+
+                    # Strategy: Try clicking page number directly
+                    num_btn = pagination_container.get_by_role("link", name=str(page_number), exact=True).first
+                    if num_btn.count() > 0 and num_btn.is_visible():
                         logger.info(f"Navigating to page {page_number}...")
-                        next_page_btn.first.click()
+                        num_btn.click()
                         time.sleep(3)
                     else:
-                        # Try "Next" button
-                        next_btn = page.get_by_role("link", name=re.compile("Next", re.I)).first
-                        if next_btn.count() > 0:
-                            # Check if disabled
-                            classes = next_btn.get_attribute("class") or ""
-                            if "disabled" in classes.lower():
-                                logger.info("Next button is disabled. Reached the end.")
-                                break
-                                
-                            logger.info(f"Clicking 'Next' to reveal more pages...")
+                        # Try "Next" or ">" button in the same container
+                        next_btn = pagination_container.get_by_role("link", name=re.compile(r"Next|>", re.I)).first
+                        if next_btn.count() > 0 and next_btn.is_visible():
+                            logger.info(f"Clicking 'Next' (>) to reveal more pages (Current max on UI: {page_number-1})...")
                             next_btn.click()
-                            time.sleep(3)
+                            time.sleep(4)
                             
-                            # Check if page number now exists
-                            next_page_btn = page.get_by_role("link", name=str(page_number), exact=True)
-                            if next_page_btn.count() > 0:
-                                next_page_btn.first.click()
+                            # Re-check if the number now appeared
+                            num_btn = pagination_container.get_by_role("link", name=str(page_number), exact=True).first
+                            if num_btn.count() > 0:
+                                num_btn.click()
                                 time.sleep(3)
-                            else:
-                                break
                         else:
-                            logger.info("No more pagination buttons found.")
+                            logger.info(f"No more pagination buttons for page {page_number} and no 'Next' button.")
                             break
                 except Exception as e:
                     logger.info(f"Pagination completed or interrupted: {e}")
@@ -320,7 +344,8 @@ class MiraeAssetDownloader(BaseDownloader):
             return download_count
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

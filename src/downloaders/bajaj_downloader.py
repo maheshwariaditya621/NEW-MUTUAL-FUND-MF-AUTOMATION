@@ -18,7 +18,7 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
     )
 except ImportError:
     DRY_RUN = False
@@ -44,10 +44,6 @@ class BajajDownloader(BaseDownloader):
         super().__init__("Bajaj Finserv Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "bajaj"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -92,47 +88,6 @@ class BajajDownloader(BaseDownloader):
         else:
             return f"{year}-{str(year+1)[-2:]}"
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            logger.debug("Session already active. Reusing existing page.")
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            args=[
-                "--window-size=1920,1080",
-                "--start-maximized",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
-            slow_mo=1000  # Bajaj site needs more time for hydrates
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            ignore_https_errors=True,
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Bajaj.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page:
-            self._page.close()
-        if self._browser:
-            self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
-            
-        self._page = None
-        self._context = None
-        self._browser = None
-        self._playwright = None
-        logger.info("Persistent Chrome session closed for Bajaj.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -259,30 +214,36 @@ class BajajDownloader(BaseDownloader):
 
     def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> Optional[Path]:
         """Internal flow using Playwright with session support and no-refresh logic."""
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         month_name = self.MONTH_NAMES[target_month]
         fy_str = self._get_fy_string(target_year, target_month)
         
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=False,
+                args=[
+                    "--window-size=1920,1080",
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+                slow_mo=1000
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                ignore_https_errors=True,
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             url = "https://www.bajajamc.com/downloads?statutory-disclosures="
-            
-            # Optimization: Skip navigation if already on the downloads page
-            current_url = page.url.rstrip('/')
-            target_url = url.rstrip('/')
-            
-            if current_url == target_url:
-                logger.info(f"Session Active: Already on {url}. Skipping navigation and refresh.")
-                # If we're already on the page, we might need to reset the selections if they stick.
-                # Usually Bajaj handles JS resets or we click the tabs again.
-            else:
-                logger.info(f"Session Active: Navigating to {url}...")
-                page.goto(url, wait_until="domcontentloaded", timeout=120000)
-                time.sleep(10) # Hydration wait
+            logger.info(f"Navigating to {url}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            time.sleep(10) # Hydration wait
 
             # 1. Close popups
             try:
@@ -392,19 +353,16 @@ class BajajDownloader(BaseDownloader):
                 target_link.click()
             
             download = download_info.value
-            ext = os.path.splitext(download.suggested_filename)[1] or ".xlsx"
-            filename = f"Bajaj_Portfolio_{month_name}_{target_year}{ext}"
+            filename = download.suggested_filename
             final_path = download_folder / filename
             download.save_as(str(final_path))
             
             logger.info(f"Downloaded: {filename}")
             return final_path
 
-        except Exception as e:
-            raise e
         finally:
-            if close_needed:
-                self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

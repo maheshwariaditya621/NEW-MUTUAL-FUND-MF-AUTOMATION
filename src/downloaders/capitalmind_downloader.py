@@ -1,3 +1,4 @@
+
 # src/downloaders/capitalmind_downloader.py
 
 import os
@@ -49,6 +50,7 @@ class CapitalMindDownloader(BaseDownloader):
         self._browser = None
         self._context = None
         self._page = None
+        logger.info("CapitalMindDownloader initialized (Fixed Version 2.0)")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -172,10 +174,13 @@ class CapitalMindDownloader(BaseDownloader):
 
         page = self._page
         url = "https://capitalmindmf.com/statutory-disclosures.html#"
-
         try:
             logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            except Exception as e:
+                logger.warning(f"Navigation warning: {e}")
+            
             time.sleep(5)
             logger.info("  ✓ Page loaded")
 
@@ -245,30 +250,31 @@ class CapitalMindDownloader(BaseDownloader):
                         s_btn.click(force=True)
                         time.sleep(2)
 
-                    # Find FY heading
+                    # Find FY heading/button
                     logger.info(f"    Searching for {target_fy} section...")
-                    fy_heading = s_panel.locator("h6").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
                     
-                    if fy_heading.count() == 0:
+                    # Prioritize Button (Interactive)
+                    fy_btn = s_panel.locator("button").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
+                    if fy_btn.count() == 0:
                         # Fallback: Try year range without FY prefix
                         year_range = target_fy.replace("FY ", "")
-                        fy_heading = s_panel.locator("h6").filter(has_text=re.compile(re.escape(year_range), re.I)).first
-                    
-                    if fy_heading.count() == 0:
-                        # Final fallback: Look for a button
-                        fy_btn = s_panel.locator("button").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
-                        if fy_btn.count() > 0:
-                            if fy_btn.get_attribute("aria-expanded") != "true":
-                                fy_btn.click(force=True)
-                                time.sleep(2)
-                            fy_panel_id = fy_btn.get_attribute("aria-controls")
-                            search_area = page.locator(f"#{fy_panel_id}")
+                        fy_btn = s_panel.locator("button").filter(has_text=re.compile(re.escape(year_range), re.I)).first
+
+                    if fy_btn.count() > 0:
+                        if fy_btn.get_attribute("aria-expanded") != "true":
+                            logger.info(f"    Expanding {target_fy} section...")
+                            fy_btn.click(force=True)
+                            time.sleep(2)
+                        search_area = s_panel
+                    else:
+                        # Fallback to Header (Static)
+                        fy_heading = s_panel.locator("h6").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
+                        if fy_heading.count() > 0:
+                            search_area = s_panel
+                            logger.info(f"    ✓ Found FY heading (Static)")
                         else:
                             logger.warning(f"    ✗ FY section '{target_fy}' not found for {scheme_name}")
                             continue
-                    else:
-                        search_area = s_panel
-                        logger.info(f"    ✓ Found FY heading")
 
                     # Find Month row
                     logger.info(f"    Searching for {month_name} row...")
@@ -281,6 +287,9 @@ class CapitalMindDownloader(BaseDownloader):
                         d_link = month_row.locator("a").filter(has_text=re.compile("Download", re.I)).first
                         
                         if d_link.count() > 0:
+                            # Ensure link is visible
+                            d_link.scroll_into_view_if_needed()
+                            time.sleep(0.5)
                             try:
                                 with page.expect_download(timeout=60000) as download_info:
                                     try:
@@ -292,8 +301,7 @@ class CapitalMindDownloader(BaseDownloader):
                                         d_link.click(force=True)
                                 
                                 download = download_info.value
-                                safe_name = re.sub(r'\W+', '_', scheme_name).strip('_')
-                                filename = f"CapitalMind_{safe_name}_{month_name}_{target_year}.xlsx"
+                                filename = download.suggested_filename
                                 save_path = download_folder / filename
                                 download.save_as(save_path)
                                 
@@ -315,7 +323,8 @@ class CapitalMindDownloader(BaseDownloader):
             return total_downloaded
 
         finally:
-            if close_needed: self.close_session()
+            if close_needed:
+                self.close_session()
 
 
 if __name__ == "__main__":

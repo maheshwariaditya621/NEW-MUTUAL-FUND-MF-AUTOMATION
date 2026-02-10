@@ -178,7 +178,7 @@ class HSBCDownloader(BaseDownloader):
             # 2. File date is in first 10 days of next month (grace window)
             if (date_obj.year == year and date_obj.month == month) or \
                (date_obj.year == next_year and date_obj.month == next_month and date_obj.day <= 10):
-                filename = f"{fund_slug}_{date_obj.strftime('%Y-%m-%d')}.xlsx"
+                filename = url.split('/')[-1]
                 filtered[filename] = url
         
         logger.info(f"Filtered to {len(filtered)} files for {year}-{month:02d} (with 10-day grace window)")
@@ -196,16 +196,11 @@ class HSBCDownloader(BaseDownloader):
                 response = requests.get(url, headers=headers, stream=True, timeout=120)
                 response.raise_for_status()
                 
+                # Save file
                 with open(file_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
-                
-                # Validate file format and fix extension if needed
-                validated_path = validate_and_fix_extension(file_path)
-                if validated_path != file_path:
-                    # File was renamed, update the path
-                    file_path = validated_path
                 
                 return True
                 

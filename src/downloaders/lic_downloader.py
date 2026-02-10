@@ -18,7 +18,7 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
     )
 except ImportError:
     DRY_RUN = False
@@ -122,6 +122,8 @@ class LICDownloader(BaseDownloader):
         self._page = None
         self._context = None
         self._browser = None
+        if self._playwright:
+            self._playwright.stop()
         self._playwright = None
         logger.info("Persistent Chrome session closed for LIC.")
 
@@ -348,13 +350,15 @@ class LICDownloader(BaseDownloader):
                 # Clean URL
                 full_url = href.replace(" ", "%20")
                 
-                # Determine file extension
-                ext = ".xlsx" if ".xlsx" in full_url.lower() else ".xls"
-                if ".pdf" in full_url.lower(): ext = ".pdf"
+                # Use original filename from URL
+                filename = full_url.split("/")[-1].replace("%20", " ")
+                if not filename or "." not in filename:
+                    # Fallback to sanitized title if URL doesn't have a clear filename
+                    safe_title = "".join([c for c in title if c.isalnum() or c in (" ", "-", "_")]).strip()
+                    ext = ".xlsx" if ".xlsx" in full_url.lower() else ".xls"
+                    if ".pdf" in full_url.lower(): ext = ".pdf"
+                    filename = f"{safe_title}{ext}"
                 
-                # Sanitize filename
-                safe_title = "".join([c for c in title if c.isalnum() or c in (" ", "-", "_")]).strip()
-                filename = f"{safe_title}{ext}"
                 filepath = download_folder / filename
                 
                 logger.info(f"Downloading: {title} ...")

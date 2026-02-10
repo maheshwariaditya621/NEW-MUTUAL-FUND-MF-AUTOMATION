@@ -11,7 +11,7 @@ def run_backfill(start_year: int, start_month: int, end_year: int, end_month: in
     logger.info(f"Starting Taurus backfill from {start_year}-{start_month} to {end_year}-{end_month}")
     
     # Persistent Session: Open once for the entire backfill
-    downloader.open_session()
+    # downloader.open_session()
     
     try:
         current_year, current_month = start_year, start_month
@@ -30,7 +30,8 @@ def run_backfill(start_year: int, start_month: int, end_year: int, end_month: in
                 
     finally:
         # Close session after all months are processed
-        downloader.close_session()
+        # downloader.close_session()
+        pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Taurus Mutual Fund Backfill")

@@ -9,8 +9,6 @@ from src.config import logger
 def run_backfill(start_year, start_month, end_year, end_month):
     downloader = WhiteOakDownloader()
     
-    # Open persistent session once
-    downloader.open_session()
     
     try:
         current_year = start_year
@@ -32,8 +30,7 @@ def run_backfill(start_year, start_month, end_year, end_month):
                 current_month += 1
                 
     finally:
-        # Close session
-        downloader.close_session()
+        pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WhiteOak Multi-month Backfill")

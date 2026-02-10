@@ -55,10 +55,6 @@ class UnifiDownloader(BaseDownloader):
         super().__init__("Unifi Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "unifi"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -85,34 +81,6 @@ class UnifiDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Unifi", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session for Unifi."""
-        if self._page: return
-            
-        self._playwright = sync_playwright().start()
-        # Using non-headless as per user script request (headless=False)
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info(f"Persistent browser session opened for {self.AMC_NAME}.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info(f"Persistent browser session closed for {self.AMC_NAME}.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -158,10 +126,6 @@ class UnifiDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if self._page:
-                     try:
-                        self._page.screenshot(path=f"unifi_debug_{year}_{month}_attempt_{attempt}.png")
-                     except: pass
                 if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
 
         if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
@@ -169,16 +133,26 @@ class UnifiDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://unifimf.com/statutorydocuments/#monthly-portfolio-disclosure"
         target_link_text = f"Document {month_full} {target_year}"
         
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=False,
+                channel="chrome",
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info("Navigating to Unifi Statutory Documents page...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             logger.info("Waiting 4s for navigation...")
@@ -259,21 +233,17 @@ class UnifiDownloader(BaseDownloader):
                             original_filename = dl.suggested_filename
                             ext = os.path.splitext(original_filename)[1] or ".pdf"
                             
-                            # Clean scheme name for filename
-                            safe_scheme = re.sub(r'[^a-zA-Z0-9]', '_', scheme_name)
-                            safe_scheme = re.sub(r'_+', '_', safe_scheme).strip('_')
+                            save_path = download_folder / original_filename
                             
-                            fname = f"UNIFI_{safe_scheme}_{month_abbr}_{target_year}{ext}"
-                            save_path = download_folder / fname
-                            
-                            # Handle duplicates
+                            # Handle duplicates only if the exact same name exists
                             if save_path.exists():
                                 ts = int(time.time())
-                                fname = f"UNIFI_{safe_scheme}_{month_abbr}_{target_year}_{ts}{ext}"
-                                save_path = download_folder / fname
+                                stem = os.path.splitext(original_filename)[0]
+                                fname_alt = f"{stem}_{ts}{ext}"
+                                save_path = download_folder / fname_alt
 
                             dl.save_as(save_path)
-                            logger.info(f"    ✓ Saved: {fname}")
+                            logger.info(f"    ✓ Saved: {save_path.name}")
                             files_downloaded += 1
                             time.sleep(1)
                             
@@ -288,7 +258,8 @@ class UnifiDownloader(BaseDownloader):
             return files_downloaded
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

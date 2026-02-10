@@ -9,7 +9,7 @@ def run_backfill(start_year, start_month, end_year, end_month):
     downloader = OldBridgeDownloader()
     
     # Use persistent session for efficient backfill
-    downloader.open_session()
+    # downloader.open_session()
     
     try:
         for year in range(start_year, end_year + 1):
@@ -22,7 +22,8 @@ def run_backfill(start_year, start_month, end_year, end_month):
                 except Exception as e:
                     logger.error(f"Failed to backfill {year}-{month:02d}: {e}")
     finally:
-        downloader.close_session()
+        # downloader.close_session()
+        pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Old Bridge Mutual Fund Backfill")

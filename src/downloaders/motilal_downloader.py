@@ -45,10 +45,6 @@ class MotilalDownloader(BaseDownloader):
         super().__init__("Motilal Oswal Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "motilal"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -82,31 +78,6 @@ class MotilalDownloader(BaseDownloader):
         else:
             return month + 1, year
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Motilal.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for Motilal.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -162,15 +133,23 @@ class MotilalDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.motilaloswalmf.com/download/scheme-portfolio-details"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             # Motilal quirk: Data for month N appears under month N+1 selection
             selection_month, selection_year = self._get_next_month(target_month, target_year)
             selection_month_name = self.MONTH_NAMES[selection_month]
@@ -219,27 +198,26 @@ class MotilalDownloader(BaseDownloader):
             logger.info(f"  ✓ Downloaded: {suggested}")
 
             # Process the file (extract if ZIP, rename)
-            final_path = self._process_downloaded_file(temp_path, month_name, target_year, download_folder)
+            final_path = self._process_downloaded_file(temp_path, month_name, target_year, download_folder, suggested)
             
             return final_path
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
-    def _process_downloaded_file(self, temp_path: Path, month_name: str, year: int, download_folder: Path) -> Optional[Path]:
-        """Process the downloaded file - extract if ZIP, rename appropriately."""
+    def _process_downloaded_file(self, temp_path: Path, month_name: str, year: int, download_folder: Path, original_suggested_name: str) -> Optional[Path]:
+        """Process the downloaded file - extract if ZIP, preserve original name."""
         try:
-            # Check if it's a ZIP file
             if temp_path.suffix.lower() == '.zip':
                 logger.info("ZIP file detected, extracting...")
-                
-                temp_extract_dir = download_folder / "temp_extract"
+                temp_extract_dir = download_folder / f"temp_extract_{int(time.time())}"
                 temp_extract_dir.mkdir(exist_ok=True)
                 
                 with zipfile.ZipFile(temp_path, 'r') as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
                 
-                # Look for Excel file in extracted contents
+                # Look for Excel file
                 found_file = None
                 for file in temp_extract_dir.rglob('*'):
                     if file.is_file() and file.suffix.lower() in ['.xlsx', '.xls']:
@@ -247,32 +225,23 @@ class MotilalDownloader(BaseDownloader):
                         break
                 
                 if found_file:
-                    logger.info(f"  ✓ Extracted: {found_file.name}")
-                    final_filename = f"MotilalOswal_{month_name}_{year}.xlsx"
-                    final_path = download_folder / final_filename
+                    final_path = download_folder / found_file.name
+                    if final_path.exists():
+                        final_path = download_folder / f"{month_name}_{year}_{found_file.name}"
                     
                     shutil.move(str(found_file), str(final_path))
-                    
-                    # Cleanup
                     temp_path.unlink()
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    
-                    logger.info(f"  ✓ Saved: {final_filename}")
+                    logger.info(f"  ✓ Saved: {final_path.name}")
                     return final_path
                 else:
-                    logger.warning("  ✗ No Excel file found in ZIP")
-                    # Cleanup
                     temp_path.unlink()
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
                     return None
             else:
-                # Direct Excel file
-                final_filename = f"MotilalOswal_{month_name}_{year}{temp_path.suffix}"
-                final_path = download_folder / final_filename
-                
+                final_path = download_folder / original_suggested_name
                 shutil.move(str(temp_path), str(final_path))
-                logger.info(f"  ✓ Saved: {final_filename}")
-                
+                logger.info(f"  ✓ Saved: {final_path.name}")
                 return final_path
                 
         except Exception as e:

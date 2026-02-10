@@ -55,10 +55,6 @@ class SundaramDownloader(BaseDownloader):
         super().__init__("Sundaram Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "sundaram"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -85,34 +81,6 @@ class SundaramDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Sundaram", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session for Sundaram."""
-        if self._page: return
-            
-        self._playwright = sync_playwright().start()
-        # Using non-headless as per user script preference
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info(f"Persistent browser session opened for {self.AMC_NAME}.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info(f"Persistent browser session closed for {self.AMC_NAME}.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -169,15 +137,25 @@ class SundaramDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.sundarammutual.com/Monthly-Fortnightly-Adhoc-Portfolios"
         
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=False,
+                channel="chrome",
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info("Navigating to Sundaram Portfolio page...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(3)
@@ -294,23 +272,13 @@ class SundaramDownloader(BaseDownloader):
                                     link.click(force=True)
                                 
                                 dl = download_info.value
-                                original_filename = dl.suggested_filename
-                                ext = os.path.splitext(original_filename)[1] or ".xlsx"
+                                fname = dl.suggested_filename
                                 
-                                # Clean up filename
-                                safe_text = re.sub(r'[^a-zA-Z0-9]', '_', text.strip())
-                                safe_text = re.sub(r'_+', '_', safe_text).strip('_')
-                                if not safe_text: safe_text = "portfolio"
+                                # Prefix with scheme identifier if filename is generic (e.g. "Monthly Portfolio.pdf")
+                                if fname.lower() in ["monthly portfolio.pdf", "monthly_portfolio.pdf", "portfolio.pdf", "disclosures.pdf", "download.pdf", "portfolio.xlsx"]:
+                                    fname = f"SUNDARAM_{safe_text}_{month_abbr}_{target_year}_{fname}"
                                 
-                                fname = f"SUNDARAM_{safe_text}_{month_abbr}_{target_year}{ext}"
                                 save_path = download_folder / fname
-                                
-                                # Handle duplicates
-                                if save_path.exists():
-                                    ts = int(time.time())
-                                    fname = f"SUNDARAM_{safe_text}_{month_abbr}_{target_year}_{ts}{ext}"
-                                    save_path = download_folder / fname
-
                                 dl.save_as(save_path)
                                 logger.info(f"    ✓ Saved: {fname}")
                                 files_downloaded += 1
@@ -329,7 +297,8 @@ class SundaramDownloader(BaseDownloader):
                 return 0
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

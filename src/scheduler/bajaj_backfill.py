@@ -81,9 +81,6 @@ def run_bajaj_backfill(
     
     downloader = BajajDownloader()
     
-    # Use persistent session for backfills
-    downloader.open_session()
-    
     try:
         skipped = 0
         downloaded_months = []
@@ -115,7 +112,7 @@ def run_bajaj_backfill(
                 # Small gap between downloads on same session for stability
                 time.sleep(2)
     finally:
-        downloader.close_session()
+        pass
     
     total_duration = time.time() - start_time
     logger.info("=" * 70)

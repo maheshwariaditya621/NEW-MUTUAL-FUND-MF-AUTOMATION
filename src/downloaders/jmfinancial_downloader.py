@@ -45,10 +45,6 @@ class JMFinancialDownloader(BaseDownloader):
         super().__init__("JM Financial Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "jmfinancial"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -75,31 +71,6 @@ class JMFinancialDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("JM_FINANCIAL", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for JM Financial.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for JM Financial.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -155,15 +126,23 @@ class JMFinancialDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.jmfinancialmf.com/downloads/Portfolio-Disclosure/Monthly-Portfolio-of-Schemes"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to {url}...")
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -253,12 +232,16 @@ class JMFinancialDownloader(BaseDownloader):
             count = 0
             for idx, (title, link) in enumerate(unique_links):
                 try:
-                    # Clean title for filename
-                    clean_title = re.sub(r'[^\w\-_\. ]', '_', title).replace(' ', '_')
-                    final_filename = f"JM_{clean_title}.xlsx"
-                    save_path = download_folder / final_filename
+                    # Extract filename from URL
+                    original_name = link.split("/")[-1].replace("%20", " ")
+                    if not original_name:
+                        # Fallback to title if URL is weird
+                        clean_title = re.sub(r'[^\w\-_\. ]', '_', title).replace(' ', '_')
+                        original_name = f"JM_{clean_title}.xlsx"
                     
-                    logger.info(f"  [{idx+1}/{len(unique_links)}] {final_filename[:60]}...")
+                    save_path = download_folder / original_name
+                    
+                    logger.info(f"  [{idx+1}/{len(unique_links)}] {original_name[:60]}...")
                     
                     response = requests.get(link, headers=headers, stream=True, timeout=30)
                     if response.status_code == 200:
@@ -274,7 +257,8 @@ class JMFinancialDownloader(BaseDownloader):
             return count
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

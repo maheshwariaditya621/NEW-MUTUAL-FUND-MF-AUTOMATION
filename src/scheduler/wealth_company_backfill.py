@@ -72,28 +72,59 @@ def run_wealth_company_backfill(
     failed_months = []
     not_published_count = 0
     
-    try:
-        # Open persistent session for efficiency
-        downloader.open_session()
+    if all([start_year, start_month, end_year, end_month]):
+        # MODE 1: MANUAL RANGE
+        mode = "MANUAL_RANGE"
+        logger.info(f"Mode: {mode}")
+        logger.info(f"Range: {start_year}-{start_month:02d} to {end_year}-{end_month:02d}")
+        months = generate_month_range(start_year, start_month, end_year, end_month)
         
-        if all([start_year, start_month, end_year, end_month]):
-            # MODE 1: MANUAL RANGE
-            mode = "MANUAL_RANGE"
-            logger.info(f"Mode: {mode}")
-            logger.info(f"Range: {start_year}-{start_month:02d} to {end_year}-{end_month:02d}")
-            months = generate_month_range(start_year, start_month, end_year, end_month)
+        for year, month in months:
+            if is_month_complete(year, month):
+                logger.info(f"[SKIP] {year}-{month:02d} - Complete")
+                skipped += 1
+                continue
             
-            for year, month in months:
-                if is_month_complete(year, month):
-                    logger.info(f"[SKIP] {year}-{month:02d} - Complete")
-                    skipped += 1
-                    continue
+            logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
+            if DRY_RUN:
+                downloaded_months.append((year, month))
+                continue
                 
-                logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
-                if DRY_RUN:
+            try:
+                result = downloader.download(year, month)
+                status = result.get("status")
+                if status == "success":
                     downloaded_months.append((year, month))
-                    continue
-                    
+                    logger.success(f"[SUCCESS] {year}-{month:02d}")
+                elif status == "not_published":
+                    not_published_count += 1
+                    logger.info(f"[NOT PUBLISHED] {year}-{month:02d}")
+                elif status == "skipped":
+                    # Could be inception date skip
+                    logger.info(f"[SKIP] {year}-{month:02d} - {result.get('reason')}")
+                    skipped += 1
+                else:
+                    reason = result.get("reason", "Unknown")
+                    failed_months.append((year, month, reason))
+                    logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+            except Exception as e:
+                failed_months.append((year, month, str(e)))
+                logger.error(f"[ERROR] {year}-{month:02d} - {e}")
+    
+    else:
+        # MODE 2: AUTO
+        mode = "AUTO"
+        logger.info(f"Mode: {mode}")
+        year, month = get_latest_eligible_month()
+        logger.info(f"Latest eligible: {year}-{month:02d}")
+        
+        if is_month_complete(year, month):
+            logger.info(f"[SKIP] {year}-{month:02d} - Complete")
+            skipped = 1
+        else:
+            if DRY_RUN:
+                downloaded_months.append((year, month))
+            else:
                 try:
                     result = downloader.download(year, month)
                     status = result.get("status")
@@ -101,51 +132,14 @@ def run_wealth_company_backfill(
                         downloaded_months.append((year, month))
                         logger.success(f"[SUCCESS] {year}-{month:02d}")
                     elif status == "not_published":
-                        not_published_count += 1
-                        logger.info(f"[NOT PUBLISHED] {year}-{month:02d}")
+                        not_published_count = 1
                     elif status == "skipped":
-                        # Could be inception date skip
-                        logger.info(f"[SKIP] {year}-{month:02d} - {result.get('reason')}")
-                        skipped += 1
+                        skipped = 1
                     else:
-                        reason = result.get("reason", "Unknown")
-                        failed_months.append((year, month, reason))
-                        logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+                        failed_months.append((year, month, result.get("reason")))
                 except Exception as e:
                     failed_months.append((year, month, str(e)))
-                    logger.error(f"[ERROR] {year}-{month:02d} - {e}")
-        
-        else:
-            # MODE 2: AUTO
-            mode = "AUTO"
-            logger.info(f"Mode: {mode}")
-            year, month = get_latest_eligible_month()
-            logger.info(f"Latest eligible: {year}-{month:02d}")
-            
-            if is_month_complete(year, month):
-                logger.info(f"[SKIP] {year}-{month:02d} - Complete")
-                skipped = 1
-            else:
-                if DRY_RUN:
-                    downloaded_months.append((year, month))
-                else:
-                    try:
-                        result = downloader.download(year, month)
-                        status = result.get("status")
-                        if status == "success":
-                            downloaded_months.append((year, month))
-                            logger.success(f"[SUCCESS] {year}-{month:02d}")
-                        elif status == "not_published":
-                            not_published_count = 1
-                        elif status == "skipped":
-                            skipped = 1
-                        else:
-                            failed_months.append((year, month, result.get("reason")))
-                    except Exception as e:
-                        failed_months.append((year, month, str(e)))
 
-    finally:
-        downloader.close_session()
 
     total_duration = time.time() - start_time
     total_checked = 1 if mode == "AUTO" else len(months)

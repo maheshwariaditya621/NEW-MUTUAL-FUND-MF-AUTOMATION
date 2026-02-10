@@ -50,10 +50,6 @@ class EdelweissDownloader(BaseDownloader):
         super().__init__("Edelweiss Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "edelweiss"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -80,36 +76,6 @@ class EdelweissDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("EDELWEISS", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            extra_http_headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Edelweiss.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for Edelweiss.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -166,22 +132,34 @@ class EdelweissDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, download_folder: Path) -> Optional[Path]:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.edelweissmf.com/statutory/portfolio-of-schemes"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                extra_http_headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             # Visit home page first to get cookies
-            if page.url != "https://www.edelweissmf.com/":
-                try:
-                    logger.info("Visiting home page to establish session...")
-                    page.goto("https://www.edelweissmf.com/", wait_until="networkidle", timeout=30000)
-                    time.sleep(2)
-                except: pass
+            try:
+                logger.info("Visiting home page to establish session...")
+                page.goto("https://www.edelweissmf.com/", wait_until="networkidle", timeout=30000)
+                time.sleep(2)
+            except: pass
 
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="networkidle", timeout=60000)
@@ -243,11 +221,7 @@ class EdelweissDownloader(BaseDownloader):
                 target_link.click()
             
             download = download_info.value
-            
-            # Save with standardized filename
-            suggested = download.suggested_filename
-            ext = os.path.splitext(suggested)[1] if suggested else ".xlsx"
-            final_filename = f"EDELWEISS_{self.MONTH_NAMES[target_month]}_{target_year}{ext}"
+            final_filename = download.suggested_filename
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
@@ -256,7 +230,8 @@ class EdelweissDownloader(BaseDownloader):
             return save_path
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

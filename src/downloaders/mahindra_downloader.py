@@ -45,10 +45,6 @@ class MahindraDownloader(BaseDownloader):
         super().__init__("Mahindra Manulife Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "mahindra"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -75,32 +71,6 @@ class MahindraDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("MAHINDRA", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Mahindra Manulife.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for Mahindra Manulife.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -156,15 +126,24 @@ class MahindraDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.mahindramanulife.com/downloads#MANDATORY-DISCLOSURES-+-MONTHLY-PORTFOLIO-DISCLOSURE"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to {url}...")
             # Increase timeout to 120s as the site is very slow
             page.goto(url, wait_until="load", timeout=120000)
@@ -246,15 +225,7 @@ class MahindraDownloader(BaseDownloader):
                 target_link.click()
             
             download = download_info.value
-            
-            # Determine extension
-            orig_filename = download.suggested_filename.lower()
-            ext = ".xlsx"
-            if orig_filename.endswith(".pdf"): ext = ".pdf"
-            elif orig_filename.endswith(".xls"): ext = ".xls"
-            elif orig_filename.endswith(".zip"): ext = ".zip"
-            
-            final_filename = f"MAHINDRA_MANULIFE_{month_name}_{target_year}{ext}"
+            final_filename = download.suggested_filename
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
@@ -263,7 +234,8 @@ class MahindraDownloader(BaseDownloader):
             return save_path
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

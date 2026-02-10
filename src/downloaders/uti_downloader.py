@@ -44,10 +44,6 @@ class UTIDownloader(BaseDownloader):
         super().__init__("UTI Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "uti"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -74,31 +70,6 @@ class UTIDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("UTI", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for UTI.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for UTI.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -154,15 +125,23 @@ class UTIDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.utimf.com/downloads/consolidate-all-portfolio-disclosure"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to {url}...")
             page.goto(url, timeout=60000)
             time.sleep(3)
@@ -237,7 +216,8 @@ class UTIDownloader(BaseDownloader):
             return final_path
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
     def _extract_sebi_file(self, zip_path: Path, target_folder: Path, month_name: str, year: int) -> Optional[Path]:
         """Extract SEBI Exposure file from ZIP."""
@@ -263,11 +243,16 @@ class UTIDownloader(BaseDownloader):
                     break
             
             if found_file:
-                # Rename and move to target folder
-                final_filename = f"UTI_{month_name}_{year}.xlsx"
-                final_path = target_folder / final_filename
+                # Use original filename from ZIP
+                original_name = Path(found_file).name
+                final_path = target_folder / original_name
+                
+                # Check for collision
+                if final_path.exists():
+                    final_path = target_folder / f"{month_name}_{year}_{original_name}"
+                    
                 shutil.move(found_file, final_path)
-                logger.info(f"  ✓ Extracted: {final_filename}")
+                logger.info(f"  ✓ Extracted: {final_path.name}")
                 return final_path
             else:
                 logger.warning("  ✗ SEBI Exposure file not found in ZIP")

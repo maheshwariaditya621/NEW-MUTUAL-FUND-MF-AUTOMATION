@@ -63,10 +63,6 @@ class InvescoDownloader(BaseDownloader):
         super().__init__("Invesco Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "invesco"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -93,35 +89,6 @@ class InvescoDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Invesco", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session for Invesco."""
-        if self._page: return
-            
-        self._playwright = sync_playwright().start()
-        # Launch non-headless if requested, but default to HEADLESS config
-        # The user script used headless=False, we will respect the config or default to True for prod
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info(f"Persistent browser session opened for {self.AMC_NAME}.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info(f"Persistent browser session closed for {self.AMC_NAME}.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -173,18 +140,26 @@ class InvescoDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://invescomutualfund.com/literature-and-form?tab=Complete"
-        col_idx = self.MONTH_TO_COLUMN[target_month]
         files_downloaded = 0
-        processed_urls = set()
+        col_idx = self.MONTH_TO_COLUMN[target_month]
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to Invesco Holdings page...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5)
@@ -192,20 +167,21 @@ class InvescoDownloader(BaseDownloader):
             for category in self.CATEGORIES:
                 logger.info(f"Processing Category: {category}")
                 try:
-                    # Click category logic from user script
+                    # Click category
                     cat_loc = page.locator("#ClassificationCompleteMonthlyHoldings").get_by_text(category, exact=True)
-                    if category == "Equity":
-                        cat_loc.click() # First click
-                        time.sleep(1)
-                        cat_loc.click() # Second click (sometimes needed for Equity)
-                    else:
-                        cat_loc.click()
+                    if cat_loc.count() > 0:
+                        cat_loc.first.click()
+                        time.sleep(2)
                     
-                    time.sleep(3)
-
-                    # Select Year
-                    page.locator("#ddlYearCompleteMonthlyHoldings").get_by_text(str(target_year), exact=True).click()
-                    time.sleep(4)
+                    # Select Year (Year elements are <li> tags, not a dropdown)
+                    year_loc = page.locator("#ddlYearCompleteMonthlyHoldings li").filter(has_text=re.compile(rf"^{target_year}$"))
+                    if year_loc.count() > 0:
+                        year_loc.first.click()
+                        logger.info(f"  ✓ Selected Year: {target_year}")
+                        time.sleep(4)
+                    else:
+                        logger.warning(f"  ✗ Year {target_year} not found in selection list")
+                        continue
 
                     # Find rows
                     rows = page.locator("tbody tr").all()
@@ -238,11 +214,15 @@ class InvescoDownloader(BaseDownloader):
                                     except: pass # Popup might not open or close instantly
                                 
                                 dl = download_info.value
-                                ext = os.path.splitext(dl.suggested_filename)[1] or ".xlsx"
-                                
-                                # Standardized Filename
-                                fname = f"INVESCO_{clean_scheme}_{clean_category}_{month_abbr}_{target_year}{ext}"
+                                fname = dl.suggested_filename
                                 save_path = download_folder / fname
+                                
+                                # Handle duplicate suggested filenames across schemes/categories
+                                if save_path.exists():
+                                    stem = os.path.splitext(fname)[0]
+                                    ext = os.path.splitext(fname)[1]
+                                    fname = f"{stem}_{clean_scheme}_{clean_category}{ext}"
+                                    save_path = download_folder / fname
                                 
                                 dl.save_as(save_path)
                                 logger.info(f"      ✓ Saved: {fname}")
@@ -265,7 +245,8 @@ class InvescoDownloader(BaseDownloader):
             return files_downloaded
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

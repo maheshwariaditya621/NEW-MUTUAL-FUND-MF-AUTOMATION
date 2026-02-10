@@ -51,20 +51,16 @@ def run_threesixtyone_backfill(
     logger.info(f"Mode: {mode} | Target: {len(months)} months")
     
     downloader = ThreeSixtyOneDownloader()
-    downloader.open_session() # Re-use session across all months
     
     downloaded, skipped, failed, not_published = 0, 0, 0, 0
-    try:
-        for year, month in months:
-            result = downloader.download(year, month)
-            status = result["status"]
-            if status == "success": downloaded += 1
-            elif status == "skipped": skipped += 1
-            elif status == "not_published": not_published += 1
-            else: failed += 1
-            time.sleep(1)
-    finally:
-        downloader.close_session()
+    for year, month in months:
+        result = downloader.download(year, month)
+        status = result["status"]
+        if status == "success": downloaded += 1
+        elif status == "skipped": skipped += 1
+        elif status == "not_published": not_published += 1
+        else: failed += 1
+        time.sleep(1)
         
     duration = time.time() - start_time
     logger.info("=" * 70)

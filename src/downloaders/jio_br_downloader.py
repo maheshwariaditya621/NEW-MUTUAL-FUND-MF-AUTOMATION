@@ -45,10 +45,6 @@ class JioBRDownloader(BaseDownloader):
         super().__init__("Jio BlackRock Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "jio_br"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -75,31 +71,6 @@ class JioBRDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("JIO_BR", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Jio BlackRock.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for Jio BlackRock.")
 
     def calculate_fy(self, month: int, year: int) -> str:
         """Calculate FY string: Nov 2025 -> 2025-2026"""
@@ -170,60 +141,72 @@ class JioBRDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, fy_str: str, download_folder: Path) -> Optional[Path]:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.jioblackrockamc.com/statutory-disclosure/disclosures/monthly-portfolio-disclosure"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="networkidle", timeout=60000)
-            time.sleep(3)
+            # Use 'load' instead of 'networkidle' for better stability on Ant Design sites
+            page.goto(url, wait_until="load", timeout=90000)
+            # Extra sleep to let JS components (Ant Design) hydrate
+            time.sleep(5)
             logger.info("  ✓ Page loaded")
 
             # Selection logic
             selectors = page.locator(".ant-select-selector")
             if selectors.count() < 2:
-                logger.error("  ✗ Selectors for Year/Month not found")
+                logger.error("  ✗ Selectors for Year/Month not found. Page might not have loaded correctly.")
                 return None
 
             # 1. Select Year
             logger.info(f"Selecting Year: {fy_str}...")
             selectors.nth(0).click()
-            time.sleep(1)
+            time.sleep(2)
             year_option = page.locator(".ant-select-item-option-content").filter(has_text=fy_str).first
             if year_option.count() > 0:
                 year_option.click()
             else:
+                # Fallback to get_by_text
                 page.get_by_text(fy_str, exact=True).last.click(force=True)
-            time.sleep(1)
+            time.sleep(2)
             logger.info("  ✓ Year selected")
 
             # 2. Select Month
             logger.info(f"Selecting Month: {month_name}...")
             selectors.nth(1).click()
-            time.sleep(1)
+            time.sleep(2)
             
             # Using type-to-filter approach as it's more robust with Ant Design
             page.keyboard.type(month_name)
-            time.sleep(1)
-            page.keyboard.press("Enter")
             time.sleep(2)
+            page.keyboard.press("Enter")
+            time.sleep(3)
             
             # Verify selection
             selected_text = selectors.nth(1).inner_text().strip()
             if month_name.lower() not in selected_text.lower():
                 logger.warning(f"  Typing {month_name} failed. Falling back to scroll-and-click...")
                 # Try to re-open and find
-                if not page.locator(".ant-select-item-option-content").first.is_visible():
+                popup_options = page.locator(".ant-select-item-option-content")
+                if popup_options.count() == 0 or not popup_options.first.is_visible():
                     selectors.nth(1).click()
-                    time.sleep(1)
+                    time.sleep(2)
                 
                 found_month = False
-                for _ in range(12):
+                for _ in range(15): # Max 15 attempts to scroll/find
                     options = page.locator(".ant-select-item-option-content")
                     for i in range(options.count()):
                         opt = options.nth(i)
@@ -233,14 +216,14 @@ class JioBRDownloader(BaseDownloader):
                             break
                     if found_month: break
                     page.keyboard.press("ArrowDown")
-                    time.sleep(0.2)
+                    time.sleep(0.3)
                 
                 if not found_month:
                     logger.error(f"  ✗ Failed to find {month_name} in dropdown")
                     return None
 
             logger.info(f"  ✓ Month selected: {month_name}")
-            time.sleep(3) # Wait for results
+            time.sleep(5) # Wait for results grid to refresh
 
             # 3. Find Consolidated Link
             logger.info("Searching for consolidated portfolio link...")
@@ -249,32 +232,45 @@ class JioBRDownloader(BaseDownloader):
             all_links = page.get_by_role("link").all()
             target_link = None
             
+            logger.debug(f"  Found {len(all_links)} total links on page")
             for link in all_links:
-                if not link.is_visible(): continue
-                text = (link.inner_text().strip() or 
-                        link.get_attribute("aria-label") or 
-                        link.get_attribute("title") or "").lower()
-                
-                if "monthly" in text and "portfolio" in text:
-                    # Jio BlackRock consolidated indicators
-                    is_generic = "mutual fund" in text or "jioblackrock" in text or "jio blackrock" in text
-                    # Exclude schemes
-                    is_scheme = any(x in text for x in ["nifty", "index", "g-sec", "yr", "8-13"])
+                try:
+                    if not link.is_visible(): continue
+                    text = (link.inner_text().strip() or 
+                            link.get_attribute("aria-label") or 
+                            link.get_attribute("title") or "").lower()
                     
-                    if is_generic and not is_scheme:
-                        target_link = link
-                        break
+                    if "monthly" in text and "portfolio" in text:
+                        # Jio BlackRock consolidated indicators
+                        is_generic = "mutual fund" in text and ("jioblackrock" in text or "jio blackrock" in text)
+                        # Exclude schemes strictly
+                        is_scheme = any(x in text for x in [
+                            "nifty", "index", "g-sec", "yr", "8-13", "overnight", 
+                            "arbitrage", "liquid", "flexi", "equity", "midcap", 
+                            "smallcap", "large", "dynamic", "money market", "tax saver"
+                        ])
+                        
+                        if is_generic and not is_scheme:
+                            target_link = link
+                            break
+                except:
+                    continue
             
             # Fallback shortest link
             if not target_link:
                 logger.info("  Precise match not found, looking for shortest generic link...")
                 shortest_len = 999
                 for link in all_links:
-                    if not link.is_visible(): continue
-                    text = (link.inner_text().strip() or "").lower()
-                    if "monthly" in text and "portfolio" in text and len(text) < shortest_len and not any(x in text for x in ["nifty", "index", "g-sec"]):
-                        target_link = link
-                        shortest_len = len(text)
+                    try:
+                        if not link.is_visible(): continue
+                        text = (link.inner_text().strip() or "").lower()
+                        if "monthly" in text and "portfolio" in text and len(text) < shortest_len:
+                            # Still exclude obvious scheme-only links
+                            if not any(x in text for x in ["nifty", "index", "g-sec", "8-13"]):
+                                target_link = link
+                                shortest_len = len(text)
+                    except:
+                        continue
 
             if not target_link:
                 logger.warning(f"  ✗ No consolidated link found for {month_name} {target_year}")
@@ -283,17 +279,16 @@ class JioBRDownloader(BaseDownloader):
             link_text = target_link.inner_text().strip()
             logger.info(f"  ✓ Found link: {link_text}")
             target_link.scroll_into_view_if_needed()
+            time.sleep(1)
 
             # 4. Download
             logger.info("Downloading file...")
             try:
-                with page.expect_download(timeout=30000) as download_info:
+                with page.expect_download(timeout=60000) as download_info:
                     target_link.click()
                 
                 download = download_info.value
-                orig_ext = os.path.splitext(download.suggested_filename)[1] or ".xlsx"
-                
-                filename = f"JIO_BR_CONSOLIDATED_{month_name}_{target_year}{orig_ext}"
+                filename = download.suggested_filename
                 save_path = download_folder / filename
                 
                 download.save_as(save_path)
@@ -305,7 +300,16 @@ class JioBRDownloader(BaseDownloader):
                 return None
 
         finally:
-            if close_needed: self.close_session()
+            if browser:
+                try:
+                    browser.close()
+                except Exception as e:
+                    logger.debug(f"Error closing browser: {e}")
+            if pw:
+                try:
+                    pw.stop()
+                except Exception as e:
+                    logger.debug(f"Error stopping playwright: {e}")
 
 
 if __name__ == "__main__":

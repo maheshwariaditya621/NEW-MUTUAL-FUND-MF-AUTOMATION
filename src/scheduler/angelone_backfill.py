@@ -80,9 +80,6 @@ def run_angelone_backfill(
     
     downloader = AngelOneDownloader()
     
-    # Use persistent session for backfills
-    downloader.open_session()
-    
     try:
         skipped = 0
         downloaded_months = []
@@ -114,7 +111,7 @@ def run_angelone_backfill(
                 # Small gap for stability even on direct links
                 time.sleep(1)
     finally:
-        downloader.close_session()
+        pass
     
     total_duration = time.time() - start_time
     logger.info("=" * 70)

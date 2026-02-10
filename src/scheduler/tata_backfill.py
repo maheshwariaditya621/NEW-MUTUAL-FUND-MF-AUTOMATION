@@ -57,7 +57,7 @@ def run_tata_backfill(
     logger.info(f"Mode: {mode} | Target: {len(months)} months")
     
     downloader = TataDownloader()
-    downloader.open_session() # Re-use session across all months
+    # downloader.open_session() # Re-use session across all months
     
     downloaded, skipped, failed, not_published = 0, 0, 0, 0
     try:
@@ -70,7 +70,8 @@ def run_tata_backfill(
             else: failed += 1
             time.sleep(1)
     finally:
-        downloader.close_session()
+        # downloader.close_session()
+        pass
         
     duration = time.time() - start_time
     logger.info("=" * 70)

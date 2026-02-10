@@ -269,8 +269,48 @@ def run_hdfc_backfill(
 
 
 if __name__ == "__main__":
-    # For testing - runs in auto mode
-    result = run_hdfc_backfill()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="HDFC Mutual Fund Backfill")
+    parser.add_argument("--start-year", type=int, help="Start year (YYYY)")
+    parser.add_argument("--start-month", type=int, help="Start month (1-12)")
+    parser.add_argument("--end-year", type=int, help="End year (YYYY)")
+    parser.add_argument("--end-month", type=int, help="End month (1-12)")
+    
+    args = parser.parse_args()
+    
+    # Check for partial ranges (not allowed)
+    provided_args = [args.start_year, args.start_month, args.end_year, args.end_month]
+    non_none_count = sum(1 for arg in provided_args if arg is not None)
+    
+    if non_none_count > 0 and non_none_count < 4:
+        logger.error("Error: All four arguments (--start-year, --start-month, --end-year, --end-month) must be provided together")
+        logger.error("For AUTO mode, omit all arguments")
+        exit(1)
+    
+    # Validate month ranges if provided
+    if args.start_month is not None:
+        if args.start_month < 1 or args.start_month > 12:
+            logger.error(f"Invalid start month: {args.start_month}. Must be between 1 and 12.")
+            exit(1)
+    
+    if args.end_month is not None:
+        if args.end_month < 1 or args.end_month > 12:
+            logger.error(f"Invalid end month: {args.end_month}. Must be between 1 and 12.")
+            exit(1)
+    
+    # Run backfill
+    if non_none_count == 4:
+        # Manual range mode
+        result = run_hdfc_backfill(
+            start_year=args.start_year,
+            start_month=args.start_month,
+            end_year=args.end_year,
+            end_month=args.end_month
+        )
+    else:
+        # Auto mode
+        result = run_hdfc_backfill()
     
     # Exit status based on mode
     if result["mode"] == "AUTO":

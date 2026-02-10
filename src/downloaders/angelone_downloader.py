@@ -45,10 +45,6 @@ class AngelOneDownloader(BaseDownloader):
         super().__init__("Angel One Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "angelone"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -86,44 +82,6 @@ class AngelOneDownloader(BaseDownloader):
             reason=f"Incomplete download detected and moved to quarantine. Reason: {reason}"
         )
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            logger.debug("Session already active. Reusing existing page.")
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=[
-                "--window-size=1920,1080",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            ignore_https_errors=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Angel One.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page:
-            self._page.close()
-        if self._browser:
-            self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
-            
-        self._page = None
-        self._context = None
-        self._browser = None
-        self._playwright = None
-        logger.info("Persistent Chrome session closed for Angel One.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -251,25 +209,32 @@ class AngelOneDownloader(BaseDownloader):
 
     def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> List[Path]:
         """Internal flow using Playwright to extract direct links from page state."""
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         month_name = self.MONTH_NAMES[target_month]
         month_abbr = month_name[:3]
         
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=[
+                    "--window-size=1920,1080",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                ignore_https_errors=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             url = "https://www.angelonemf.com/downloads"
-            
-            # Optimization: Skip navigation if already on the downloads page and context is fresh
-            # However, for Angel One, we might want to refresh to get latest state if it doesn't change URLs
-            if page.url == url:
-                logger.info(f"Already on {url}, checking if data needs refresh...")
-            else:
-                logger.info(f"Navigating to {url}...")
-                page.goto(url, wait_until="load", timeout=120000)
+            logger.info(f"Navigating to {url}...")
+            page.goto(url, wait_until="load", timeout=120000)
             
             # Wait for content or a bit of delay for Next.js to populate window object
             time.sleep(5)
@@ -341,23 +306,8 @@ class AngelOneDownloader(BaseDownloader):
             downloaded_paths = []
             for idx, dl_url in enumerate(final_links):
                 try:
-                    # Extract descriptive filename
-                    filename_from_url = dl_url.split("/")[-1]
-                    # Robust replacement using regex to avoid partial word collisions
-                    base_name = re.sub(r'^Monthly-Portfolio-', '', filename_from_url, flags=re.I)
-                    # Remove all instances of month and year as standalone tokens
-                    base_name = re.sub(rf'\b{month_abbr}\b', '', base_name, flags=re.I)
-                    base_name = re.sub(rf'\b{month_name}\b', '', base_name, flags=re.I)
-                    base_name = re.sub(rf'\b{target_year}\b', '', base_name, flags=re.I)
-                    
-                    # Remove trailing version numbers (e.g. -1, -2)
-                    base_name = base_name.replace(".xlsx", "").replace(".XLSX", "")
-                    base_name = re.sub(r'-\d+$', '', base_name)
-                    
-                    # Clean up hyphens and separators
-                    base_name = re.sub(r'[-/_]+', '-', base_name).strip('-')
-                    
-                    clean_filename = f"ANGELONE_{base_name}_{month_name}_{target_year}.xlsx"
+                    # Preserve original filename from URL
+                    clean_filename = dl_url.split("/")[-1]
                     save_path = download_folder / clean_filename
                     
                     logger.info(f"Downloading ({idx+1}/{len(final_links)}): {clean_filename}")
@@ -376,11 +326,9 @@ class AngelOneDownloader(BaseDownloader):
 
             return downloaded_paths
 
-        except Exception as e:
-            raise e
         finally:
-            if close_needed:
-                self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

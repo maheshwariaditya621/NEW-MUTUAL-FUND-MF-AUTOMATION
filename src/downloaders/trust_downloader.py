@@ -55,10 +55,6 @@ class TrustDownloader(BaseDownloader):
         super().__init__("Trust Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "trust"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -85,34 +81,6 @@ class TrustDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Trust", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session for Trust."""
-        if self._page: return
-            
-        self._playwright = sync_playwright().start()
-        # Using non-headless as per user script request (headless=False)
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info(f"Persistent browser session opened for {self.AMC_NAME}.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info(f"Persistent browser session closed for {self.AMC_NAME}.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -169,15 +137,25 @@ class TrustDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.trustmf.com/disclosures?active=Tab%3Dportfolio-disclosures&activeTab=portfolio-disclosures"
         
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=False,
+                channel="chrome",
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info("Navigating to Trust Mutual Fund website...")
             page.goto(url, wait_until="domcontentloaded", timeout=120000)
             
@@ -237,13 +215,13 @@ class TrustDownloader(BaseDownloader):
                         report_link.click()
                 
                 dl = download_info.value
-                original_filename = dl.suggested_filename
-                ext = os.path.splitext(original_filename)[1] or ".xlsx"
+                fname = dl.suggested_filename
                 
-                fname = f"TRUST_TRUSTMF_Monthly_Portfolio_Report_{month_abbr}_{target_year}{ext}"
-                save_path = download_folder / fname
-                
-                dl.save_as(save_path)
+                # Prefix with identifier if filename is generic
+                if fname.lower() in ["portfolio.pdf", "monthly_portfolio.pdf", "download.pdf", "portfolio.xlsx", "report.xlsx"]:
+                    fname = f"TRUST_{month_abbr}_{target_year}_{fname}"
+                    
+                dl.save_as(download_folder / fname)
                 logger.info(f"  ✓ Saved: {fname}")
                 return 1
 
@@ -252,7 +230,8 @@ class TrustDownloader(BaseDownloader):
                 return 0
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

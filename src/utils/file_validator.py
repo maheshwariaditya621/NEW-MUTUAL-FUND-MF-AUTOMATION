@@ -25,18 +25,25 @@ def get_actual_file_format(file_path: Path) -> Optional[str]:
             header = f.read(8)
         
         # Excel formats
-        if header[:2] == b'PK':  # ZIP-based format
-            return '.xlsx'  # Modern Excel (Office Open XML)
+        if header[:2] == b'PK':  # ZIP-based format (could be XLSX, ZIP, or others)
+            # XLSX is an OOXML format which is a ZIP containing '[Content_Types].xml'
+            # We'll read more to differentiate if possible, or default to .zip 
+            # and let the user/system handle it if it's actually a ZIP.
+            # Most AMCs serving XLSX won't serve a plain ZIP.
+            # ABSL serves a plain ZIP.
+            
+            # Read a bit more to see if it's a typical OOXML structure
+            with open(file_path, 'rb') as f:
+                content = f.read(2000) # Read enough to potentially find [Content_Types].xml
+                if b'[Content_Types].xml' in content or b'xl/workbook.xml' in content:
+                    return '.xlsx'
+            return '.zip'
         elif header[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
             return '.xls'   # Old Excel (OLE2/CFB)
         
         # PDF
         elif header[:4] == b'%PDF':
             return '.pdf'
-        
-        # ZIP
-        elif header[:2] == b'PK':
-            return '.zip'
         
         return None
     

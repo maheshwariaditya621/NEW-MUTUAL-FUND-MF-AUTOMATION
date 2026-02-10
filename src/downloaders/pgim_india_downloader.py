@@ -55,10 +55,6 @@ class PGIMIndiaDownloader(BaseDownloader):
         super().__init__("PGIM India Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "pgim_india"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -85,34 +81,6 @@ class PGIMIndiaDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("PGIM India", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session for PGIM India."""
-        if self._page: return
-            
-        self._playwright = sync_playwright().start()
-        # Force headless=False for PGIM India to avoid 403 Forbidden
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info(f"Persistent browser session opened for {self.AMC_NAME}.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info(f"Persistent browser session closed for {self.AMC_NAME}.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -165,15 +133,25 @@ class PGIMIndiaDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.pgimindia.com/mutual-funds/disclosures/Portfolios/Monthly-Portfolio"
-        
+
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            # PGIM India often needs headful to avoid 403
+            browser = pw.chromium.launch(
+                headless=False, 
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to PGIM India Portfolio page...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5)
@@ -273,18 +251,14 @@ class PGIMIndiaDownloader(BaseDownloader):
                             except: pass # Popup might not open/close
                         
                         dl = download_info.value
-                        original_filename = dl.suggested_filename
-                        ext = os.path.splitext(original_filename)[1] or ".xlsx"
+                        fname = dl.suggested_filename
                         
-                        fname = f"PGIM_INDIA_{clean_scheme}_{month_abbr}_{target_year}{ext}"
+                        # Handle generic filenames by prefixing with scheme name
+                        if fname.lower() in ["portfolio.pdf", "monthly_portfolio.pdf", "download.pdf", "portfolio.xlsx", "portfolio.xls"]:
+                            clean_scheme = clean_scheme[:30] # Limit length
+                            fname = f"{clean_scheme}_{fname}"
+                        
                         save_path = download_folder / fname
-                        
-                        # Handle potential filename length issues
-                        if len(str(save_path)) > 250:
-                            clean_scheme = clean_scheme[:50]
-                            fname = f"PGIM_INDIA_{clean_scheme}_{month_abbr}_{target_year}{ext}"
-                            save_path = download_folder / fname
-
                         dl.save_as(save_path)
                         logger.info(f"      ✓ Saved: {fname}")
                         files_downloaded += 1
@@ -299,7 +273,8 @@ class PGIMIndiaDownloader(BaseDownloader):
             return files_downloaded
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

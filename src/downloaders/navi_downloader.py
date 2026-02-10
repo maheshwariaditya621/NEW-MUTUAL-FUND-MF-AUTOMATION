@@ -54,10 +54,6 @@ class NaviDownloader(BaseDownloader):
         super().__init__("Navi Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "navi"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -100,33 +96,6 @@ class NaviDownloader(BaseDownloader):
             fy_end = year
         return f"{fy_start}-{fy_end}"
 
-    def open_session(self):
-        """Open a persistent browser session for Navi."""
-        if self._page: return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            channel="chrome",
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
-        )
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info(f"Persistent browser session opened for {self.AMC_NAME}.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info(f"Persistent browser session closed for {self.AMC_NAME}.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -179,16 +148,26 @@ class NaviDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full_name: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://navi.com/mutual-fund/downloads/portfolio"
-        fy_year = self._get_financial_year(target_month, target_year)
-        
+
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
+            fy_year = self._get_financial_year(target_month, target_year)
+            
             logger.info(f"Navigating to Navi Portfolio page...")
             page.goto(url, wait_until="domcontentloaded", timeout=120000)
             time.sleep(3)
@@ -288,25 +267,29 @@ class NaviDownloader(BaseDownloader):
                     logger.info(f"    Downloading: {scheme_name}...")
                     
                     try:
-                        response = self._context.request.get(href)
+                        response = context.request.get(href)
                         if response.status == 200:
-                            # Determine extension
-                            ext = ".pdf"
+                            # Use original filename from content-disposition if possible
+                            original_filename = ""
                             content_disp = response.headers.get("content-disposition", "")
                             if "filename=" in content_disp:
-                                fname_raw = content_disp.split("filename=")[1].strip('"\'')
-                                ext_match = os.path.splitext(fname_raw)[1]
-                                if ext_match: ext = ext_match
-                            elif ".xlsx" in href: ext = ".xlsx"
-                            elif ".xls" in href: ext = ".xls"
+                                original_filename = content_disp.split("filename=")[1].strip('"\'')
                             
-                            fname = f"NAVI_{scheme_name}_{month_abbr}_{target_year}{ext}"
-                            save_path = download_folder / fname
+                            if not original_filename:
+                                original_filename = href.split("/")[-1].split("?")[0]
+                            
+                            if not original_filename or "." not in original_filename:
+                                ext = ".pdf"
+                                if ".xlsx" in href: ext = ".xlsx"
+                                elif ".xls" in href: ext = ".xls"
+                                original_filename = f"NAVI_{scheme_name}_{month_abbr}_{target_year}{ext}"
+                            
+                            save_path = download_folder / original_filename
                             
                             with open(save_path, "wb") as f:
                                 f.write(response.body())
                                 
-                            logger.info(f"      ✓ Saved: {fname}")
+                            logger.info(f"      ✓ Saved: {original_filename}")
                             success_count += 1
                             time.sleep(0.5)
                         else:
@@ -321,7 +304,8 @@ class NaviDownloader(BaseDownloader):
             return success_count
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

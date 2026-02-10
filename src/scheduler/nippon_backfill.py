@@ -81,7 +81,7 @@ def run_nippon_backfill(
     downloader = NipponDownloader()
     
     # Use persistent session for backfills
-    downloader.open_session()
+    # downloader.open_session()
     
     try:
         skipped = 0
@@ -111,7 +111,8 @@ def run_nippon_backfill(
                 except Exception as e:
                     failed_months.append((year, month, str(e)))
     finally:
-        downloader.close_session()
+        # downloader.close_session()
+        pass
     
     total_duration = time.time() - start_time
     logger.info("=" * 70)

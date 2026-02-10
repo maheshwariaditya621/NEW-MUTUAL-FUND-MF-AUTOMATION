@@ -198,13 +198,16 @@ class ICICIDownloader(BaseDownloader):
 
             # STRICT MATCH: Only files for THIS exact month
             if dt.year == year and dt.month == month:
+                url = "https://www.icicipruamc.com/blob" + rel_url
+                original_name = rel_url.split("/")[-1]
+                
                 matched.append({
-                    "name": item.get("title", {}).get("text", "icici_monthly_portfolio") + ".zip",
-                    "url": "https://www.icicipruamc.com/blob" + rel_url,
+                    "name": original_name,
+                    "url": url,
                     "matched_year": dt.year,
                     "matched_month": dt.month
                 })
-                logger.info(f"✓ Matched (Timestamp): {item.get('title', {}).get('text', 'Unknown')} (timestamp: {dt.year}-{dt.month:02d})")
+                logger.info(f"✓ Matched (Timestamp): {original_name} (timestamp: {dt.year}-{dt.month:02d})")
 
         # 2. SECONDARY MATCH: Fallback to filename/title parsing ONLY if timestamp match failed
         # (Handles cases where API metadata is wrong but file is correct)

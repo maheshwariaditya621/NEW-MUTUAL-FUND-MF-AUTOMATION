@@ -46,10 +46,6 @@ class SamcoDownloader(BaseDownloader):
         super().__init__("Samco Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "samco"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -76,32 +72,6 @@ class SamcoDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("SAMCO", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Samco.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for Samco.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -157,15 +127,24 @@ class SamcoDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.samcomf.com/StatutoryDisclosure"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
@@ -240,12 +219,9 @@ class SamcoDownloader(BaseDownloader):
                         target_link.click(force=True)
                     
                     download = download_info.value
-                    orig_ext = os.path.splitext(download.suggested_filename)[1] or ".xlsx"
+                    filename = download.suggested_filename
                     
-                    filename = f"SAMCO_{scheme_name}_{month_name}_{target_year}{orig_ext}"
-                    save_path = download_folder / filename
-                    
-                    download.save_as(save_path)
+                    download.save_as(download_folder / filename)
                     logger.info(f"    ✓ Saved: {filename}")
                     success_count += 1
                     downloaded_schemes.add(scheme_name)
@@ -256,7 +232,8 @@ class SamcoDownloader(BaseDownloader):
             return success_count
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

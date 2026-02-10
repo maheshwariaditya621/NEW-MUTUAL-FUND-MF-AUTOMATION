@@ -18,7 +18,7 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
     )
 except ImportError:
     DRY_RUN = False
@@ -44,10 +44,6 @@ class NipponDownloader(BaseDownloader):
         super().__init__("Nippon India Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "nippon"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -85,46 +81,6 @@ class NipponDownloader(BaseDownloader):
             reason=f"Incomplete download detected and moved to quarantine. Reason: {reason}"
         )
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            logger.debug("Session already active. Reusing existing page.")
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            args=[
-                "--window-size=1920,1080",
-                "--start-maximized",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
-            slow_mo=500
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Nippon.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page:
-            self._page.close()
-        if self._browser:
-            self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
-            
-        self._page = None
-        self._context = None
-        self._browser = None
-        self._playwright = None
-        logger.info("Persistent Chrome session closed for Nippon.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -250,26 +206,33 @@ class NipponDownloader(BaseDownloader):
         }
 
     def _run_download_flow(self, target_year: int, target_month_name: str, download_folder: Path) -> Optional[Path]:
-        """Internal flow using Playwright with session support."""
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
+        """Internal flow using Playwright."""
+        url = "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures"
 
-        page = self._page
+        pw = None
+        browser = None
         try:
-            url = "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures"
-            
-            # Optimization: Skip navigation if already on page
-            current_url = page.url.rstrip('/')
-            target_url = url.rstrip('/')
-            
-            if current_url == target_url:
-                logger.info(f"Session Active: Already on {url}. Skipping navigation and refresh.")
-            else:
-                logger.info(f"Session Active: Navigating to {url}...")
-                page.goto(url, wait_until="domcontentloaded", timeout=120000)
-                time.sleep(3)
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS, # Use global config
+                args=[
+                    "--window-size=1920,1080",
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
+            logger.info(f"Navigating to {url}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            time.sleep(3)
             
             # 1. Wait for content to load
             logger.info("Waiting for portfolio list to load...")
@@ -322,8 +285,8 @@ class NipponDownloader(BaseDownloader):
             # Re-raise to allow retry logic in download()
             raise e
         finally:
-            if close_needed:
-                self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

@@ -45,10 +45,6 @@ class FranklinDownloader(BaseDownloader):
         super().__init__("Franklin Templeton Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "franklin"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -75,31 +71,6 @@ class FranklinDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("FRANKLIN", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for Franklin.")
-
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for Franklin.")
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -155,15 +126,23 @@ class FranklinDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://www.franklintempletonindia.com/reports"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=HEADLESS,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="networkidle", timeout=60000)
             time.sleep(5)
@@ -194,10 +173,7 @@ class FranklinDownloader(BaseDownloader):
                 isin_link.click()
             
             download = download_info.value
-            suggested = download.suggested_filename
-            ext = os.path.splitext(suggested)[1] if suggested else ".xlsx"
-            
-            final_filename = f"Franklin_ISIN_{month_name}_{target_year}{ext}"
+            final_filename = download.suggested_filename
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
@@ -206,7 +182,8 @@ class FranklinDownloader(BaseDownloader):
             return save_path
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

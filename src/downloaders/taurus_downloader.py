@@ -57,10 +57,6 @@ class TaurusDownloader(BaseDownloader):
         super().__init__("Taurus Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "taurus"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -85,33 +81,6 @@ class TaurusDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("TAURUS", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        if self._page: return
-        self._playwright = sync_playwright().start()
-        logger.info("Launching Edge session...")
-        try:
-            self._browser = self._playwright.chromium.launch(
-                headless=False,
-                channel="msedge",
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-            )
-        except:
-            self._browser = self._playwright.chromium.launch(headless=False)
-
-        self._context = self._browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
-            viewport={"width": 1280, "height": 800},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent session opened.")
-
-    def close_session(self):
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -153,15 +122,29 @@ class TaurusDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_short: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page or self._page.is_closed():
-            self.open_session()
-            close_needed = True
-
-        page = self._page
         url = "https://taurusmutualfund.com/monthly-portfolio"
 
+        pw = None
+        browser = None
         try:
+            pw = sync_playwright().start()
+            try:
+                browser = pw.chromium.launch(
+                    headless=False,
+                    channel="msedge",
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                )
+            except:
+                browser = pw.chromium.launch(headless=False)
+
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=True
+            )
+            page = context.new_page()
+            Stealth().apply_stealth_sync(page)
+
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
 
@@ -255,10 +238,14 @@ class TaurusDownloader(BaseDownloader):
                             lnk.click(force=True)
                         
                         dl = dinfo.value
-                        ext = os.path.splitext(dl.suggested_filename)[1] or ".xlsx"
-                        fname = f"TAURUS_{safe_name}_{month_short}_{target_year}{ext}"
+                        fname = dl.suggested_filename
+                        
+                        # Handle generic filenames by prefixing with scheme/month info
+                        if fname.lower() in ["portfolio.pdf", "monthly_portfolio.pdf", "download.pdf", "portfolio.xlsx", "portfolio.xls"]:
+                            fname = f"TAURUS_{safe_name}_{month_short}_{target_year}_{fname}"
+                            
                         dl.save_as(download_folder / fname)
-                        logger.info(f"    ✓ Saved")
+                        logger.info(f"    ✓ Saved: {fname}")
                         success_count += 1
                         time.sleep(2)
                     except Exception as e:
@@ -270,7 +257,8 @@ class TaurusDownloader(BaseDownloader):
             return success_count
 
         finally:
-            if close_needed: self.close_session()
+            if browser: browser.close()
+            if pw: pw.stop()
 
 
 if __name__ == "__main__":

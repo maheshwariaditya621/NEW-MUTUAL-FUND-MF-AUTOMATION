@@ -74,7 +74,7 @@ def run_trust_backfill(
     
     try:
         # Open persistent session for efficiency
-        downloader.open_session()
+        # downloader.open_session()
         
         if all([start_year, start_month, end_year, end_month]):
             # MODE 1: MANUAL RANGE
@@ -143,7 +143,8 @@ def run_trust_backfill(
                         failed_months.append((year, month, str(e)))
 
     finally:
-        downloader.close_session()
+        # downloader.close_session()
+        pass
 
     total_duration = time.time() - start_time
     total_checked = 1 if mode == "AUTO" else len(months)

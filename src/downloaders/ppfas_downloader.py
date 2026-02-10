@@ -161,8 +161,7 @@ class PPFASDownloader(BaseDownloader):
                             page.evaluate("(el) => el.click()", consolidated_btn.element_handle())
                     
                     download = download_info.value
-                    ext = os.path.splitext(download.suggested_filename)[1]
-                    filename = f"PPFAS_Monthly_Portfolio_Report_{target_month_name}_30_{target_year}{ext}"
+                    filename = download.suggested_filename
                     save_path = download_folder / filename
                     download.save_as(str(save_path))
                     logger.success(f"PPFAS: Saved: {save_path.name}")
