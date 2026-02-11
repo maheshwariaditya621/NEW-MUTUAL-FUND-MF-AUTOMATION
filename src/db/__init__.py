@@ -7,9 +7,16 @@ from .repositories import (
     upsert_scheme,
     upsert_period,
     upsert_company,
+    upsert_company_master,
+    get_isin_details,
+    get_canonical_sector,
     create_snapshot,
     insert_holdings,
     check_snapshot_exists,
+    record_extraction_run,
+    check_file_already_extracted,
+    delete_extraction_run_and_holdings,
+    upsert_isin_master,
 )
 
 __all__ = [
@@ -22,7 +29,14 @@ __all__ = [
     "upsert_scheme",
     "upsert_period",
     "upsert_company",
+    "upsert_company_master",
+    "get_isin_details",
+    "get_canonical_sector",
     "create_snapshot",
     "insert_holdings",
     "check_snapshot_exists",
+    "record_extraction_run",
+    "check_file_already_extracted",
+    "delete_extraction_run_and_holdings",
+    "upsert_isin_master",
 ]

@@ -11,6 +11,110 @@ from src.db.connection import get_cursor
 from src.config import logger
 
 
+def upsert_isin_master(
+    isin: str,
+    canonical_name: str,
+    nse_symbol: Optional[str] = None,
+    bse_code: Optional[str] = None,
+    sector: Optional[str] = None,
+    industry: Optional[str] = None
+) -> str:
+    """
+    Insert or update the ISIN Master (Source of Truth).
+    """
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        INSERT INTO isin_master (isin, canonical_name, nse_symbol, bse_code, sector, industry)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (isin) DO UPDATE SET 
+            canonical_name = EXCLUDED.canonical_name,
+            nse_symbol = COALESCE(EXCLUDED.nse_symbol, isin_master.nse_symbol),
+            bse_code = COALESCE(EXCLUDED.bse_code, isin_master.bse_code),
+            sector = COALESCE(EXCLUDED.sector, isin_master.sector),
+            industry = COALESCE(EXCLUDED.industry, isin_master.industry),
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING isin
+        """,
+        (isin, canonical_name, nse_symbol, bse_code, sector, industry)
+    )
+    return cursor.fetchone()[0]
+
+def get_isin_master_details(isin: str) -> Optional[Dict[str, Any]]:
+    """
+    Lookup details from ISIN Master.
+    """
+    cursor = get_cursor()
+    cursor.execute(
+        "SELECT canonical_name, nse_symbol, bse_code, sector, industry FROM isin_master WHERE isin = %s",
+        (isin,)
+    )
+    row = cursor.fetchone()
+    if row:
+        return {
+            "canonical_name": row[0],
+            "nse_symbol": row[1],
+            "bse_code": row[2],
+            "sector": row[3],
+            "industry": row[4]
+        }
+    return None
+
+def get_canonical_sector(raw_sector_name: str) -> str:
+    """
+    Resolves a raw AMC sector name to a canonical one.
+    Fallback: returns the cleaned raw name if no mapping found.
+    """
+    if not raw_sector_name:
+        return "Unknown"
+        
+    cursor = get_cursor()
+    cursor.execute(
+        "SELECT canonical_sector FROM sector_master WHERE raw_sector_name = %s",
+        (raw_sector_name.upper().strip(),)
+    )
+    row = cursor.fetchone()
+    if row:
+        return row[0]
+    
+    # Optional: Logic to auto-seed or just return cleaned name
+    return raw_sector_name.title().strip()
+
+def upsert_company_master(
+    isin: str,
+    canonical_name: str,
+    sector: Optional[str] = None,
+    industry: Optional[str] = None,
+    is_listed: bool = True
+) -> int:
+    """
+    Insert or update the Analytical Entity (Company Master).
+    """
+    cursor = get_cursor()
+    
+    # 1. Resolve canonical sector if provided
+    canonical_sector = get_canonical_sector(sector) if sector else None
+
+    # 2. Upsert with Date Tracking
+    cursor.execute(
+        """
+        INSERT INTO company_master (
+            isin, canonical_name, sector, industry, is_listed, 
+            first_seen_date, last_seen_date
+        )
+        VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, CURRENT_DATE)
+        ON CONFLICT (isin) DO UPDATE SET 
+            canonical_name = EXCLUDED.canonical_name,
+            sector = COALESCE(EXCLUDED.sector, company_master.sector),
+            industry = COALESCE(EXCLUDED.industry, company_master.industry),
+            last_seen_date = CURRENT_DATE,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING company_id
+        """,
+        (isin, canonical_name, canonical_sector, industry, is_listed)
+    )
+    return cursor.fetchone()[0]
+
 def upsert_amc(amc_name: str) -> int:
     """
     Insert or get existing AMC.
@@ -48,44 +152,32 @@ def upsert_scheme(
     scheme_name: str,
     plan_type: str,
     option_type: str,
+    is_reinvest: bool = False,
     scheme_category: Optional[str] = None,
     scheme_code: Optional[str] = None
 ) -> int:
     """
-    Insert or get existing scheme.
-    
-    Args:
-        amc_id: AMC ID
-        scheme_name: Canonical scheme name (without plan/option suffixes)
-        plan_type: "Direct" or "Regular"
-        option_type: "Growth", "Dividend", or "IDCW"
-        scheme_category: Optional scheme category
-        scheme_code: Optional AMC-specific scheme code
-        
-    Returns:
-        scheme_id
-        
-    Raises:
-        psycopg2.Error: If database operation fails
+    Insert or get existing scheme with granular plan/option split.
     """
     cursor = get_cursor()
     
     cursor.execute(
         """
-        INSERT INTO schemes (amc_id, scheme_name, plan_type, option_type, scheme_category, scheme_code)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (amc_id, scheme_name, plan_type, option_type) 
+        INSERT INTO schemes (amc_id, scheme_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (amc_id, scheme_name, plan_type, option_type, is_reinvest) 
         DO UPDATE SET 
+            is_reinvest = EXCLUDED.is_reinvest,
             scheme_category = COALESCE(EXCLUDED.scheme_category, schemes.scheme_category),
             scheme_code = COALESCE(EXCLUDED.scheme_code, schemes.scheme_code),
             updated_at = CURRENT_TIMESTAMP
         RETURNING scheme_id
         """,
-        (amc_id, scheme_name, plan_type, option_type, scheme_category, scheme_code)
+        (amc_id, scheme_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
     )
     
     scheme_id = cursor.fetchone()[0]
-    logger.debug(f"Scheme upserted: {scheme_name} - {plan_type} - {option_type} (scheme_id={scheme_id})")
+    logger.debug(f"Scheme upserted: {scheme_name} ({plan_type}/{option_type})")
     
     return scheme_id
 
@@ -128,39 +220,30 @@ def upsert_company(
     company_name: str,
     exchange_symbol: Optional[str] = None,
     sector: Optional[str] = None,
-    industry: Optional[str] = None
+    industry: Optional[str] = None,
+    nse_symbol: Optional[str] = None,
+    bse_code: Optional[str] = None
 ) -> int:
     """
-    Insert or update company.
-    
-    Args:
-        isin: 12-character ISIN code (equity only)
-        company_name: Official company name
-        exchange_symbol: Optional exchange symbol
-        sector: Optional sector
-        industry: Optional industry
-        
-    Returns:
-        company_id
-        
-    Raises:
-        psycopg2.Error: If database operation fails
+    Insert or update company with support for exchange symbols and sectors.
     """
     cursor = get_cursor()
     
     cursor.execute(
         """
-        INSERT INTO companies (isin, company_name, exchange_symbol, sector, industry)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (isin) DO UPDATE SET
+        INSERT INTO companies (isin, company_name, exchange_symbol, sector, industry, nse_symbol, bse_code)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (isin) DO UPDATE SET 
             company_name = EXCLUDED.company_name,
             exchange_symbol = COALESCE(EXCLUDED.exchange_symbol, companies.exchange_symbol),
             sector = COALESCE(EXCLUDED.sector, companies.sector),
             industry = COALESCE(EXCLUDED.industry, companies.industry),
+            nse_symbol = COALESCE(EXCLUDED.nse_symbol, companies.nse_symbol),
+            bse_code = COALESCE(EXCLUDED.bse_code, companies.bse_code),
             updated_at = CURRENT_TIMESTAMP
         RETURNING company_id
         """,
-        (isin, company_name, exchange_symbol, sector, industry)
+        (isin, company_name, exchange_symbol, sector, industry, nse_symbol, bse_code)
     )
     
     company_id = cursor.fetchone()[0]
@@ -273,5 +356,130 @@ def check_snapshot_exists(scheme_id: int, period_id: int) -> bool:
         """,
         (scheme_id, period_id)
     )
-    
     return cursor.fetchone()[0]
+
+def record_extraction_run(
+    amc_id: int,
+    period_id: int,
+    file_name: str,
+    file_hash: str,
+    extractor_version: str,
+    header_fingerprint: str,
+    rows_read: int,
+    rows_inserted: int,
+    rows_filtered: int,
+    total_value: float,
+    processing_time_seconds: float,
+    status: str,
+    error_log: Optional[str] = None
+) -> int:
+    """
+    Log an extraction run with full financial lineage.
+    """
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        INSERT INTO extraction_runs (
+            amc_id, period_id, file_name, file_hash, extractor_version,
+            header_fingerprint, rows_read, rows_inserted, rows_filtered, 
+            total_value, processing_time_seconds, status, error_log
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING run_id
+        """,
+        (amc_id, period_id, file_name, file_hash, extractor_version, 
+         header_fingerprint, rows_read, rows_inserted, rows_filtered, 
+         total_value, processing_time_seconds, status, error_log)
+    )
+    run_id = cursor.fetchone()[0]
+    logger.info(f"Extraction run recorded: {status} (run_id={run_id})")
+    return run_id
+
+
+def get_isin_details(isin: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch canonical details for an ISIN.
+    Priority: isin_master -> companies (already exists)
+    """
+    # 1. Try isin_master
+    master = get_isin_master_details(isin)
+    if master:
+        return master
+        
+    # 2. Fallback to existing company record
+    cursor = get_cursor()
+    cursor.execute(
+        "SELECT company_name, sector, industry, nse_symbol, bse_code FROM companies WHERE isin = %s",
+        (isin,)
+    )
+    row = cursor.fetchone()
+    if row:
+        return {
+            "canonical_name": row[0],
+            "sector": row[1],
+            "industry": row[2],
+            "nse_symbol": row[3],
+            "bse_code": row[4]
+        }
+    return None
+
+def check_file_already_extracted(file_hash: str) -> bool:
+    """
+    Check if this exact file (by hash) has already been successfully extracted.
+    """
+    cursor = get_cursor()
+    cursor.execute(
+        "SELECT EXISTS(SELECT 1 FROM extraction_runs WHERE file_hash = %s AND status = 'SUCCESS')",
+        (file_hash,)
+    )
+    return cursor.fetchone()[0]
+
+def upsert_scheme_master(
+    raw_sheet_name: str,
+    canonical_name: str,
+    plan_type: str,
+    option_type: str
+) -> None:
+    """
+    Map a raw Excel sheet name to canonical scheme attributes.
+    """
+    cursor = get_cursor()
+
+def delete_extraction_run_and_holdings(amc_id: int, period_id: int) -> int:
+    """
+    Rollback: Delete all holdings and snapshots for an AMC and period,
+    plus the extraction run record.
+    Returns number of holdings deleted.
+    """
+    cursor = get_cursor()
+    
+    # 1. Get snapshots
+    cursor.execute(
+        "SELECT snapshot_id FROM scheme_snapshots WHERE scheme_id IN (SELECT scheme_id FROM schemes WHERE amc_id = %s) AND period_id = %s",
+        (amc_id, period_id)
+    )
+    snapshot_ids = [r[0] for r in cursor.fetchall()]
+    
+    deleted_count = 0
+    if snapshot_ids:
+        # 2. Delete holdings
+        cursor.execute(
+            "DELETE FROM equity_holdings WHERE snapshot_id = ANY(%s)",
+            (snapshot_ids,)
+        )
+        deleted_count = cursor.rowcount
+        
+        # 3. Delete snapshots
+        cursor.execute(
+            "DELETE FROM scheme_snapshots WHERE snapshot_id = ANY(%s)",
+            (snapshot_ids,)
+        )
+    
+    # 4. Delete extraction run
+    cursor.execute(
+        "DELETE FROM extraction_runs WHERE amc_id = %s AND period_id = %s",
+        (amc_id, period_id)
+    )
+    
+    logger.warning(f"ROLLBACK EXECUTED for amc_id={amc_id}, period_id={period_id}. Deleted {deleted_count} holdings.")
+    return deleted_count
