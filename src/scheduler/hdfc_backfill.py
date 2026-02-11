@@ -141,7 +141,7 @@ def run_hdfc_backfill(
     # Determine mode and execute
     if all([start_year, start_month, end_year, end_month]):
         # ========================================================================
-        # MODE 1: MANUAL RANGE (loop-based)
+        # MODE 1: MANUAL RANGE
         # ========================================================================
         mode = "MANUAL_RANGE"
         logger.info(f"Mode: {mode}")
@@ -152,81 +152,66 @@ def run_hdfc_backfill(
         
         # Process each month in range
         for year, month in months:
+            logger.info(f"[CHECK] {year}-{month:02d}")
             month_start_time = time.time()
             
-            if is_month_complete(year, month):
-                logger.info(f"[SKIP] {year}-{month:02d} - Complete (_SUCCESS.json exists)")
-                skipped += 1
-            else:
-                logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
+            try:
+                # Downloader now handles idempotency and consolidation trigger
+                result = downloader.download(year=year, month=month)
+                status = result["status"]
                 
-                if DRY_RUN:
-                    logger.info(f"[DRY RUN] Would download {year}-{month:02d}")
+                if status == "success":
                     downloaded_months.append((year, month))
-                    continue
-                
-                try:
-                    result = downloader.download(year=year, month=month)
-                    status = result["status"]
-                    
-                    if status == "success":
-                        downloaded_months.append((year, month))
-                        month_duration = time.time() - month_start_time
-                        logger.success(f"[SUCCESS] {year}-{month:02d} - Downloaded {result['files_downloaded']} file(s) in {month_duration:.2f}s")
-                    elif status == "not_published":
-                        not_published_count += 1
-                        logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not yet available")
-                    else:
-                        reason = result.get("reason", "Unknown error")
-                        failed_months.append((year, month, reason))
-                        logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
-                except Exception as e:
-                    error_msg = str(e)
-                    failed_months.append((year, month, error_msg))
-                    logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
+                    month_duration = time.time() - month_start_time
+                    logger.success(f"[SUCCESS] {year}-{month:02d} - Consolidated in {month_duration:.2f}s")
+                elif status == "skipped":
+                    skipped += 1
+                    logger.success(f"[OK] {year}-{month:02d} - Already complete (Consolidation refreshed)")
+                elif status == "not_published":
+                    not_published_count += 1
+                    logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not available")
+                else:
+                    reason = result.get("reason", "Unknown error")
+                    failed_months.append((year, month, reason))
+                    logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+            except Exception as e:
+                error_msg = str(e)
+                failed_months.append((year, month, error_msg))
+                logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
     
     else:
         # ========================================================================
-        # MODE 2: AUTO (single-shot, structurally incapable of iteration)
+        # MODE 2: AUTO
         # ========================================================================
         mode = "AUTO"
         logger.info(f"Mode: {mode}")
         
         year, month = get_latest_eligible_month()
         logger.info(f"Latest eligible month: {year}-{month:02d}")
-        
-        # Single attempt only - no loop
         month_start_time = time.time()
         
-        if is_month_complete(year, month):
-            logger.info(f"[SKIP] {year}-{month:02d} - Complete (_SUCCESS.json exists)")
-            skipped = 1
-        else:
-            logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
+        try:
+            result = downloader.download(year=year, month=month)
+            status = result["status"]
             
-            if DRY_RUN:
-                logger.info(f"[DRY RUN] Would download {year}-{month:02d}")
+            if status == "success":
                 downloaded_months.append((year, month))
+                month_duration = time.time() - month_start_time
+                logger.success(f"[SUCCESS] {year}-{month:02d} - Consolidated in {month_duration:.2f}s")
+            elif status == "skipped":
+                skipped = 1
+                logger.success(f"[OK] {year}-{month:02d} - Already complete (Consolidation refreshed)")
+            elif status == "not_published":
+                not_published_count = 1
+                logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not available")
             else:
-                try:
-                    result = downloader.download(year=year, month=month)
-                    status = result["status"]
-                    
-                    if status == "success":
-                        downloaded_months.append((year, month))
-                        month_duration = time.time() - month_start_time
-                        logger.success(f"[SUCCESS] {year}-{month:02d} - Downloaded {result['files_downloaded']} file(s) in {month_duration:.2f}s")
-                    elif status == "not_published":
-                        not_published_count = 1
-                        logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not yet available")
-                    else:
-                        reason = result.get("reason", "Unknown error")
-                        failed_months.append((year, month, reason))
-                        logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
-                except Exception as e:
-                    error_msg = str(e)
-                    failed_months.append((year, month, error_msg))
-                    logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
+                reason = result.get("reason", "Unknown error")
+                failed_months.append((year, month, reason))
+                logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+        except Exception as e:
+            error_msg = str(e)
+            failed_months.append((year, month, error_msg))
+            logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
     
     # Summary
     total_duration = time.time() - start_time

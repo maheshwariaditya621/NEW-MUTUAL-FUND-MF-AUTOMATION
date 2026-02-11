@@ -144,15 +144,22 @@ class LICDownloader(BaseDownloader):
         if target_dir.exists():
             success_marker = target_dir / "_SUCCESS.json"
             if success_marker.exists():
+                # Month already complete - check for missing consolidation
+                logger.info(f"LIC: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
-                logger.info(f"[SUMMARY]")
-                logger.info(f"AMC: LIC")
-                logger.info(f"Mode: SKIPPED")
-                logger.info(f"Month: {year}-{month:02d}")
-                logger.info(f"Status: ALREADY COMPLETE")
-                logger.info(f"Duration: {duration:.2f}s")
+                logger.info("✅ Month already complete — UPDATED")
+                logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
-                return {"amc": "LIC", "year": year, "month": month, "status": "skipped", "reason": "already_downloaded"}
+                return {
+                    "status": "skipped", 
+                    "reason": "already_downloaded",
+                    "duration": duration
+                }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing _SUCCESS.json marker")
 
@@ -196,6 +203,10 @@ class LICDownloader(BaseDownloader):
 
                 # Success
                 self._create_success_marker(target_dir, year, month, len(downloaded_files))
+                
+                # Consolidate downloads
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
                 self.notifier.notify_success("LIC", year, month, files_downloaded=len(downloaded_files), duration=duration)
                 
@@ -392,4 +403,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     downloader = LICDownloader()
-    downloader.download(args.year, args.month)
+    result = downloader.download(args.year, args.month)
+
+    status = result["status"]
+    if status == "success":
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif status == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+    elif status == "not_published":
+        logger.info(f"ℹ️  Info: Month not yet published")
+    else:
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        raise SystemExit(1)

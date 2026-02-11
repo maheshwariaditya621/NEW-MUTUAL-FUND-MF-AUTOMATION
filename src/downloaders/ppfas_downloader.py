@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List
 from src.downloaders.base_downloader import BaseDownloader
+import time
 from src.config import logger
 from src.alerts.telegram_notifier import get_notifier
 
@@ -24,6 +25,7 @@ except ImportError:
 
 
 class PPFASDownloader(BaseDownloader):
+    AMC_NAME = "ppfas"
     """
     PPFAS Mutual Fund - Portfolio Downloader
     
@@ -216,15 +218,25 @@ class PPFASDownloader(BaseDownloader):
         if target_dir.exists():
             success_marker = target_dir / "_SUCCESS.json"
             if success_marker.exists():
+                # Month already complete - check for missing consolidation
+                logger.info(f"PPFAS: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
-                logger.info(f"[SUMMARY]")
-                logger.info(f"AMC: PPFAS")
-                logger.info(f"Mode: SKIPPED")
-                logger.info(f"Month: {year}-{month:02d}")
-                logger.info(f"Status: ALREADY COMPLETE")
-                logger.info(f"Duration: {duration:.2f}s")
+                logger.info("✅ Month already complete — UPDATED")
+                logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
-                return {"amc": "PPFAS Mutual Fund", "year": year, "month": month, "status": "skipped", "reason": "already_downloaded"}
+                return {
+                    "amc": "PPFAS Mutual Fund", 
+                    "year": year, 
+                    "month": month, 
+                    "status": "skipped", 
+                    "reason": "already_downloaded",
+                    "duration": duration
+                }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing _SUCCESS.json marker")
 
@@ -252,6 +264,9 @@ class PPFASDownloader(BaseDownloader):
                 
                 # 4) Success Marker
                 self._create_success_marker(target_dir, year, month, 1)
+                
+                # Consolidate downloads
+                self.consolidate_downloads(year, month)
                 
                 # 5) Sanity Check
                 self._check_file_count(1, year, month)
@@ -354,9 +369,11 @@ if __name__ == "__main__":
     result = downloader.download(year=args.year, month=args.month)
     
     if result["status"] == "success":
-        logger.success(f"✅ Downloaded {result['files_downloaded']} file(s)")
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif result["status"] == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
     elif result["status"] == "not_published":
-        logger.info(f"ℹ️  Not published yet: {result.get('reason')}")
+        logger.info(f"ℹ️  Info: Month not yet published: {result.get('reason')}")
     else:
         logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

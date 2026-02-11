@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict
 
 from src.downloaders.base_downloader import BaseDownloader
+import time
 from src.config import logger
 from src.alerts.telegram_notifier import get_notifier
 
@@ -24,6 +25,7 @@ except ImportError:
 
 
 class QuantumDownloader(BaseDownloader):
+    AMC_NAME = "quantum"
     """
     Quantum Mutual Fund monthly portfolio downloader.
 
@@ -201,8 +203,17 @@ class QuantumDownloader(BaseDownloader):
                 logger.warning(f"Incomplete month detected: {year}-{month:02d}")
                 self._move_to_corrupt(target_dir, year, month, "Missing _SUCCESS.json marker")
             else:
-                # Month already complete
+                # Month already complete - check for missing consolidation
+                logger.info(f"Quantum: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
+                logger.info("✅ Month already complete — UPDATED")
+                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info("=" * 60)
                 return {
                     "amc": self.amc_name,
                     "year": year,
@@ -210,7 +221,8 @@ class QuantumDownloader(BaseDownloader):
                     "files_downloaded": 0,
                     "files": [],
                     "status": "skipped",
-                    "reason": "Already complete"
+                    "reason": "already_downloaded",
+                    "duration": duration
                 }
 
         try:
@@ -265,6 +277,9 @@ class QuantumDownloader(BaseDownloader):
 
             # Create atomic completion marker
             self._create_success_marker(target_dir, year, month, 1)
+            
+            # Consolidate downloads
+            self.consolidate_downloads(year, month)
 
             duration = time.time() - start_time
             
@@ -326,15 +341,15 @@ if __name__ == "__main__":
     status = result.get("status")
 
     if status == "success":
-        logger.info(f"✅ Downloaded {result['files_downloaded']} file(s)")
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
         exit(0)
 
     elif status == "skipped":
-        logger.info("⏭️ Skipped: already complete")
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
         exit(0)
 
     elif status == "not_published":
-        logger.warning("⚠️ Month not yet published")
+        logger.info(f"ℹ️  Info: Month not yet published")
         exit(0)
 
     else:

@@ -11,6 +11,7 @@ from .numbers import (
     validate_percent_range,
     safe_decimal,
 )
+from .excel_merger import merge_project_excels, consolidate_amc_downloads
 
 __all__ = [
     "is_valid_equity_isin",
@@ -26,4 +27,6 @@ __all__ = [
     "validate_non_negative",
     "validate_percent_range",
     "safe_decimal",
+    "merge_project_excels",
+    "consolidate_amc_downloads",
 ]

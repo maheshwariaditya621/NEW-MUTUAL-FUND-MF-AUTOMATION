@@ -92,8 +92,22 @@ class MiraeAssetDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                logger.info(f"MIRAE_ASSET: {year}-{month:02d} already complete. Skipping.")
-                return {"status": "skipped", "reason": "already_downloaded"}
+                # Month already complete - check for missing consolidation
+                logger.info(f"Mirae Asset: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
+                duration = time.time() - start_time
+                logger.info("✅ Month already complete — UPDATED")
+                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info("=" * 60)
+                return {
+                    "status": "skipped", 
+                    "reason": "already_downloaded",
+                    "duration": duration
+                }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing success marker")
 
@@ -116,6 +130,10 @@ class MiraeAssetDownloader(BaseDownloader):
 
                 # Success
                 self._create_success_marker(target_dir, year, month, files_downloaded)
+                
+                # Consolidate downloads
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
                 self.notifier.notify_success("MIRAE_ASSET", year, month, files_downloaded=files_downloaded, duration=duration)
                 logger.success(f"✅ MIRAE_ASSET download completed: {files_downloaded} files")
@@ -153,6 +171,24 @@ class MiraeAssetDownloader(BaseDownloader):
             logger.info(f"Navigating to Mirae Asset Downloads page...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
+
+            # Retry logic for data visibility
+            data_visible = False
+            for visibility_attempt in range(5):
+                # Use a specific container if possible for better performance
+                container = page.locator("#nav-portfolio-tab1")
+                if container.count() > 0 and container.locator("a").count() > 0:
+                    data_visible = True
+                    break
+                
+                logger.warning(f"MIRAE_ASSET: Data not visible (Attempt {visibility_attempt + 1}/5). Retrying in 15s...")
+                time.sleep(15)
+                page.reload(wait_until="load")
+                time.sleep(5)
+            
+            if not data_visible:
+                logger.error("MIRAE_ASSET: Data failed to load after 5 retries.")
+                raise Exception("Data visibility timeout: No portfolio links found in container.")
 
             # Accept cookies
             try:
@@ -356,4 +392,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     downloader = MiraeAssetDownloader()
-    downloader.download(args.year, args.month)
+    result = downloader.download(args.year, args.month)
+
+    status = result["status"]
+    if status == "success":
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif status == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+    elif status == "not_published":
+        logger.info(f"ℹ️  Info: Month not yet published")
+    else:
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        raise SystemExit(1)

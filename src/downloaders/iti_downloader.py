@@ -84,8 +84,22 @@ class ITIDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                logger.info(f"ITI: {year}-{month:02d} already complete. Skipping.")
-                return {"status": "skipped", "reason": "already_downloaded"}
+                # Month already complete - check for missing consolidation
+                logger.info(f"ITI: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
+                duration = time.time() - start_time
+                logger.info("✅ Month already complete — UPDATED")
+                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info("=" * 60)
+                return {
+                    "status": "skipped", 
+                    "reason": "already_downloaded",
+                    "duration": duration
+                }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing success marker")
 
@@ -108,6 +122,10 @@ class ITIDownloader(BaseDownloader):
 
                 # Success
                 self._create_success_marker(target_dir, year, month, 1)
+                
+                # Consolidate downloads
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
                 self.notifier.notify_success("ITI", year, month, files_downloaded=1, duration=duration)
                 logger.success(f"✅ ITI download completed: {downloaded_path.name}")
@@ -265,4 +283,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     downloader = ITIDownloader()
-    downloader.download(args.year, args.month)
+    result = downloader.download(args.year, args.month)
+
+    status = result["status"]
+    if status == "success":
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif status == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+    elif status == "not_published":
+        logger.info(f"ℹ️  Info: Month not yet published")
+    else:
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        raise SystemExit(1)

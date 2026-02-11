@@ -27,6 +27,7 @@ except ImportError:
 
 
 class ICICIDownloader(BaseDownloader):
+    AMC_NAME = "icici"
     API_URL = "https://apimf.icicipruamc.com/nms/v1/downloads/files"
 
     MONTH_NAMES = {
@@ -118,8 +119,15 @@ class ICICIDownloader(BaseDownloader):
                 logger.warning(f"⚠️ Incomplete folder detected for {year}-{month:02d}")
                 self._move_to_corrupt(target_dir, year, month, "Missing _SUCCESS.json")
             else:
+                # Month already complete - check for missing consolidation
+                logger.info(f"ICICI: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
-                logger.info("⏭️  Month already downloaded — SKIPPING")
+                logger.info("✅ Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
 
@@ -318,6 +326,9 @@ class ICICIDownloader(BaseDownloader):
                 
                 self._check_file_count(len(saved_files), folder_year, folder_month)
                 self._create_success_marker(actual_folder, folder_year, folder_month, len(saved_files))
+                
+                # Consolidate downloads
+                self.consolidate_downloads(folder_year, folder_month)
         
         # Clean up empty requested month folder if it wasn't used
         if target_dir.exists():
@@ -363,8 +374,13 @@ if __name__ == "__main__":
     parser.add_argument("--month", type=int, required=True)
     args = parser.parse_args()
 
-    downloader = ICICIDownloader()
-    result = downloader.download(args.year, args.month)
-
-    if result["status"] != "success":
+    status = result["status"]
+    if status == "success":
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif status == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+    elif status == "not_published":
+        logger.info(f"ℹ️  Info: Month not yet published")
+    else:
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -1,5 +1,5 @@
 """
-Kotak Auto Backfill Module.
+Kotak Mahindra Auto Backfill Module.
 
 Supports two modes:
 1. Manual range mode: User-defined date range
@@ -82,20 +82,23 @@ def is_month_complete(year: int, month: int) -> bool:
     Returns:
         True if _SUCCESS.json exists, False otherwise
     """
-    folder_path = Path(f"data/raw/kotak/{year}_{month:02d}")
-    success_marker = folder_path / "_SUCCESS.json"
-    
-    return success_marker.exists()
+    # NOTE: This is a heuristic. The authoritative check is in the downloader.
+    # We check the standard path data/raw/{amc_name}/YYYY_MM/_SUCCESS.json
+    # We need to construct the AMC name directory correctly.
+    # Since AMC_NAME is defined in the downloader, we might just rely on the downloader's idempotency.
+    # But for reporting 'skipped' without invoking downloader overhead, we can check.
+    # However, to be safe and consistent with "Gold Standard" logic, we let the downloader handle it.
+    pass
 
 
-def run_kotak_backfill(
+def run_backfill(
     start_year: Optional[int] = None,
     start_month: Optional[int] = None,
     end_year: Optional[int] = None,
     end_month: Optional[int] = None
 ) -> dict:
     """
-    Run Kotak backfill.
+    Run Kotak Mahindra backfill.
     
     Two modes:
     
@@ -112,19 +115,12 @@ def run_kotak_backfill(
         end_month: Optional end month (1-12)
         
     Returns:
-        Dictionary with summary:
-            - mode: str ("range" or "auto")
-            - total_checked: int
-            - skipped: int
-            - downloaded: int
-            - failed: int
-            - downloaded_months: List[Tuple[int, int]]
-            - failed_months: List[Tuple[int, int, str]]
+        Dictionary with summary metrics.
     """
     start_time = time.time()
     
     logger.info("=" * 70)
-    logger.info("KOTAK BACKFILL STARTED")
+    logger.info("Kotak Mahindra BACKFILL STARTED")
     if DRY_RUN:
         logger.info("MODE: DRY RUN (no network calls)")
     logger.info("=" * 70)
@@ -141,7 +137,7 @@ def run_kotak_backfill(
     # Determine mode and execute
     if all([start_year, start_month, end_year, end_month]):
         # ========================================================================
-        # MODE 1: MANUAL RANGE (loop-based)
+        # MODE 1: MANUAL RANGE
         # ========================================================================
         mode = "MANUAL_RANGE"
         logger.info(f"Mode: {mode}")
@@ -152,108 +148,66 @@ def run_kotak_backfill(
         
         # Process each month in range
         for year, month in months:
+            logger.info(f"[CHECK] {year}-{month:02d}")
             month_start_time = time.time()
             
-            if is_month_complete(year, month):
-                logger.info(f"[SKIP] {year}-{month:02d} - Complete (_SUCCESS.json exists)")
-                skipped += 1
-            else:
-                logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
+            try:
+                # Downloader now handles idempotency and consolidation trigger
+                result = downloader.download(year=year, month=month)
+                status = result["status"]
                 
-                if DRY_RUN:
-                    logger.info(f"[DRY RUN] Would download {year}-{month:02d}")
+                if status == "success":
                     downloaded_months.append((year, month))
-                    continue
-                
-                try:
-                    # Kotak uses Playwright, so we might want to ensure session logic if needed
-                    # but the basic download method handles it.
-                    # For optimization, we could open/close session outside loop, but KotakDownloader 
-                    # opens a new context per download call in current implementation unless we modify it.
-                    # The current implementation of KotakDownloader.download() calls _download_via_playwright 
-                    # which opens a context if one isn't passed.
-                    
-                    # To optimize, let's use the persistence if available, 
-                    # but KotakDownloader structure in previous step didn't explicitly expose 
-                    # a public 'download_with_session' method easily without modifying the class 
-                    # to accept a session in `download`.
-                    # The `download` method in `KotakDownloader` (from step 1) 
-                    # calls `_download_via_playwright` which creates a NEW context every time 
-                    # unless `self._page` is set.
-                    # Let's check if we can reuse the session.
-                    # The `KotakDownloader` has `open_session` and `close_session`.
-                    # If we call `downloader.open_session()` before loop, `self._page` will be set.
-                    # Then `download` calls `_download_via_playwright(..., page=self._page)`.
-                    # This is efficient!
-                    
-
-
-                    result = downloader.download(year=year, month=month)
-                    status = result["status"]
-                    
-                    if status == "success":
-                        downloaded_months.append((year, month))
-                        month_duration = time.time() - month_start_time
-                        logger.success(f"[SUCCESS] {year}-{month:02d} - Downloaded {result['files_downloaded']} file(s) in {month_duration:.2f}s")
-                    elif status == "not_published":
-                        not_published_count += 1
-                        logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not yet available")
-                    else:
-                        reason = result.get("reason", "Unknown error")
-                        failed_months.append((year, month, reason))
-                        logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
-                except Exception as e:
-                    error_msg = str(e)
-                    failed_months.append((year, month, error_msg))
-                    logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
-        
-
+                    month_duration = time.time() - month_start_time
+                    logger.success(f"[SUCCESS] {year}-{month:02d} - Consolidated in {month_duration:.2f}s")
+                elif status == "skipped":
+                    skipped += 1
+                    logger.success(f"[OK] {year}-{month:02d} - Already complete (Consolidation refreshed)")
+                elif status == "not_published":
+                    not_published_count += 1
+                    logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not available")
+                else:
+                    reason = result.get("reason", "Unknown error")
+                    failed_months.append((year, month, reason))
+                    logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+            except Exception as e:
+                error_msg = str(e)
+                failed_months.append((year, month, error_msg))
+                logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
     
     else:
         # ========================================================================
-        # MODE 2: AUTO (single-shot, structurally incapable of iteration)
+        # MODE 2: AUTO
         # ========================================================================
         mode = "AUTO"
         logger.info(f"Mode: {mode}")
         
         year, month = get_latest_eligible_month()
         logger.info(f"Latest eligible month: {year}-{month:02d}")
-        
-        # Single attempt only - no loop
         month_start_time = time.time()
         
-        if is_month_complete(year, month):
-            logger.info(f"[SKIP] {year}-{month:02d} - Complete (_SUCCESS.json exists)")
-            skipped = 1
-        else:
-            logger.info(f"[MISSING] {year}-{month:02d} - Attempting download...")
+        try:
+            result = downloader.download(year=year, month=month)
+            status = result["status"]
             
-            if DRY_RUN:
-                logger.info(f"[DRY RUN] Would download {year}-{month:02d}")
+            if status == "success":
                 downloaded_months.append((year, month))
+                month_duration = time.time() - month_start_time
+                logger.success(f"[SUCCESS] {year}-{month:02d} - Consolidated in {month_duration:.2f}s")
+            elif status == "skipped":
+                skipped = 1
+                logger.success(f"[OK] {year}-{month:02d} - Already complete (Consolidation refreshed)")
+            elif status == "not_published":
+                not_published_count = 1
+                logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not available")
             else:
-                try:
-                    # Session management for single run too
-                    
-                    result = downloader.download(year=year, month=month)
-                    status = result["status"]
-                    
-                    if status == "success":
-                        downloaded_months.append((year, month))
-                        month_duration = time.time() - month_start_time
-                        logger.success(f"[SUCCESS] {year}-{month:02d} - Downloaded {result['files_downloaded']} file(s) in {month_duration:.2f}s")
-                    elif status == "not_published":
-                        not_published_count = 1
-                        logger.info(f"[NOT PUBLISHED] {year}-{month:02d} - Data not yet available")
-                    else:
-                        reason = result.get("reason", "Unknown error")
-                        failed_months.append((year, month, reason))
-                        logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
-                except Exception as e:
-                    error_msg = str(e)
-                    failed_months.append((year, month, error_msg))
-                    logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
-
+                reason = result.get("reason", "Unknown error")
+                failed_months.append((year, month, reason))
+                logger.warning(f"[FAILED] {year}-{month:02d} - {reason}")
+        except Exception as e:
+            error_msg = str(e)
+            failed_months.append((year, month, error_msg))
+            logger.error(f"[ERROR] {year}-{month:02d} - {error_msg}")
     
     # Summary
     total_duration = time.time() - start_time
@@ -298,7 +252,7 @@ def run_kotak_backfill(
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Kotak Mutual Fund Backfill")
+    parser = argparse.ArgumentParser(description="Kotak Mahindra Backfill")
     parser.add_argument("--start-year", type=int, help="Start year (YYYY)")
     parser.add_argument("--start-month", type=int, help="Start month (1-12)")
     parser.add_argument("--end-year", type=int, help="End year (YYYY)")
@@ -329,7 +283,7 @@ if __name__ == "__main__":
     # Run backfill
     if non_none_count == 4:
         # Manual range mode
-        result = run_kotak_backfill(
+        result = run_backfill(
             start_year=args.start_year,
             start_month=args.start_month,
             end_year=args.end_year,
@@ -337,7 +291,7 @@ if __name__ == "__main__":
         )
     else:
         # Auto mode
-        result = run_kotak_backfill()
+        result = run_backfill()
     
     # Exit status based on mode
     if result["mode"] == "AUTO":

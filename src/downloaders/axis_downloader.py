@@ -243,13 +243,20 @@ class AxisDownloader(BaseDownloader):
                 logger.warning(f"Incomplete month detected: {year}-{month:02d}")
                 self._move_to_corrupt(target_dir, year, month, "Missing _SUCCESS.json marker")
             else:
+                # Month already complete - check for missing consolidation
+                logger.info(f"Axis: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+                
+                # Always try consolidation in case it was missed/errored previously
+                self.consolidate_downloads(year, month)
+                
                 # Month already complete
                 duration = time.time() - start_time
                 logger.info(f"[SUMMARY]")
                 logger.info(f"AMC: Axis")
                 logger.info(f"Mode: SKIPPED")
                 logger.info(f"Month: {year}-{month:02d}")
-                logger.info(f"Status: ALREADY COMPLETE")
+                logger.info(f"Status: COMPLETE")
                 logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 
@@ -258,7 +265,8 @@ class AxisDownloader(BaseDownloader):
                     "year": year,
                     "month": month,
                     "files_downloaded": 0,
-                    "status": "skipped"
+                    "status": "skipped",
+                    "duration": duration
                 }
         
         # Create directory
@@ -354,6 +362,9 @@ class AxisDownloader(BaseDownloader):
             # Create atomic completion marker
             self._create_success_marker(target_dir, year, month, len(saved_files))
             
+            # Consolidate downloads
+            self.consolidate_downloads(year, month)
+            
             duration = time.time() - start_time
             
             logger.success("✅ AXIS download completed")
@@ -441,5 +452,13 @@ if __name__ == "__main__":
     downloader = AxisDownloader()
     result = downloader.download(year=args.year, month=args.month)
     
-    if result["status"] != "success":
+    status = result["status"]
+    if status == "success":
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif status == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+    elif status == "not_published":
+        logger.info(f"ℹ️  Info: Month not yet published")
+    else:
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

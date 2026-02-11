@@ -305,14 +305,24 @@ class HSBCDownloader(BaseDownloader):
         
         # Check if already complete
         if success_marker.exists():
-            logger.info(f"Month {year}-{month:02d} already complete (_SUCCESS.json exists)")
+            # Month already complete - check for missing consolidation
+            logger.info(f"HSBC: {year}-{month:02d} files already downloaded.")
+            logger.info("Verifying consolidation/merged files...")
+
+            # Always try consolidation in case it was missed/errored previously
+            self.consolidate_downloads(year, month)
+            
+            duration = time.time() - start_time
+            logger.info("✅ Month already complete — UPDATED")
+            logger.info(f"🕒 Duration: {duration:.2f}s")
+            logger.info("=" * 60)
             return {
                 "amc": self.AMC_NAME,
                 "year": year,
                 "month": month,
                 "status": "skipped",
-                "reason": "Already complete",
-                "duration": time.time() - start_time
+                "reason": "already_downloaded",
+                "duration": duration
             }
         
         # Check for corruption
@@ -372,6 +382,9 @@ class HSBCDownloader(BaseDownloader):
             
             # Create success marker
             self._create_success_marker(target_dir, year, month, files_downloaded)
+            
+            # Consolidate downloads
+            self.consolidate_downloads(year, month)
             
             duration = time.time() - start_time
             
@@ -441,11 +454,11 @@ if __name__ == "__main__":
     result = downloader.download(year=args.year, month=args.month)
     
     if result["status"] == "success":
-        logger.success(f"✅ Successfully downloaded {result['files_downloaded']} files")
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif result["status"] == "skipped":
-        logger.info(f"ℹ️  Month already complete")
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
     elif result["status"] == "not_published":
-        logger.info(f"ℹ️  Data not yet published for {args.year}-{args.month:02d}")
+        logger.info(f"ℹ️  Info: Month not yet published")
     else:
-        logger.error(f"❌ Download failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

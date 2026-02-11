@@ -186,6 +186,60 @@ class TelegramNotifier:
         msg = self.templates.scheduler(data)
         return self.client.send_message(msg)
 
+    def notify_merge_success(self, amc: str, year: int, month: int, 
+                            output_file: str) -> bool:
+        """
+        Send EXCEL_MERGE_SUCCESS alert.
+        
+        Args:
+            amc: AMC name
+            year: Year
+            month: Month
+            output_file: Path to merged file
+            
+        Returns:
+            True if sent, False otherwise
+        """
+        if not self._should_send("SUCCESS"):
+            return False
+        
+        data = {
+            "amc": amc,
+            "year": year,
+            "month": month,
+            "output_file": output_file
+        }
+        
+        message = self.templates.merge_success(data)
+        return self.client.send_message(message)
+
+    def notify_merge_error(self, amc: str, year: int, month: int,
+                          error: str) -> bool:
+        """
+        Send EXCEL_MERGE_ERROR alert.
+        
+        Args:
+            amc: AMC name
+            year: Year
+            month: Month
+            error: Error message
+            
+        Returns:
+            True if sent, False otherwise
+        """
+        if not self._should_send("ERROR"):
+            return False
+        
+        data = {
+            "amc": amc,
+            "year": year,
+            "month": month,
+            "error": error
+        }
+        
+        message = self.templates.merge_error(data)
+        return self.client.send_message(message)
+
 
 # Global singleton instance
 _notifier = None

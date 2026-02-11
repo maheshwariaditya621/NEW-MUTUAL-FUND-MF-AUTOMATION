@@ -140,3 +140,53 @@ Status: NOT PUBLISHED"""
                 msg += f"\n❌ Failed: {stats['failed']}"
         
         return msg
+
+    @staticmethod
+    def merge_success(data: Dict[str, Any]) -> str:
+        """
+        Format EXCEL_MERGE_SUCCESS alert.
+        
+        Args:
+            data: {amc, year, month, output_file}
+            
+        Returns:
+            Formatted message
+        """
+        amc = data.get("amc", "Unknown")
+        year = data.get("year")
+        month = data.get("month")
+        output_file = data.get("output_file", "Unknown")
+        
+        return f"""📊 *{amc} Excel Consolidation Complete*
+
+📅 Period: {year}-{month:02d}
+📄 File: `{output_file}`
+
+The Excel sheets have been successfully merged.
+
+Status: MERGE SUCCESS"""
+
+    @staticmethod
+    def merge_error(data: Dict[str, Any]) -> str:
+        """
+        Format EXCEL_MERGE_ERROR alert.
+        
+        Args:
+            data: {amc, year, month, error}
+            
+        Returns:
+            Formatted message
+        """
+        amc = data.get("amc", "Unknown")
+        year = data.get("year")
+        month = data.get("month")
+        error = data.get("error", "Unknown error")
+        
+        return f"""❌ *{amc} Excel Consolidation Failed*
+
+📅 Period: {year}-{month:02d}
+🚨 Error: {error}
+
+Reason: Merging process encountered an error.
+
+Status: MERGE FAILED"""

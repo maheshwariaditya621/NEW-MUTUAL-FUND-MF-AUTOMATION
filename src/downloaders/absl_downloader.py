@@ -303,8 +303,15 @@ class ABSLDownloader(BaseDownloader):
         try:
             # Check if already complete
             if success_marker.exists():
+                # Month already complete - check for missing consolidation
+                logger.info(f"ABSL: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+
+                # Always try consolidation in case it was missed/erroed previously
+                self.consolidate_downloads(year, month)
+                
                 duration = time.time() - start_time
-                logger.info(f"Month {year}-{month:02d} already complete (_SUCCESS.json exists)")
+                logger.info(f"Month {year}-{month:02d} already complete - UPDATED")
                 logger.info("=" * 60)
                 
                 return {
@@ -434,7 +441,10 @@ class ABSLDownloader(BaseDownloader):
             self._check_file_count(file_count, year, month)
             
             # Create success marker
-            self._create_success_marker(target_dir, year, month, file_count)
+            self._create_success_marker(target_dir, year, month, 1)
+            
+            # Consolidate downloads
+            self.consolidate_downloads(year, month)
             
             duration = time.time() - start_time
             
@@ -503,5 +513,13 @@ if __name__ == "__main__":
     downloader = ABSLDownloader()
     result = downloader.download(year=args.year, month=args.month)
     
-    if result["status"] != "success":
+    status = result["status"]
+    if status == "success":
+        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+    elif status == "skipped":
+        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+    elif status == "not_published":
+        logger.info(f"ℹ️  Info: Month not yet published")
+    else:
+        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

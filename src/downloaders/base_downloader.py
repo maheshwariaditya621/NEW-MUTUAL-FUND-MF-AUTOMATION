@@ -146,3 +146,19 @@ class BaseDownloader(ABC):
         """
         folder = self.get_target_folder(amc_slug, year, month)
         return os.path.join(folder, filename)
+
+    def consolidate_downloads(self, year: int, month: int) -> None:
+        """
+        Consolidate all downloaded files for the AMC/period into a single file.
+        This is typically called after a successful multi-file download.
+        """
+        from src.utils import consolidate_amc_downloads
+        
+        amc_slug = getattr(self, "AMC_NAME", self.amc_name.lower().replace(" ", "_"))
+        logger.info(f"Consolidating downloads for {self.amc_name} ({year}-{month:02d})...")
+        
+        consolidated_path = consolidate_amc_downloads(amc_slug, year, month)
+        if consolidated_path:
+            logger.success(f"Consolidation complete: {consolidated_path}")
+        else:
+            logger.warning(f"Consolidation skipped or failed for {self.amc_name}")
