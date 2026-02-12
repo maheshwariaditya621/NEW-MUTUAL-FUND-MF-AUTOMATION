@@ -3,6 +3,7 @@ AMC_HDFC = "HDFC Mutual Fund"
 AMC_SBI = "SBI Mutual Fund"
 AMC_KOTAK = "Kotak Mahindra Mutual Fund"
 AMC_ICICI = "ICICI Prudential Mutual Fund"
+AMC_HSBC = "HSBC Mutual Fund"
 AMC_NIPPON = "Nippon India Mutual Fund"
 AMC_AXIS = "Axis Mutual Fund"
 AMC_ABSL = "Aditya Birla Sun Life Mutual Fund"
@@ -15,6 +16,7 @@ AMC_MAPPING = {
     "sbi": AMC_SBI,
     "kotak": AMC_KOTAK,
     "icici": AMC_ICICI,
+    "hsbc": AMC_HSBC,
     "nippon": AMC_NIPPON,
     "axis": AMC_AXIS,
     "absl": AMC_ABSL,
