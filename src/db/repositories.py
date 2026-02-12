@@ -214,6 +214,20 @@ def upsert_period(year: int, month: int, period_end_date: date) -> int:
     
     return period_id
 
+def check_period_locked(year: int, month: int) -> bool:
+    """
+    Check if a period is marked as FINAL.
+    """
+    cursor = get_cursor()
+    cursor.execute(
+        "SELECT period_status FROM periods WHERE year = %s AND month = %s",
+        (year, month)
+    )
+    row = cursor.fetchone()
+    if row and row[0] == 'FINAL':
+        return True
+    return False
+
 
 def upsert_company(
     isin: str,
@@ -371,7 +385,8 @@ def record_extraction_run(
     total_value: float,
     processing_time_seconds: float,
     status: str,
-    error_log: Optional[str] = None
+    error_log: Optional[str] = None,
+    git_commit_hash: Optional[str] = None
 ) -> int:
     """
     Log an extraction run with full financial lineage.
@@ -382,14 +397,16 @@ def record_extraction_run(
         INSERT INTO extraction_runs (
             amc_id, period_id, file_name, file_hash, extractor_version,
             header_fingerprint, rows_read, rows_inserted, rows_filtered, 
-            total_value, processing_time_seconds, status, error_log
+            total_value, processing_time_seconds, status, error_log,
+            git_commit_hash
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING run_id
         """,
         (amc_id, period_id, file_name, file_hash, extractor_version, 
          header_fingerprint, rows_read, rows_inserted, rows_filtered, 
-         total_value, processing_time_seconds, status, error_log)
+         total_value, processing_time_seconds, status, error_log,
+         git_commit_hash)
     )
     run_id = cursor.fetchone()[0]
     logger.info(f"Extraction run recorded: {status} (run_id={run_id})")
@@ -483,3 +500,81 @@ def delete_extraction_run_and_holdings(amc_id: int, period_id: int) -> int:
     
     logger.warning(f"ROLLBACK EXECUTED for amc_id={amc_id}, period_id={period_id}. Deleted {deleted_count} holdings.")
     return deleted_count
+
+def upsert_nav_entries(nav_data: List[Dict[str, Any]]):
+    """
+    Bulk upsert NAV entries into nav_history.
+    Enforces Inception Date Guard and Historical Year Locks.
+    """
+    from psycopg2.extras import execute_values
+    from .connection import get_connection
+    
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    # 1. Fetch current AMFI code -> (scheme_id, inception_date) mapping
+    cur.execute("SELECT amfi_code, scheme_id, inception_date FROM schemes WHERE amfi_code IS NOT NULL")
+    scheme_meta = {row[0]: {"id": row[1], "inception": row[2]} for row in cur.fetchall()}
+    
+    # 2. Fetch locked years
+    cur.execute("SELECT lock_year FROM nav_history_locks WHERE is_locked = TRUE")
+    locked_years = {row[0] for row in cur.fetchall()}
+    
+    query = """
+        INSERT INTO nav_history (
+            scheme_code, isin_growth, isin_div_payout, 
+            isin_div_reinv, scheme_name, nav_value, nav_date,
+            plan_type, option_type, is_reinvest, scheme_id
+        )
+        VALUES %s
+        ON CONFLICT (scheme_code, nav_date) DO UPDATE 
+        SET 
+            nav_value = EXCLUDED.nav_value,
+            scheme_name = EXCLUDED.scheme_name,
+            isin_growth = COALESCE(EXCLUDED.isin_growth, nav_history.isin_growth),
+            plan_type = EXCLUDED.plan_type,
+            option_type = EXCLUDED.option_type,
+            is_reinvest = EXCLUDED.is_reinvest,
+            scheme_id = COALESCE(EXCLUDED.scheme_id, nav_history.scheme_id)
+    """
+    
+    # Filter data based on guards
+    filtered_values = []
+    skipped_inception = 0
+    skipped_lock = 0
+    
+    for item in nav_data:
+        code = item['scheme_code']
+        n_date = item['nav_date']
+        meta = scheme_meta.get(code)
+        
+        # Guard 1: Inception Date
+        if meta and meta['inception'] and n_date < meta['inception']:
+            skipped_inception += 1
+            continue
+            
+        # Guard 2: Year Lock
+        if n_date.year in locked_years:
+            skipped_lock += 1
+            continue
+            
+        filtered_values.append((
+            code, 
+            item['isin_growth'], 
+            item.get('isin_div_payout'), 
+            item.get('isin_div_reinv'),
+            item['scheme_name'],
+            item['nav_value'],
+            n_date,
+            item['plan_type'],
+            item['option_type'],
+            item['is_reinvest'],
+            meta['id'] if meta else None
+        ))
+    
+    if filtered_values:
+        execute_values(cur, query, filtered_values)
+        conn.commit()
+        
+    logger.info(f"Ingested {len(filtered_values)} NAV entries. "
+                f"Skipped: {skipped_inception} (pre-inception), {skipped_lock} (year locked).")

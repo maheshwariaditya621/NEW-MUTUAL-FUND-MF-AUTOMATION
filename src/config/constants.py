@@ -2,10 +2,22 @@
 AMC_HDFC = "HDFC Mutual Fund"
 AMC_SBI = "SBI Mutual Fund"
 AMC_KOTAK = "Kotak Mahindra Mutual Fund"
+AMC_ICICI = "ICICI Prudential Mutual Fund"
+AMC_NIPPON = "Nippon India Mutual Fund"
+AMC_AXIS = "Axis Mutual Fund"
+AMC_ABSL = "Aditya Birla Sun Life Mutual Fund"
+AMC_UTI = "UTI Mutual Fund"
+AMC_MIRAE = "Mirae Asset Mutual Fund"
 
-# Mapping of short codes to canonical names
+# Mapping of short codes (slugs) to canonical names
 AMC_MAPPING = {
     "hdfc": AMC_HDFC,
     "sbi": AMC_SBI,
-    "kotak": AMC_KOTAK
+    "kotak": AMC_KOTAK,
+    "icici": AMC_ICICI,
+    "nippon": AMC_NIPPON,
+    "axis": AMC_AXIS,
+    "absl": AMC_ABSL,
+    "uti": AMC_UTI,
+    "mirae_asset": AMC_MIRAE
 }

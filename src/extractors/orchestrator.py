@@ -11,8 +11,9 @@ from src.extractors.drift_detector import DriftDetector
 from src.db import (
     upsert_amc, upsert_period, record_extraction_run, 
     check_file_already_extracted, TransactionContext,
-    delete_extraction_run_and_holdings
+    delete_extraction_run_and_holdings, check_period_locked
 )
+import subprocess
 
 class ExtractionOrchestrator:
     """
@@ -26,6 +27,13 @@ class ExtractionOrchestrator:
     def __init__(self, base_dir: str = "data/output/merged excels"):
         self.base_dir = Path(base_dir)
         self.drift_detector = DriftDetector()
+
+    def _get_git_commit(self) -> str:
+        """Fetch current git commit hash."""
+        try:
+            return subprocess.check_output(['git', 'rev-parse', 'HEAD'], stderr=subprocess.STDOUT).decode('ascii').strip()
+        except Exception:
+            return "UNKNOWN"
 
     def compute_file_hash(self, file_path: Path) -> str:
         """Computes SHA-256 hash of a file for high-integrity idempotency."""
@@ -44,6 +52,12 @@ class ExtractionOrchestrator:
         if not file_path.exists():
             logger.error(f"Merged file not found: {file_path}")
             return {"status": "failed", "reason": "file_not_found"}
+
+        # 0. Check Period Lock
+        if not dry_run and not redo:
+            if check_period_locked(year, month):
+                logger.warning(f"Period {year}-{month:02d} is FINAL/LOCKED. Skipping processing.")
+                return {"status": "skipped", "reason": "period_locked"}
 
         # 1. Setup Extractor (Moved up for correct AMC Name)
         extractor = ExtractorFactory.get_extractor(amc_slug, year, month)
@@ -113,7 +127,8 @@ class ExtractionOrchestrator:
                     rows_filtered=0, # TODO: Track filtered rows in extractor
                     total_value=sum(h['market_value_inr'] for h in holdings),
                     processing_time_seconds=duration,
-                    status="SUCCESS"
+                    status="SUCCESS",
+                    git_commit_hash=self._get_git_commit()
                 )
 
                 # 5. Generate Reconciliation Report

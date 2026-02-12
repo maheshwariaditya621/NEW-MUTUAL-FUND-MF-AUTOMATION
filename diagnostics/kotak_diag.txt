@@ -1,0 +1,42 @@
+================================================================================
+DIAGNOSING AMC: KOTAK
+File: d:\CODING\NEW MUTUAL FUND MF AUTOMATION\data\output\merged excels\kotak\2025\CONSOLIDATED_KOTAK_2025_12.xlsx
+Total Sheets: 115
+
+--- Sheet [0]: ConsolidatedSEBIPortfolioDecemb ---
+Header found at row: 1
+RAW HEADER: ['Name of Instrument', nan, nan, 'ISIN Code', 'Industry', 'Yield', 'Quantity', 'Market Value (Rs.in Lacs)', '% to Net Assets']
+SAMPLE DATA:
+Equity & Equity related                                       NaN                                                NaN          NaN                      NaN NaN    NaN     NaN    NaN
+                    NaN Listed/Awaiting listing on Stock Exchange                                                NaN          NaN                      NaN NaN    NaN     NaN    NaN
+                    NaN                                                                         INDIAN HOTELS CO LTD INE053A01029         Leisure Services NaN  93403  690.11  19.98
+                    NaN                                                                     Inter Globe Aviation Ltd INE646L01027       Transport Services NaN  13615  688.85  19.94
+                    NaN                                                                         GMR AIRPORTS LIMITED INE776C01039 Transport Infrastructure NaN 495072  516.71  14.96
+                    NaN                                                                   Jubilant Foodworks Limited INE797F01020         Leisure Services NaN  54306  303.35   8.78
+                    NaN                                           Indian Railway Catering And Tourism Corporation Lt INE335Y01020         Leisure Services NaN  41855  286.54   8.29
+                    NaN                                                                           ITC HOTELS LIMITED INE379A01028         Leisure Services NaN 129361   255.4   7.39
+                    NaN                                                                        LEMON TREE HOTELS LTD INE970X01018         Leisure Services NaN  68952  109.81   3.18
+                    NaN                                                                                     EIH Ltd. INE230A01023         Leisure Services NaN  27509   101.3   2.93
+                    NaN                                                                           CHALET HOTELS LTD. INE427F01016         Leisure Services NaN   9904   86.22    2.5
+                    NaN                                                                    Sapphire Foods India Ltd. INE806T01020         Leisure Services NaN  32836    84.4   2.44
+                    NaN                                                                DEVYANI INTERNATIONAL LIMITED INE872J01023         Leisure Services NaN  55810   82.57   2.39
+                    NaN                                                                              TBO TEK LIMITED INE673O01025         Leisure Services NaN   4626   76.92   2.23
+
+--- Sheet [57]: ConsolidatedSEBIPortfolioD (57) ---
+Header found at row: 1
+RAW HEADER: ['Name of Instrument', nan, nan, 'ISIN Code', 'Rating', 'Yield*', 'Quantity', 'Market Value (Rs.in Lacs)', '% to Net Assets']
+SAMPLE DATA:
+Debt Instruments                                       NaN                                                                                                          NaN          NaN        NaN   NaN   NaN       NaN   NaN
+             NaN                      Debentures and Bonds                                                                                                          NaN          NaN        NaN   NaN   NaN       NaN   NaN
+             NaN Listed/Awaiting listing on Stock Exchange                                                                                                          NaN          NaN        NaN   NaN   NaN       NaN   NaN
+             NaN                                    0.0796                                                                         PIPELINE INFRASTRUCTURE LIMITED(^)** INE01XX07042 CRISIL AAA  7.02 16500     16847     5
+             NaN                                       ZCB JUBILANT BEVCO LIMITED ( Axis Trustee Services Limited\nstep up or down 25 bps for every rating chang) (^)** INE1D4P08019  CRISIL AA  8.23  1000  10735.95  3.19
+             NaN                                       ZCB                                                 JTPM METAL TRADERS PVT LTD ( CATALYST TRUSTEESHIP LIMITE) ** INE02PE08036  CRISIL AA   8.1 10000  10316.02  3.06
+             NaN                                    0.0805                                                                       TATA CAPITAL HOUSING FINANCE LTD.(^)** INE033L07IH5 CRISIL AAA  7.18 10000  10250.41  3.04
+             NaN                                    0.0786                                                                       TATA CAPITAL HOUSING FINANCE LTD.(^)** INE033L07IJ1 CRISIL AAA  7.18 10000  10208.88  3.03
+             NaN                                    0.0725                                                                                 EMBASSY OFFICE PARKS REIT(^) INE041007191 CRISIL AAA  7.46 10000  10052.92  2.98
+             NaN                                    0.0745                                                                                     BHARTI TELECOM LTD.(^)** INE403D08280 CRISIL AAA  7.51 10000   9983.45  2.96
+             NaN                                    0.0692                                                                           DLF Cyber City Developers Ltd(^)** INE186K07122 CRISIL AAA  7.21 10000   9975.96  2.96
+             NaN                                    0.0791                                                                                       TATA CAPITAL LTD.(^)** INE306N07NO7   ICRA AAA  7.09  9500   9562.36  2.84
+             NaN                                    0.0796                                                                               EMBASSY OFFICE PARKS REIT(^)** INE041007142 CRISIL AAA  7.28  9000   9127.76  2.71
+             NaN                                    0.0909                                                                                    MUTHOOT FINANCE LTD.(^)** INE414G07JG7 CRISIL AA+  7.89  7500   7755.41   2.3

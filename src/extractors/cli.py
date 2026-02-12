@@ -30,7 +30,8 @@ def main():
     )
 
     if result["status"] == "success":
-        logger.info(f"SUCCESS: Extracted {result.get('rows', 0)} holdings.")
+        extracted_count = result.get('rows_inserted') or result.get('rows_read', 0)
+        logger.info(f"SUCCESS: Extracted {extracted_count} holdings.")
     elif result["status"] == "skipped":
         logger.info(f"SKIPPED: {result.get('reason')}")
     else:

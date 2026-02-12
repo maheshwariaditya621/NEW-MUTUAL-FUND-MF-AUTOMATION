@@ -1,0 +1,56 @@
+================================================================================
+DIAGNOSING AMC: NIPPON
+File: d:\CODING\NEW MUTUAL FUND MF AUTOMATION\data\output\merged excels\nippon\2025\CONSOLIDATED_NIPPON_2025_12.xlsx
+Total Sheets: 111
+
+--- Sheet [0]: NIMF Index ---
+HEADER NOT FOUND
+INDEX                                                                                                                                                                                                                                                                                       NaN
+   GF                                                                                                                                                                                                                                                                                       NaN
+   GS                                                                                                                                                                                                                                                                                       NaN
+   IP                                                                                                                                                                                                                                                                                       NaN
+   IF                                                                                                                                                                                                                                                                                       NaN
+   ST                                                                                                                                                                                                                                                                                       NaN
+   BF                                                                                                                                                                                                                                                                                       NaN
+   MI                                                                                                            Nippon India Conservative Hybrid Fund (An Open Ended Hybrid Scheme Investing Predominantly In Debt Instruments)\nNippon India Conservative Hybrid Fund -Segregated Portfolio 2
+   PS                                                                                                                                                                                                                                                                                       NaN
+   CP                                                                                                                                                                                                                                                                                       NaN
+   PH                                                                                                                                                                                                                                                                                       NaN
+   ME                                                                                                                                                                                                                                                                                       NaN
+   NE                                                                                                                                                                                                                                                                                       NaN
+   NI                                                                                                                                                                                                                                                                                       NaN
+   EO                                                                                                                                                                                                                                                                                       NaN
+   LF                                                                                                                                                                                                                                                                                       NaN
+   FR                                                                                                                                                                                                                                                                                       NaN
+   SD Nippon India Credit Risk Fund (An open ended debt scheme predominantly investing in AA and below rated corporate bonds (excluding AA+ rated corporate bonds). Relatively High interest rate risk and Relatively High Credit Risk. )\nNippon India Credit Risk Fund-Segregated Portfolio 2
+   SE                                                                                                                                                                                                                                                                                       NaN
+   SH                                                                                          Nippon India Aggressive Hybrid Fund (An Open Ended Hybrid Scheme Investing Predominantly In Equity And Equity Related Instruments)\nNippon India Aggressive Hybrid Fund-SEGREGATED PORTFOLIO 2\n
+   LQ                                                                                                                                                                                                                                                                                       NaN
+   TS                                                                                                                                                                                                                                                                                       NaN
+   LE                                                                                                                                                                                                                                                                                       NaN
+   LP                                                                                                                                                                                                                                                                                       NaN
+   UB                                                                                                                                                                                                                                                                                       NaN
+   K5                                                                                                                                                                                                                                                                                       NaN
+   EA                                                                                                                                                                                                                                                                                       NaN
+   QP                                                                                                                                                                                                                                                                                       NaN
+   GL                                                                                                                                                                                                                                                                                       NaN
+   NF                                                                                                                                                                                                                                                                                       NaN
+
+--- Sheet [55]: NIMF HS ---
+Header found at row: 3
+RAW HEADER: [nan, 'ISIN', 'Name of the Instrument', 'Industry / Rating', 'Quantity', 'Market/Fair Value\n( Rs. in Lacs)', '% to NAV', 'YIELD']
+SAMPLE DATA:
+         NaN          NaN                         Equity & Equity related                                   NaN    NaN      NaN     NaN NaN
+         NaN          NaN     (a) Listed Foreign Securities/Overseas ETFs                                   NaN    NaN      NaN     NaN NaN
+ 34175902HKD KYG9897K1058                        ZTO Express (Cayman) Inc               Air Freight & Logistics  24310   455.48  0.0045 NaN
+111653255HKD KYG5074S1012                                JD Logistics Inc               Air Freight & Logistics 146262   192.83  0.0019 NaN
+ 12396756HKD KYG211501005                    China Hongqiao Group Limited                              Aluminum 183221   689.96  0.0068 NaN
+  3227484HKD KYG040111059                    Anta Sports Products Limited Apparel, Accessories and Luxury Goods  77120   717.13   0.007 NaN
+  2334217HKD KYG8087W1015       Shenzhou International Group Holdings Ltd Apparel, Accessories and Luxury Goods  45426   320.94  0.0031 NaN
+  3378915HKD KYG5496K1242                         Li Ning Company Limited Apparel, Accessories and Luxury Goods 127818   275.49  0.0027 NaN
+  1459145HKD CNE100000296                  BYD Company Limited - H shares              Automobile Manufacturers 202381  2227.71  0.0218 NaN
+  1812980HKD KYG3777B1032                                      Geely Auto              Automobile Manufacturers 333571    689.3  0.0068 NaN
+ 56066025HKD KYG5479M1050                                     Li Auto Inc              Automobile Manufacturers  76459   572.41  0.0056 NaN
+ 11137143HKD KYG9894K1085               Zhongsheng Group Holdings Limited                     Automotive Retail  39016    52.34  0.0005 NaN
+ 44320293HKD KYG4818G1010                          Innovent Biologics Inc                         Biotechnology  89440    787.3  0.0077 NaN
+   421075HKD HK0291001490 China Resources Beer (Holdings) Company Limited                               Brewers  89124   269.77  0.0026 NaN

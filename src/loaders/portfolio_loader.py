@@ -115,6 +115,15 @@ class PortfolioLoader:
 
                 # 4. Atomic Load per Scheme
                 total_value = sum(h['market_value_inr'] for h in db_holdings)
+                total_nav_percent = sum(float(h['percent_of_nav']) for h in db_holdings)
+
+                # %NAV Guard: Check if sum is within 95-105% (Standard Equity Range)
+                if not (95.0 <= total_nav_percent <= 105.0):
+                    logger.warning(
+                        f"[%NAV GUARD] Scheme '{s_key[0]}' has unusual total equity exposure: {total_nav_percent:.2f}% "
+                        f"(Expected 95-105%). Verify if significant Cash/Debt was excluded."
+                    )
+
                 snapshot_id = create_snapshot(
                     scheme_id=scheme_id,
                     period_id=period_id,

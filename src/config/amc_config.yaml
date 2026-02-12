@@ -1,0 +1,60 @@
+# AMC Configuration Registry
+# This file defines the parsing rules for each AMC.
+# It allows adding new AMCs without writing custom Python code for standard formats.
+
+global_defaults:
+  required_columns: ["ISIN", "Scheme Name", "NAV", "Quantity", "Market Value"]
+  date_formats: ["%d-%b-%y", "%d/%m/%Y", "%d-%m-%Y"]
+
+amcs:
+  # 1. ICICI Prudential Mutual Fund
+  ICICI_PRU:
+    amc_name: "ICICI Prudential Mutual Fund"
+    amc_code: "ICICI_PRU"
+    file_type: "excel" # xls or xlsx
+    
+    # Text to identify this AMC in a file (optional - for auto-detection)
+    signature_keywords: ["ICICI Prudential", "Portfolio Statement"]
+    
+    input_config:
+      sheet_pattern: ".*" # All sheets are schemes
+      iterate_sheets: true
+      header_row_keywords: ["ISIN", "Quantity", "Market Value"] 
+      # ICICI Sheet names have suffixes like "HOUSING OPPORTUNITIES HOUSING"
+      # Regex to strip the ALL-CAPS suffix if it duplicates words or looks like a code
+      # Simple approach: Strip the last word if it's all caps? 
+      # Actually HDFC used strict suffix removal. 
+      # Let's try to remove the last token.
+      scheme_name_cleaning_regex: "\\s+[A-Z0-9]+$" 
+
+    column_mapping:
+      # Map raw headers (in file) to internal standard columns
+      "ISIN": "ISIN"
+      "Company Name": "Company Name"
+      "Name of Instrument": "Company Name"
+      "NAV": "NAV" # Might be missing in ICICI, will check
+      "Market Value": "Market Value" 
+      "Value": "Market Value"
+      "Quantity": "Quantity"
+      "Units": "Quantity"
+      "% to NAV": "Percent to NAV"
+      "% to Net Assets": "Percent to NAV"
+      "Industry": "Sector"
+
+  # 2. Nippon India Mutual Fund
+  NIPPON_INDIA:
+    amc_name: "Nippon India Mutual Fund"
+    amc_code: "NIPPON_INDIA"
+    file_type: "excel"
+    signature_keywords: ["Nippon India Mutual Fund", "Reliance Mutual Fund"]
+    
+    input_config:
+      sheet_pattern: ".*Valuation.*" 
+      header_row_keywords: ["ISIN Code", "Scheme"]
+      
+    column_mapping:
+      "ISIN Code": "ISIN"
+      "Scheme": "Scheme Name"
+      "NAV (Rs.)": "NAV"
+      "Units": "Quantity"
+      "Current Value (Rs.)": "Market Value"

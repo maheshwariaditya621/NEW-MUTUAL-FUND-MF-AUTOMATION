@@ -17,6 +17,8 @@ from .repositories import (
     check_file_already_extracted,
     delete_extraction_run_and_holdings,
     upsert_isin_master,
+    check_period_locked,
+    upsert_nav_entries,
 )
 
 __all__ = [
@@ -39,4 +41,6 @@ __all__ = [
     "check_file_already_extracted",
     "delete_extraction_run_and_holdings",
     "upsert_isin_master",
+    "check_period_locked",
+    "upsert_nav_entries",
 ]
