@@ -1,7 +1,10 @@
 import pandas as pd
+import re
 from typing import Dict, Any, List
 from src.extractors.base_extractor import BaseExtractor
 from src.config import logger
+
+from src.config.constants import AMC_SBI
 
 class SBIExtractorV1(BaseExtractor):
     """
@@ -10,7 +13,7 @@ class SBIExtractorV1(BaseExtractor):
     """
 
     def __init__(self):
-        super().__init__(amc_name="SBI Mutual Fund", version="v1")
+        super().__init__(amc_name=AMC_SBI, version="v1")
         # SBI might use different names (hypothetical based on common patterns)
         self.column_mapping = {
             "ISIN": "isin",
@@ -19,7 +22,12 @@ class SBIExtractorV1(BaseExtractor):
             "QUANTITY": "quantity",
             "MARKET VALUE": "market_value_inr",
             "PERCENTAGE TO NAV": "percent_to_nav",
-            "INDUSTRY": "sector"
+            "% TO NAV": "percent_to_nav",
+            "% TO AUM": "percent_to_nav",
+            "% TO NET ASSETS": "percent_to_nav",
+            "INDUSTRY": "sector",
+            # New mappings from debug
+            "EQUITY & EQUITY RELATED": "company_name" # Sometimes header is subsection
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -69,25 +77,28 @@ class SBIExtractorV1(BaseExtractor):
             # Extract Scheme Name from Cell C3 (Row 2, Col 2 0-indexed) if available
             extracted_name = sheet_name
             try:
-                # Re-read header part to get the name (df might be sliced or processed)
-                # We can't rely on 'df' here because it skipped rows. 
-                # But we can read just the top rows cheaply.
+                # 1. Try to get internal name from Row 2 or Row 3, columns C or D
                 header_df = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=5)
-                # Check C3 (Row 2, Col 2)
-                candidate = str(header_df.iloc[2, 2])
+                candidate = str(header_df.iloc[2, 2]) # C3
                 if "SCHEME NAME" in candidate.upper():
-                    # Case 1: Merged cell "SCHEME NAME : SBI Fund"
                     parts = candidate.split(":", 1)
                     if len(parts) > 1 and parts[1].strip():
                         extracted_name = parts[1].strip()
                     else:
-                        # Case 2: Split cells C3="SCHEME NAME :", D3="SBI Fund"
-                        # Check D3 (Row 2, Col 3)
                         extracted_name = str(header_df.iloc[2, 3]).strip()
-                        
-                    logger.debug(f"Found internal scheme name: {extracted_name}")
+                
+                # 2. UNIQUENESS FIX: If sheet_name has a suffix like "SRBF AHP" or "SLTAF II", 
+                # and the extracted_name is generic, append the suffix.
+                sheet_suffix_match = re.search(r'31st\s+(.+)$', sheet_name)
+                if sheet_suffix_match:
+                    suffix = sheet_suffix_match.group(1).strip()
+                    # If the suffix is not already in the name, and name is short/generic
+                    if suffix not in extracted_name and (len(extracted_name) < 25 or "BENEFIT" in extracted_name.upper()):
+                         extracted_name = f"{extracted_name} ({suffix})"
+                         
+                logger.debug(f"Found unique scheme name: {extracted_name}")
             except Exception as e:
-                logger.debug(f"Could not extract internal scheme name: {e}")
+                logger.debug(f"Could not extract unique name: {e}")
 
             scheme_info = self.parse_verbose_scheme_name(extracted_name)
             
@@ -103,12 +114,42 @@ class SBIExtractorV1(BaseExtractor):
                     "company_name": row.get("company_name"),
                     "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                     "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                    "percent_to_nav": float(row.get("percent_to_nav", 0)),
+                    "percent_to_nav": self._safe_float(row.get("percent_to_nav", 0)),
                     "sector": row.get("sector", None)
                 }
                 all_holdings.append(holding)
 
         return all_holdings
+
+    def parse_verbose_scheme_name(self, raw_name: str) -> Dict[str, Any]:
+        """
+        SBI specific parsing. Avoids over-aggressive splitting that merges 
+        different series or sub-plans.
+        """
+        # Call base to get standard plan/option detection
+        info = super().parse_verbose_scheme_name(raw_name)
+        
+        # For SBI, if we have a hyphen, we might want to keep the suffix in the name 
+        # if it's a "Series" or specific "Plan" that isn't just Regular/Direct.
+        if " - " in raw_name:
+            parts = [p.strip() for p in raw_name.split(" - ")]
+            main_parts = []
+            description_parts = []
+            
+            for p in parts:
+                p_upper = p.upper()
+                # If it's a standard Plan/Option keywords, it's description
+                if any(kw in p_upper for kw in ["DIRECT", "REGULAR", "GROWTH", "IDCW", "DIVIDEND", "PAYOUT", "REINVEST"]):
+                    description_parts.append(p)
+                else:
+                    # It's part of the unique scheme identity (e.g. Series VI, Investment Plan)
+                    main_parts.append(p)
+            
+            if main_parts:
+                info["scheme_name"] = " - ".join(main_parts)
+                info["description"] = " - ".join(description_parts)
+                
+        return info
 
     def _map_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {}
@@ -119,3 +160,9 @@ class SBIExtractorV1(BaseExtractor):
                     new_cols[col] = canonical
                     break
         return df.rename(columns=new_cols)
+
+    def _safe_float(self, val: Any) -> float:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return 0.0

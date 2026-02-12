@@ -255,11 +255,12 @@ def run_hdfc_backfill(
 
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description="HDFC Mutual Fund Backfill")
-    parser.add_argument("--start-year", type=int, help="Start year (YYYY)")
-    parser.add_argument("--start-month", type=int, help="Start month (1-12)")
-    parser.add_argument("--end-year", type=int, help="End year (YYYY)")
+    from src.config.constants import AMC_HDFC
+
+    parser = argparse.ArgumentParser(description=f"{AMC_HDFC} Backfill")
+    parser.add_argument("--months", type=int, default=1, help="Months to look back")
+    parser.add_argument("--start-date", type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD)")
     parser.add_argument("--end-month", type=int, help="End month (1-12)")
     
     args = parser.parse_args()

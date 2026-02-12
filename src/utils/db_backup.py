@@ -25,18 +25,40 @@ def backup_database():
     
     logger.info(f"Starting database backup: {backup_file}")
     
+    # Path to pg_dump
+    pg_dump_path = r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe"
+    
+    # DB Credentials
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_user = os.getenv("DB_USER", "postgres")
+    db_name = os.getenv("DB_NAME", "mf_analytics")
+    db_password = os.getenv("DB_PASSWORD")
+
+    # Set PGPASSWORD environment variable for this process
+    env = os.environ.copy()
+    if db_password:
+        env["PGPASSWORD"] = db_password
+    
     try:
-        # Example command - actual params depend on user environment
-        # cmd = ["pg_dump", "-h", "localhost", "-U", "postgres", "mutual_fund_db", "-f", backup_file]
-        # subprocess.run(cmd, check=True)
+        cmd = [
+            pg_dump_path,
+            "-h", db_host,
+            "-p", str(db_port),
+            "-U", db_user,
+            "-F", "c", # Custom format (compressed)
+            "-f", backup_file,
+            db_name
+        ]
         
-        # Placeholder logging for environments where pg_dump might not be installed
-        logger.info(f"Database backup logic ready. Destination: {backup_file}")
-        # In dummy/local mode, we just touch the file
-        with open(backup_file, "w") as f:
-            f.write(f"-- Dummy backup created at {datetime.now()}\n")
-            
+        logger.info(f"Executing: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, env=env)
+        
+        logger.success(f"Database backup completed: {backup_file}")
         return backup_file
+    except subprocess.CalledProcessError as e:
+        logger.error(f"pg_dump failed with exit code {e.returncode}")
+        return None
     except Exception as e:
         logger.error(f"Database backup failed: {e}")
         return None

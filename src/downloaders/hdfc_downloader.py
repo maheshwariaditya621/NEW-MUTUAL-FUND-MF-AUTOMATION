@@ -42,7 +42,7 @@ class HDFCDownloader(BaseDownloader):
     
     def __init__(self):
         """Initialize HDFC downloader."""
-        super().__init__("HDFC Mutual Fund")
+        super().__init__(AMC_HDFC)
         self.notifier = get_notifier()
 
     def _financial_year(self, year: int, month: int) -> int:

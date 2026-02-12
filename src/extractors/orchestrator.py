@@ -151,6 +151,6 @@ class ExtractionOrchestrator:
             writer = csv.writer(f)
             writer.writerow(["AMC", "Scheme", "Rows Extracted", "Total Value (INR)"])
             for s_name, data in schemes.items():
-                writer.writerow([amc.upper(), s_name, data["rows"], f"{data['value']:.2f}"])
+                writer.writerow([holdings[0]['amc_name'] if holdings else amc.upper(), s_name, data["rows"], f"{data['value']:.2f}"])
         
         logger.info(f"Reconciliation report generated: {report_path}")

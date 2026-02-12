@@ -1,0 +1,89 @@
+
+==================================================
+CHECK 1: SECTOR DISTRIBUTION (Sample Schemes)
+==================================================
+
+--- Flexi Cap ---
+scheme_name                          sector  total_exposure
+  Flexi Cap              Financial Services           34.74
+  Flexi Cap                     Automobiles            9.99
+  Flexi Cap Pharmaceuticals & Biotechnology            6.05
+  Flexi Cap                   It - Software            5.60
+  Flexi Cap                       Insurance            4.23
+
+--- Large and Mid Cap ---
+      scheme_name                          sector  total_exposure
+Large and Mid Cap              Financial Services           26.12
+Large and Mid Cap Pharmaceuticals & Biotechnology            9.14
+Large and Mid Cap                   It - Software            7.85
+Large and Mid Cap                     Automobiles            4.06
+Large and Mid Cap                 Auto Components            4.00
+
+--- SBI Large and Midcap Fund ---
+              scheme_name                                           sector  total_exposure
+SBI Large and Midcap Fund                               Financial Services           16.85
+SBI Large and Midcap Fund                  Pharmaceuticals & Biotechnology           12.11
+SBI Large and Midcap Fund                                  Auto Components            8.49
+SBI Large and Midcap Fund                                Consumer Durables            7.40
+SBI Large and Midcap Fund Agricultural, Commercial & Construction Vehicles            4.80
+
+--- SBI Large Cap Fund ---
+       scheme_name                          sector  total_exposure
+SBI Large Cap Fund              Financial Services           26.30
+SBI Large Cap Fund              Petroleum Products            6.96
+SBI Large Cap Fund                   It - Software            5.73
+SBI Large Cap Fund Pharmaceuticals & Biotechnology            5.51
+SBI Large Cap Fund                    Construction            5.41
+
+--- SBI Midcap Fund ---
+    scheme_name                          sector  total_exposure
+SBI Midcap Fund              Financial Services           17.82
+SBI Midcap Fund                 Auto Components            8.32
+SBI Midcap Fund             Industrial Products            7.82
+SBI Midcap Fund        Cement & Cement Products            7.39
+SBI Midcap Fund Pharmaceuticals & Biotechnology            6.50
+
+==================================================
+CHECK 2: STOCK EXPOSURE (HDFC Bank Ltd.)
+==================================================
+        amc_name  scheme_count  total_shares  total_value_cr
+HDFC Mutual Fund            40   383032702.0      37967.0271
+ SBI Mutual Fund            34   809555320.0      80253.6329
+
+==================================================
+CHECK 3: MONTH CONTINUITY (Nov vs Dec 2025)
+==================================================
+Scheme: Flexi Cap
+ year  month  total_holdings     aum_cr  actual_rows
+ 2025     11              50 81080.0899           50
+ 2025     12              51 81324.7393           51
+
+==================================================
+CHECK 4: TOP 10 HOLDINGS (Random Verification)
+==================================================
+
+--- SBI Large Cap Fund (Top 10) ---
+               company_name  quantity    val_cr  percent_of_nav
+            HDFC Bank Ltd.£  40700000 4034.1840            7.22
+            ICICI Bank Ltd.  29000000 3894.4100            6.97
+   Reliance Industries Ltd.  24500000 3847.4800            6.89
+     Larsen and Toubro Ltd.   7400000 3021.7900            5.41
+       Asian Paints Limited   8300000 2298.6850            4.11
+            Infosys Limited  13417914 2167.5298            3.88
+Kotak Mahindra Bank Limited   9200000 2025.0120            3.62
+        State Bank of India  19106000 1876.5913            3.36
+    Divis Laboratories Ltd.   2731710 1746.2456            3.13
+             Axis Bank Ltd.  13750000 1745.4250            3.12
+
+--- Large and Mid Cap (Top 10) ---
+               company_name  quantity    val_cr  percent_of_nav
+            HDFC Bank Ltd.£  14664794 1453.5744            5.02
+            ICICI Bank Ltd.   6900836  926.7133            3.20
+         Bharti Airtel Ltd.   2857420  601.6584            2.08
+             Axis Bank Ltd.   4250000  539.4950            1.86
+            Infosys Limited   3231484  522.0139            1.80
+Max Financial Services Ltd.   2602017  435.0052            1.50
+           MphasiS Limited.   1537999  429.2863            1.48
+  Fortis Healthcare Limited   4733349  418.4281            1.44
+        State Bank of India   4210091  413.5151            1.43
+Maruti Suzuki India Limited    243447  406.4835            1.40

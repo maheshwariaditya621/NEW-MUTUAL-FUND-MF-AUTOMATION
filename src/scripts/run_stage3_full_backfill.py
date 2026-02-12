@@ -19,15 +19,16 @@ def run_stage3():
     orchestrator = ExtractionOrchestrator()
     
     # Define scope
-    amcs = ["hdfc", "sbi"]
+    from src.config.constants import AMC_MAPPING
+    amcs = list(AMC_MAPPING.keys()) # ["hdfc", "sbi"] derived from keys
     years = [2024, 2025]
     months = range(1, 13) # 1 to 12
 
     total_stats = {"processed": 0, "skipped": 0, "errors": 0}
 
-    for amc in amcs:
+    for amc_key in amcs:
         logger.info(f"\n{'='*50}")
-        logger.info(f"STARTING BACKFILL FOR AMC: {amc.upper()}")
+        logger.info(f"STARTING BACKFILL FOR AMC: {AMC_MAPPING[amc_key].upper()}")
         logger.info(f"{'='*50}")
         
         for year in years:
@@ -37,11 +38,11 @@ def run_stage3():
                     continue
 
                 # Force REDO for HDFC 2025 to apply Unit Normalization fix
-                force_redo = False 
+                force_redo = (amc_key == "sbi") 
                 
-                logger.info(f"\n--- Processing {amc.upper()} {year}-{month:02d} (Redo: {force_redo}) ---")
+                logger.info(f"\n--- Processing {AMC_MAPPING[amc_key].upper()} {year}-{month:02d} (Redo: {force_redo}) ---")
                 try:
-                    result = orchestrator.process_amc_month(amc, year, month, redo=force_redo)
+                    result = orchestrator.process_amc_month(amc_key, year, month, redo=force_redo)
                     
                     if result["status"] == "success":
                         total_stats["processed"] += 1
@@ -53,7 +54,7 @@ def run_stage3():
                         total_stats["errors"] += 1
                         
                 except Exception as e:
-                    logger.error(f"CRITICAL FAILED for {amc} {year}-{month}: {e}")
+                    logger.error(f"CRITICAL FAILED for {amc_key} {year}-{month}: {e}")
                     total_stats["errors"] += 1
 
     logger.info(f"\n{'='*50}")

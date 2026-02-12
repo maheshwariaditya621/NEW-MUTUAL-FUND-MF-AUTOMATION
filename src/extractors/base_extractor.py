@@ -51,10 +51,10 @@ class BaseExtractor(abc.ABC):
                 return False
             if not isin.startswith("INE"):
                 return False
-            # Security code at index 8-9 (positions 9-10)
-            # In India, '10' is the standard for Equity Shares
-            security_code = isin[8:10]
-            return security_code == "10"
+            # STRICT FILTER: Security code '10' for Equity Shares
+            if isin[8:10] != "10":
+                return False
+            return True
 
         equity_mask = df[isin_col].apply(is_equity)
         filtered_df = df[equity_mask].copy()

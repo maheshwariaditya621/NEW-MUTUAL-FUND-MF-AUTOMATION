@@ -26,6 +26,8 @@ except ImportError:
     HEADLESS = True
 
 
+from src.config.constants import AMC_SBI
+
 class SBIDownloader(BaseDownloader):
     """
     SBI Mutual Fund - Portfolio Downloader

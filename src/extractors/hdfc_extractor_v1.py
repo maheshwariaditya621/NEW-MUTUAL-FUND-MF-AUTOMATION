@@ -3,6 +3,8 @@ from typing import Dict, Any, List
 from src.extractors.base_extractor import BaseExtractor
 from src.config import logger
 
+from src.config.constants import AMC_HDFC
+
 class HDFCExtractorV1(BaseExtractor):
     """
     HDFC Mutual Fund Extractor Implementation (Version 1).
@@ -10,7 +12,7 @@ class HDFCExtractorV1(BaseExtractor):
     """
 
     def __init__(self):
-        super().__init__(amc_name="HDFC Mutual Fund", version="v1")
+        super().__init__(amc_name=AMC_HDFC, version="v1")
         # Mapping of raw column substrings to canonical fields
         self.column_mapping = {
             "ISIN": "isin",
