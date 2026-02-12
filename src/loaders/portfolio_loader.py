@@ -80,9 +80,15 @@ class PortfolioLoader:
 
                     if isin not in PortfolioLoader._company_cache:
                         isin_meta = get_isin_details(isin)
-                        canonical_name = isin_meta['canonical_name'] if isin_meta else h['company_name']
                         
-                        # Added: Ensure ISIN exists in isin_master to satisfy FK constraint
+                        # CRITICAL FIX: Prefer extractor's company_name when ISIN master has stale "N/A"
+                        # This ensures fresh data from extractors updates stale ISIN master entries
+                        if isin_meta and isin_meta['canonical_name'] and isin_meta['canonical_name'] != 'N/A':
+                            canonical_name = isin_meta['canonical_name']
+                        else:
+                            canonical_name = h['company_name']
+                        
+                        # Upsert ISIN master with fresh data (will update if canonical_name changed)
                         upsert_isin_master(
                             isin=isin,
                             canonical_name=canonical_name,

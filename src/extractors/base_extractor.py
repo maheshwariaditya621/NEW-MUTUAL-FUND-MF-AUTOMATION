@@ -94,11 +94,9 @@ class BaseExtractor(abc.ABC):
         3) Security code (pos 8-9) must be '10'
         
         Also implements MULTI-TABLE DETECTION:
-        Stops processing if 3 consecutive rows are empty OR termination keywords found.
-        CRITICAL: Only stop after at least one ISIN has been seen to avoid skipping leading sub-headers.
+        Stops processing if termination keywords found.
         """
         equity_rows = []
-        consecutive_empty = 0
         has_started = False
         stop_keywords = ["TOTAL", "GRAND TOTAL", "SUB TOTAL", "NET ASSETS", "% TO NAV 100"]
 
@@ -116,15 +114,9 @@ class BaseExtractor(abc.ABC):
             # ISIN cleaning and empty check
             cleaned_isin = self.clean_isin(raw_isin)
             if not cleaned_isin:
-                if has_started:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 3:
-                        logger.debug("3 consecutive empty ISIN rows. Stopping extraction.")
-                        break
                 continue
             
-            has_started = True 
-            consecutive_empty = 0
+            has_started = True
 
             # Filter Equity
             if len(cleaned_isin) == 12 and cleaned_isin.startswith("INE") and cleaned_isin[8:10] == "10":
