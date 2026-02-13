@@ -7,6 +7,7 @@ from src.extractors.sbi_extractor_v1 import SBIExtractorV1
 from src.extractors.hsbc_extractor_v1 import HSBCExtractorV1
 from src.extractors.kotak_extractor_v1 import KotakExtractorV1
 from src.extractors.ppfas_extractor_v1 import PPFASExtractorV1
+from src.extractors.axis_extractor_v1 import AxisExtractorV1
 from src.extractors.generic_extractor import GenericExtractor
 
 class ExtractorFactory:
@@ -40,5 +41,8 @@ class ExtractorFactory:
             
         if amc_slug == "ppfas":
             return PPFASExtractorV1()
+            
+        if amc_slug == "axis":
+            return AxisExtractorV1()
 
         return None

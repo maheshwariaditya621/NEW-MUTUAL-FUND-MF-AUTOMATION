@@ -98,15 +98,23 @@ class BaseExtractor(abc.ABC):
         """
         equity_rows = []
         has_started = False
-        stop_keywords = ["TOTAL", "GRAND TOTAL", "SUB TOTAL", "NET ASSETS", "% TO NAV 100"]
+        stop_keywords = ["GRAND TOTAL", "NET ASSETS", "% TO NAV 100"]
 
         for _, row in df.iterrows():
             raw_isin = row[isin_col]
             
             # Check for termination keywords in the whole row
             row_str = " ".join([str(v).upper() for v in row.values if not pd.isna(v)])
+            
+            # Check for GRAND TOTAL, NET ASSETS, or % TO NAV 100
             if any(skw in row_str for skw in stop_keywords):
-                # Only stop if we've already seen some data, otherwise it might be a sub-header containing "Total"
+                if has_started:
+                    logger.debug(f"Multi-table marker found: '{row_str}'. Stopping extraction.")
+                    break
+            
+            # Check for "TOTAL" at start of row (but not "SUB TOTAL")
+            # This catches "Total" rows that mark end of data
+            if row_str.strip().startswith("TOTAL") and "SUB" not in row_str:
                 if has_started:
                     logger.debug(f"Multi-table marker found: '{row_str}'. Stopping extraction.")
                     break

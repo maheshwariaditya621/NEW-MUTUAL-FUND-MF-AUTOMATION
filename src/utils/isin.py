@@ -9,8 +9,9 @@ from typing import Optional
 
 
 # ISIN regex pattern for Indian equity securities
-# Format: INE[6 alphanumeric][security code "10"][1 check digit]
-EQUITY_ISIN_PATTERN = re.compile(r'^INE[A-Z0-9]{6}10[A-Z0-9]{1}$')
+# Format: INE[5 alphanumeric][security code "10"][2 check digits]
+# Example: INE040A01034 = INE + 040A0 + 10 + 34
+EQUITY_ISIN_PATTERN = re.compile(r'^INE[A-Z0-9]{5}10[A-Z0-9]{2}$')
 
 
 def is_valid_equity_isin(isin: str) -> bool:
@@ -20,9 +21,9 @@ def is_valid_equity_isin(isin: str) -> bool:
     Rules (from Canonical Data Contract v1.0):
     - Must be exactly 12 characters
     - Must start with "INE"
-    - Characters 4-9: alphanumeric (company code)
-    - Characters 10-11: must be "10" (equity security code)
-    - Character 12: check digit (alphanumeric)
+    - Characters 4-8: alphanumeric (company code, 5 chars)
+    - Characters 9-10: must be "10" (equity security code)
+    - Characters 11-12: check digits (2 chars, alphanumeric)
     
     Args:
         isin: ISIN code to validate

@@ -6,6 +6,7 @@ import zipfile
 from copy import copy
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import unquote
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 
@@ -45,7 +46,8 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
 
 
     for idx, file_path in enumerate(files):
-        file_name = os.path.basename(file_path)
+        # Decode filename to handle %20 and other URL-encoded characters
+        file_name = unquote(os.path.basename(file_path))
         
         # Avoid merging an already generated consolidation file if it happens to be in the same folder
         if file_name == output_filename.name:
@@ -254,7 +256,8 @@ def merge_project_excels_com(folder_path: Path, output_filename: Path) -> Option
         dummy_sheet.Name = "TEMP_INITIAL_SHEET"
 
         for idx, file_path in enumerate(files):
-            file_name = os.path.basename(file_path)
+            # Decode filename to handle %20 and other URL-encoded characters
+            file_name = unquote(os.path.basename(file_path))
             if file_name == output_filename.name:
                 continue
 
@@ -402,8 +405,11 @@ def _prepare_raw_folder(folder_path: Path, excel_app=None):
 
 def _get_clean_sheet_name(file_name: str, sheet_title: str, existing_names: List[str]) -> str:
     """Refactored sheet name cleaning logic."""
+    # Decode filename to handle %20 and other URL-encoded characters
+    decoded_file_name = unquote(file_name)
+    
     # Combine filename and sheet title context
-    base_raw_name = f"{file_name.rsplit('.', 1)[0]} {sheet_title}"
+    base_raw_name = f"{decoded_file_name.rsplit('.', 1)[0]} {sheet_title}"
     
     # Cleaning
     sheet_name = base_raw_name.replace("_", " ").replace("-", " ").strip()
