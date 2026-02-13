@@ -5,6 +5,7 @@ from src.extractors.hdfc_extractor_v1 import HDFCExtractorV1
 from src.extractors.icici_extractor_v1 import ICICIExtractorV1
 from src.extractors.sbi_extractor_v1 import SBIExtractorV1
 from src.extractors.hsbc_extractor_v1 import HSBCExtractorV1
+from src.extractors.kotak_extractor_v1 import KotakExtractorV1
 from src.extractors.generic_extractor import GenericExtractor
 
 class ExtractorFactory:
@@ -32,6 +33,9 @@ class ExtractorFactory:
 
         if amc_slug == "hsbc":
             return HSBCExtractorV1()
+
+        if amc_slug == "kotak":
+            return KotakExtractorV1()
 
         # Add other AMCs as they are implemented
         # if amc_slug == "icici":

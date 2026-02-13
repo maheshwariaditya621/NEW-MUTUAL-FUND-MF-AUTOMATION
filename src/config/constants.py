@@ -14,9 +14,11 @@ AMC_MIRAE = "Mirae Asset Mutual Fund"
 AMC_MAPPING = {
     "hdfc": AMC_HDFC,
     "sbi": AMC_SBI,
-    "kotak": AMC_KOTAK,
+    "icici_pru": AMC_ICICI,
+    "std_icici_pru": AMC_ICICI,
     "icici": AMC_ICICI,
     "hsbc": AMC_HSBC,
+    "kotak": AMC_KOTAK,
     "nippon": AMC_NIPPON,
     "axis": AMC_AXIS,
     "absl": AMC_ABSL,
