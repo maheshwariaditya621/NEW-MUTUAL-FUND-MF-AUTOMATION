@@ -9,6 +9,8 @@ from src.extractors.kotak_extractor_v1 import KotakExtractorV1
 from src.extractors.ppfas_extractor_v1 import PPFASExtractorV1
 from src.extractors.axis_extractor_v1 import AxisExtractorV1
 from src.extractors.bajaj_extractor_v1 import BajajExtractorV1
+from src.extractors.absl_extractor_v1 import ABSLExtractorV1
+from src.extractors.angelone_extractor_v1 import AngelOneExtractorV1
 from src.extractors.generic_extractor import GenericExtractor
 
 class ExtractorFactory:
@@ -48,5 +50,11 @@ class ExtractorFactory:
 
         if amc_slug == "bajaj":
             return BajajExtractorV1()
+
+        if amc_slug == "absl":
+            return ABSLExtractorV1()
+
+        if amc_slug == "angelone":
+            return AngelOneExtractorV1()
 
         return None

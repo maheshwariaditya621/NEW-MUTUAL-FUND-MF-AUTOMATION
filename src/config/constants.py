@@ -7,6 +7,7 @@ AMC_HSBC = "HSBC Mutual Fund"
 AMC_NIPPON = "Nippon India Mutual Fund"
 AMC_AXIS = "Axis Mutual Fund"
 AMC_ABSL = "Aditya Birla Sun Life Mutual Fund"
+AMC_ANGELONE = "Angel One Mutual Fund"
 AMC_UTI = "UTI Mutual Fund"
 AMC_MIRAE = "Mirae Asset Mutual Fund"
 AMC_PPFAS = "PPFAS Mutual Fund"
@@ -27,5 +28,6 @@ AMC_MAPPING = {
     "uti": AMC_UTI,
     "mirae_asset": AMC_MIRAE,
     "ppfas": AMC_PPFAS,
-    "bajaj": AMC_BAJAJ
+    "bajaj": AMC_BAJAJ,
+    "angelone": AMC_ANGELONE
 }
