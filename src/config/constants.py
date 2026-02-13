@@ -10,6 +10,7 @@ AMC_ABSL = "Aditya Birla Sun Life Mutual Fund"
 AMC_UTI = "UTI Mutual Fund"
 AMC_MIRAE = "Mirae Asset Mutual Fund"
 AMC_PPFAS = "PPFAS Mutual Fund"
+AMC_BAJAJ = "Bajaj Finserv Mutual Fund"
 
 # Mapping of short codes (slugs) to canonical names
 AMC_MAPPING = {
@@ -25,5 +26,6 @@ AMC_MAPPING = {
     "absl": AMC_ABSL,
     "uti": AMC_UTI,
     "mirae_asset": AMC_MIRAE,
-    "ppfas": AMC_PPFAS
+    "ppfas": AMC_PPFAS,
+    "bajaj": AMC_BAJAJ
 }
