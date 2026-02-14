@@ -78,7 +78,7 @@ class CommonExtractorV1(BaseExtractor):
                         "company_name": row.get("company_name"),
                         "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                         "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_to_nav": self.safe_float(row.get("percent_to_nav", 0)),
+                        "percent_to_nav": self.parse_percentage(row.get("percent_to_nav", 0)),
                         "sector": row.get("sector", None),
                     }
                 )

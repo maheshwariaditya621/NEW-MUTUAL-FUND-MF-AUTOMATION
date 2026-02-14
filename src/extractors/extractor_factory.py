@@ -11,6 +11,7 @@ from src.extractors.axis_extractor_v1 import AxisExtractorV1
 from src.extractors.bajaj_extractor_v1 import BajajExtractorV1
 from src.extractors.absl_extractor_v1 import ABSLExtractorV1
 from src.extractors.angelone_extractor_v1 import AngelOneExtractorV1
+from src.extractors.nippon_extractor_v1 import NipponExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -97,6 +98,9 @@ class ExtractorFactory:
 
         if amc_slug == "angelone":
             return AngelOneExtractorV1()
+
+        if amc_slug == "nippon":
+            return NipponExtractorV1()
 
         if amc_slug in ADDITIONAL_AMC_NAMES:
             return CommonExtractorV1(amc_slug=amc_slug, amc_name=ADDITIONAL_AMC_NAMES[amc_slug])
