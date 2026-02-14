@@ -60,25 +60,33 @@ def get_isin_master_details(isin: str) -> Optional[Dict[str, Any]]:
         }
     return None
 
-def get_canonical_sector(raw_sector_name: str) -> str:
+def get_canonical_sector(raw_sector_name: Any) -> str:
     """
     Resolves a raw AMC sector name to a canonical one.
     Fallback: returns the cleaned raw name if no mapping found.
     """
-    if not raw_sector_name:
-        return "Unknown"
+    if not raw_sector_name or pd.isna(raw_sector_name) if 'pd' in globals() else not isinstance(raw_sector_name, str):
+        if not isinstance(raw_sector_name, str):
+            # Handle NaN or None
+            if raw_sector_name is None: return "Unknown"
+            try:
+                import pandas as pd
+                if pd.isna(raw_sector_name): return "Unknown"
+            except ImportError:
+                pass
+            return "Unknown"
         
     cursor = get_cursor()
     cursor.execute(
         "SELECT canonical_sector FROM sector_master WHERE raw_sector_name = %s",
-        (raw_sector_name.upper().strip(),)
+        (str(raw_sector_name).upper().strip(),)
     )
     row = cursor.fetchone()
     if row:
         return row[0]
     
     # Optional: Logic to auto-seed or just return cleaned name
-    return raw_sector_name.title().strip()
+    return str(raw_sector_name).title().strip()
 
 def upsert_company_master(
     isin: str,

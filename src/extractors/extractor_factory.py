@@ -13,6 +13,7 @@ from src.extractors.absl_extractor_v1 import ABSLExtractorV1
 from src.extractors.angelone_extractor_v1 import AngelOneExtractorV1
 from src.extractors.nippon_extractor_v1 import NipponExtractorV1
 from src.extractors.mirae_extractor_v1 import MiraeExtractorV1
+from src.extractors.motilal_extractor_v1 import MotilalExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -105,6 +106,9 @@ class ExtractorFactory:
 
         if amc_slug == "mirae_asset":
             return MiraeExtractorV1()
+
+        if amc_slug == "motilal":
+            return MotilalExtractorV1()
 
         if amc_slug in ADDITIONAL_AMC_NAMES:
             return CommonExtractorV1(amc_slug=amc_slug, amc_name=ADDITIONAL_AMC_NAMES[amc_slug])
