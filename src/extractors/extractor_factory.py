@@ -17,6 +17,7 @@ from src.extractors.motilal_extractor_v1 import MotilalExtractorV1
 from src.extractors.quant_extractor_v1 import QuantExtractorV1
 from src.extractors.quantum_extractor_v1 import QuantumExtractorV1
 from src.extractors.edelweiss_extractor_v1 import EdelweissExtractorV1
+from src.extractors.lic_extractor_v1 import LICExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -121,6 +122,9 @@ class ExtractorFactory:
 
         if amc_slug == "edelweiss":
             return EdelweissExtractorV1()
+
+        if amc_slug == "lic":
+            return LICExtractorV1()
 
         if amc_slug in ADDITIONAL_AMC_NAMES:
             # Default to CommonExtractorV1 if no dedicated version exists
