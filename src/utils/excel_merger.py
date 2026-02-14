@@ -9,6 +9,7 @@ from typing import List, Optional
 from urllib.parse import unquote
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 from src.config import logger
 from src.alerts.telegram_notifier import get_notifier
@@ -394,13 +395,44 @@ def _prepare_raw_folder(folder_path: Path, excel_app=None):
                         logger.debug(f"  COM Conversion error: {e}")
 
                 if not conversion_success:
-                    # Pandas fallback
+                    # xlrd -> openpyxl fallback (preserve all sheets explicitly)
                     try:
-                        xls_data = pd.read_excel(xls_path, engine='xlrd', sheet_name=None)
-                        with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
-                            for sheet_name, df in xls_data.items(): df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        import xlrd
+                        src_book = xlrd.open_workbook(str(xls_path), formatting_info=False)
+                        out_wb = Workbook()
+                        if "Sheet" in out_wb.sheetnames:
+                            out_wb.remove(out_wb["Sheet"])
+
+                        for i in range(src_book.nsheets):
+                            src_ws = src_book.sheet_by_index(i)
+                            safe_name = re.sub(r'[\\/*?:\[\]]', '', (src_ws.name or f"Sheet{i+1}")).strip()[:31]
+                            if not safe_name:
+                                safe_name = f"Sheet{i+1}"
+                            if safe_name in out_wb.sheetnames:
+                                base = safe_name[:28]
+                                suffix = 1
+                                while f"{base}_{suffix}" in out_wb.sheetnames:
+                                    suffix += 1
+                                safe_name = f"{base}_{suffix}"
+
+                            out_ws = out_wb.create_sheet(title=safe_name)
+                            for r in range(src_ws.nrows):
+                                row_vals = src_ws.row_values(r)
+                                for c, val in enumerate(row_vals, start=1):
+                                    write_val = val
+                                    if isinstance(write_val, str):
+                                        write_val = ILLEGAL_CHARACTERS_RE.sub('', write_val)
+                                        if write_val.startswith("="):
+                                            write_val = "'" + write_val
+                                    out_ws.cell(row=r + 1, column=c, value=write_val)
+
+                        out_wb.save(str(xlsx_path))
                         conversion_success = True
-                    except: pass
+                    except Exception as e:
+                        logger.exception(f"  xlrd conversion fallback failed for {xls_path.name}: {e}")
+
+                if not conversion_success:
+                    logger.error(f"Failed to convert {xls_path.name} to .xlsx; source may require COM conversion.")
         except Exception as e: logger.error(f"XLS Conversion error: {e}")
 
 def _get_clean_sheet_name(file_name: str, sheet_title: str, existing_names: List[str]) -> str:

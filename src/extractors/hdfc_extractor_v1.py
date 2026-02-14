@@ -106,6 +106,7 @@ class HDFCExtractorV1(BaseExtractor):
             scheme_info = self.parse_verbose_scheme_name(clean_sheet_name)
             
             # 6. Build final records
+            sheet_holdings = []
             for _, row in equity_df.iterrows():
                 holding = {
                     "amc_name": self.amc_name,
@@ -121,10 +122,11 @@ class HDFCExtractorV1(BaseExtractor):
                     "percent_to_nav": self.safe_float(row.get("percent_to_nav", 0)),
                     "sector": row.get("sector", None)
                 }
-                all_holdings.append(holding)
+                sheet_holdings.append(holding)
 
-        # Final sanity check for the entire sheet/scheme
-        self.validate_nav_completeness(all_holdings) 
+            if sheet_holdings:
+                self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+            all_holdings.extend(sheet_holdings)
 
         logger.info(f"Successfully extracted {len(all_holdings)} equity holdings from {file_path}")
         return all_holdings

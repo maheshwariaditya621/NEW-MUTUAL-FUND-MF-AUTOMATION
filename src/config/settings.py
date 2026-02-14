@@ -26,8 +26,8 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")  # dev or prod
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "mf_analytics")
-DB_USER = os.getenv("DB_USER", "mf_admin")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "Babyaditya#007")
 
 # Telegram Configuration (optional at import time)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

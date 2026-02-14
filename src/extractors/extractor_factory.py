@@ -11,7 +11,48 @@ from src.extractors.axis_extractor_v1 import AxisExtractorV1
 from src.extractors.bajaj_extractor_v1 import BajajExtractorV1
 from src.extractors.absl_extractor_v1 import ABSLExtractorV1
 from src.extractors.angelone_extractor_v1 import AngelOneExtractorV1
-from src.extractors.generic_extractor import GenericExtractor
+from src.extractors.common_extractor_v1 import CommonExtractorV1
+
+
+ADDITIONAL_AMC_NAMES = {
+    "bandhan": "Bandhan Mutual Fund",
+    "baroda": "Baroda BNP Paribas Mutual Fund",
+    "boi": "Bank of India Mutual Fund",
+    "canara": "Canara Robeco Mutual Fund",
+    "capitalmind": "Capitalmind Mutual Fund",
+    "choice": "Choice Mutual Fund",
+    "dsp": "DSP Mutual Fund",
+    "edelweiss": "Edelweiss Mutual Fund",
+    "franklin": "Franklin Templeton Mutual Fund",
+    "groww": "Groww Mutual Fund",
+    "helios": "Helios Mutual Fund",
+    "invesco": "Invesco Mutual Fund",
+    "iti": "ITI Mutual Fund",
+    "jio_br": "Jio BlackRock Mutual Fund",
+    "jmfinancial": "JM Financial Mutual Fund",
+    "lic": "LIC Mutual Fund",
+    "mahindra": "Mahindra Manulife Mutual Fund",
+    "mirae_asset": "Mirae Asset Mutual Fund",
+    "motilal": "Motilal Oswal Mutual Fund",
+    "navi": "Navi Mutual Fund",
+    "nippon": "Nippon India Mutual Fund",
+    "nj": "NJ Mutual Fund",
+    "old_bridge": "Old Bridge Mutual Fund",
+    "pgim_india": "PGIM India Mutual Fund",
+    "quant": "Quant Mutual Fund",
+    "quantum": "Quantum Mutual Fund",
+    "samco": "Samco Mutual Fund",
+    "sundaram": "Sundaram Mutual Fund",
+    "tata": "Tata Mutual Fund",
+    "taurus": "Taurus Mutual Fund",
+    "threesixtyone": "360 ONE Mutual Fund",
+    "trust": "Trust Mutual Fund",
+    "unifi": "Unifi Mutual Fund",
+    "union": "Union Mutual Fund",
+    "uti": "UTI Mutual Fund",
+    "wealth_company": "The Wealth Company Mutual Fund",
+    "whiteoak": "WhiteOak Capital Mutual Fund",
+}
 
 class ExtractorFactory:
     """
@@ -56,5 +97,8 @@ class ExtractorFactory:
 
         if amc_slug == "angelone":
             return AngelOneExtractorV1()
+
+        if amc_slug in ADDITIONAL_AMC_NAMES:
+            return CommonExtractorV1(amc_slug=amc_slug, amc_name=ADDITIONAL_AMC_NAMES[amc_slug])
 
         return None
