@@ -37,6 +37,7 @@ from src.extractors.mahindra_manulife_extractor_v1 import MahindraManulifeExtrac
 from src.extractors.navi_extractor_v1 import NaviExtractorV1
 from src.extractors.nj_extractor_v1 import NJExtractorV1
 from src.extractors.old_bridge_extractor_v1 import OldBridgeExtractorV1
+from src.extractors.pgim_india_extractor_v1 import PGIMIndiaExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -111,6 +112,9 @@ class ExtractorFactory:
 
         if amc_slug == "old_bridge":
             return OldBridgeExtractorV1()
+
+        if amc_slug == "pgim_india":
+            return PGIMIndiaExtractorV1()
 
         if amc_slug == "kotak":
             return KotakExtractorV1()
