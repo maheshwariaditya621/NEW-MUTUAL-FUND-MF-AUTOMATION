@@ -27,6 +27,7 @@ from src.extractors.capitalmind_extractor_v1 import CapitalmindExtractorV1
 from src.extractors.choice_extractor_v1 import ChoiceExtractorV1
 from src.extractors.dsp_extractor_v1 import DSPExtractorV1
 from src.extractors.franklin_extractor_v1 import FranklinExtractorV1
+from src.extractors.groww_extractor_v1 import GrowwExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -157,6 +158,7 @@ class ExtractorFactory:
             "choice": lambda: ChoiceExtractorV1(),
             "dsp": lambda: DSPExtractorV1(),
             "franklin": lambda: FranklinExtractorV1(),
+            "groww": lambda: GrowwExtractorV1(),
         }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
