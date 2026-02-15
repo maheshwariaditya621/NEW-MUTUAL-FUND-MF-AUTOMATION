@@ -40,6 +40,7 @@ from src.extractors.old_bridge_extractor_v1 import OldBridgeExtractorV1
 from src.extractors.pgim_india_extractor_v1 import PGIMIndiaExtractorV1
 from src.extractors.samco_extractor_v1 import SamcoExtractorV1
 from src.extractors.sundaram_extractor_v1 import SundaramExtractorV1
+from src.extractors.taurus_extractor_v1 import TaurusExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -192,7 +193,8 @@ class ExtractorFactory:
     "jio_br": JioBRExtractorV1,
     "jmfinancial": JMFinancialExtractorV1,
     "mahindra": MahindraManulifeExtractorV1,
-        }
+    "taurus": TaurusExtractorV1,
+}
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
         if extractor_func:
