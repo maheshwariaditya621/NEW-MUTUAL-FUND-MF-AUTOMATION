@@ -39,6 +39,7 @@ from src.extractors.nj_extractor_v1 import NJExtractorV1
 from src.extractors.old_bridge_extractor_v1 import OldBridgeExtractorV1
 from src.extractors.pgim_india_extractor_v1 import PGIMIndiaExtractorV1
 from src.extractors.samco_extractor_v1 import SamcoExtractorV1
+from src.extractors.sundaram_extractor_v1 import SundaramExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -119,6 +120,9 @@ class ExtractorFactory:
 
         if amc_slug == "samco":
             return SamcoExtractorV1()
+
+        if amc_slug == "sundaram":
+            return SundaramExtractorV1()
 
         if amc_slug == "kotak":
             return KotakExtractorV1()
