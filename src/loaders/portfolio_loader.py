@@ -142,8 +142,9 @@ class PortfolioLoader:
                 total_inserted += len(db_holdings)
 
             except Exception as e:
-                logger.error(f"Failed to load scheme {s_key}: {e}")
-                continue
+                # Log and re-raise to trigger transaction rollback
+                logger.error(f"Critical failure loading scheme {s_key}: {e}")
+                raise
 
         return {
             "rows_inserted": total_inserted,

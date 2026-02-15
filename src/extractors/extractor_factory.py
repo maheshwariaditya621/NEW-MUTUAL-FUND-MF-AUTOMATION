@@ -45,6 +45,7 @@ from src.extractors.threesixtyone_extractor_v1 import ThreeSixtyOneExtractorV1
 from src.extractors.trust_extractor_v1 import TrustExtractorV1
 from src.extractors.unifi_extractor_v1 import UnifiExtractorV1
 from src.extractors.union_extractor_v1 import UnionExtractorV1
+from src.extractors.uti_extractor_v1 import UTIExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -202,6 +203,7 @@ class ExtractorFactory:
     "trust": TrustExtractorV1,
     "unifi": UnifiExtractorV1,
     "union": UnionExtractorV1,
+    "uti": UTIExtractorV1,
 }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
