@@ -20,6 +20,7 @@ from src.extractors.edelweiss_extractor_v1 import EdelweissExtractorV1
 from src.extractors.lic_extractor_v1 import LICExtractorV1
 from src.extractors.tata_extractor_v1 import TataExtractorV1
 from src.extractors.bandhan_extractor_v1 import BandhanExtractorV1
+from src.extractors.baroda_extractor_v1 import BarodaExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -122,17 +123,33 @@ class ExtractorFactory:
         if amc_slug == "quantum":
             return QuantumExtractorV1()
 
-        if amc_slug == "edelweiss":
-            return EdelweissExtractorV1()
+        EXTRACTOR_MAP = {
+            "hdfc": lambda: HDFCExtractorV1(),
+            "sbi": lambda: SBIExtractorV1(),
+            "icici": lambda: ICICIExtractorV1(),
+            "icici_pru": lambda: ICICIExtractorV1(),
+            "hsbc": lambda: HSBCExtractorV1(),
+            "kotak": lambda: KotakExtractorV1(),
+            "ppfas": lambda: PPFASExtractorV1(),
+            "axis": lambda: AxisExtractorV1(),
+            "bajaj": lambda: BajajExtractorV1(),
+            "absl": lambda: ABSLExtractorV1(),
+            "angelone": lambda: AngelOneExtractorV1(),
+            "nippon": lambda: NipponExtractorV1(),
+            "mirae_asset": lambda: MiraeExtractorV1(),
+            "motilal": lambda: MotilalExtractorV1(),
+            "quant": lambda: QuantExtractorV1(),
+            "quantum": lambda: QuantumExtractorV1(),
+            "edelweiss": lambda: EdelweissExtractorV1(),
+            "lic": lambda: LICExtractorV1(),
+            "tata": lambda: TataExtractorV1(),
+            "bandhan": lambda: BandhanExtractorV1(),
+            "baroda": lambda: BarodaExtractorV1(),
+        }
 
-        if amc_slug == "lic":
-            return LICExtractorV1()
-
-        if amc_slug == "tata":
-            return TataExtractorV1()
-
-        if amc_slug == "bandhan":
-            return BandhanExtractorV1()
+        extractor_func = EXTRACTOR_MAP.get(amc_slug)
+        if extractor_func:
+            return extractor_func()
 
         if amc_slug in ADDITIONAL_AMC_NAMES:
             # Default to CommonExtractorV1 if no dedicated version exists
