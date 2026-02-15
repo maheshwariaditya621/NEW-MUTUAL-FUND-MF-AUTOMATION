@@ -43,14 +43,14 @@ def run_hdfc_dry_run():
         print(f"Total Holdings: {len(s_holdings)}")
         
         # 3. Sum of % to NAV
-        total_nav = sum(h.get('percent_to_nav', 0.0) for h in s_holdings)
+        total_nav = sum(h.get('percent_of_nav', 0.0) for h in s_holdings)
         print(f"Total % to NAV: {total_nav:.2f}%")
         
         # 2. Top 5 Holdings
         sorted_h = sorted(s_holdings, key=lambda x: x.get('market_value_inr', 0), reverse=True)
         print(f"Top 5 Holdings:")
         for i, h in enumerate(sorted_h[:5]):
-            print(f"  {i+1}. {h['company_name']} ({h['isin']}) - {h['percent_to_nav']}%")
+            print(f"  {i+1}. {h['company_name']} ({h['isin']}) - {h['percent_of_nav']}%")
             
         # 5. ISIN security code check (all must be 10)
         debt_found = [h['isin'] for h in s_holdings if h['isin'][8:10] != '10']

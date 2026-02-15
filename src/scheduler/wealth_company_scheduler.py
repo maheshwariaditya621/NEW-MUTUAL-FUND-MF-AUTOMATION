@@ -5,6 +5,7 @@ from datetime import datetime, time as dt_time
 from typing import Optional, Tuple, Dict
 from src.scheduler.wealth_company_backfill import run_wealth_company_backfill
 from src.config import logger
+from src.config.constants import AMC_WEALTH
 from src.alerts.telegram_notifier import get_notifier
 
 
@@ -86,7 +87,7 @@ def wait_for_scheduled_time(state: SchedulerState):
 
 def run_two_stage_backfill() -> dict:
     logger.info("=" * 70)
-    logger.info("WEALTH COMPANY TWO-STAGE BACKFILL EXECUTION")
+    logger.info(f"{AMC_WEALTH} TWO-STAGE BACKFILL EXECUTION")
     logger.info("=" * 70)
     
     stage1_result = None
@@ -129,7 +130,7 @@ def run_two_stage_backfill() -> dict:
 
 def run_scheduler():
     logger.info("=" * 70)
-    logger.info("WEALTH COMPANY MF SCHEDULER STARTED")
+    logger.info(f"{AMC_WEALTH} MF SCHEDULER STARTED")
     logger.info("=" * 70)
     for schedule_time in SCHEDULE_TIMES:
         logger.info(f"  - {schedule_time.strftime('%H:%M')}")
@@ -168,7 +169,7 @@ def run_scheduler():
                             if result["total_downloaded"] > 0 or result["total_failed"] > 0:
                                 notifier.notify_scheduler(
                                     event="Scheduled Run Complete",
-                                    message=f"Wealth Company completed at {now.strftime('%H:%M')}",
+                                    message=f"{AMC_WEALTH} completed at {now.strftime('%H:%M')}",
                                     stats={
                                         "downloaded": result["total_downloaded"],
                                         "failed": result["total_failed"]
@@ -179,7 +180,7 @@ def run_scheduler():
                             notifier = get_notifier()
                             notifier.notify_scheduler(
                                 event="Scheduled Run Failed",
-                                message=f"Wealth Company Error: {str(e)[:100]}",
+                                message=f"{AMC_WEALTH} Error: {str(e)[:100]}",
                                 stats={}
                             )
                             state.mark_executed(now, schedule_time.hour)

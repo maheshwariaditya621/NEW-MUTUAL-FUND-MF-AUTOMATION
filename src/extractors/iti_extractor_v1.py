@@ -35,7 +35,7 @@ class ITIExtractorV1(BaseExtractor):
             elif 'MARKET/FAIR VALUE' in c and 'LAKH' in c:
                 new_cols[col] = 'market_value_inr'
             elif '% TO NET' in c and 'ASSET' in c:
-                new_cols[col] = 'percent_to_nav'
+                new_cols[col] = 'percent_of_nav'
             elif 'INDUSTRY' in c or 'RATING' in c:
                 new_cols[col] = 'sector'
                 
@@ -122,7 +122,7 @@ class ITIExtractorV1(BaseExtractor):
                                 # Convert Lakhs to Rupees
                                 "market_value_inr": self.safe_float(row.get('market_value_inr', 0)) * 100000,
                                 # Scale Decimal to Percentage (0.15 -> 15.0)
-                                "percent_to_nav": self.safe_float(row.get('percent_to_nav', 0)) * 100,
+                                "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)) * 100,
                                 "sector": str(row.get('sector', '')).strip(),
                                 
                                 # Scheme Info

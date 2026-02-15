@@ -75,7 +75,7 @@ class UTIExtractorV1(BaseExtractor):
                             "RATING/INDUSTRY": "sector",
                             "QUANTITY": "quantity",
                             "MARKET-VALUE": "market_value_inr",
-                            "% TO NAV": "percent_to_nav"
+                            "% TO NAV": "percent_of_nav"
                         }
                         for i, h in enumerate(headers):
                             for kw, std in col_keywords.items():
@@ -108,7 +108,7 @@ class UTIExtractorV1(BaseExtractor):
                     if not self.is_valid_equity_isin(isin_str):
                         continue
 
-                    percent_val = self.safe_float(raw_record.get('percent_to_nav', 0.0))
+                    percent_val = self.safe_float(raw_record.get('percent_of_nav', 0.0))
                     market_val = self.normalize_currency(raw_record.get('market_value_inr'), "LAKHS")
                     
                     # Guard: Skip negative market values or percentages (usually hedges/shorts in Arbitrage funds)
@@ -127,7 +127,7 @@ class UTIExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(raw_record.get('company_name', 'N/A')),
                         "quantity": self.safe_float(raw_record.get('quantity')),
                         "market_value_inr": market_val,
-                        "percent_to_nav": percent_val,
+                        "percent_of_nav": percent_val,
                         "sector": self.clean_company_name(raw_record.get('sector', 'N/A'))
                     }
                     all_holdings.append(record)

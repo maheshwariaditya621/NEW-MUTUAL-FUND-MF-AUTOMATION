@@ -1,5 +1,5 @@
 """
-Wealth Company Auto Backfill Module.
+AMC_WEALTH Auto Backfill Module.
 
 Supports two modes:
 1. Manual range mode: User-defined date range
@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Tuple, Optional
 from src.downloaders.wealth_company_downloader import WealthCompanyDownloader
 from src.config import logger
+from src.config.constants import AMC_WEALTH
 
 # Import dry-run config
 try:
@@ -98,7 +99,7 @@ def run_backfill(
     end_month: Optional[int] = None
 ) -> dict:
     """
-    Run Wealth Company backfill.
+    Run AMC_WEALTH backfill.
     
     Two modes:
     
@@ -120,7 +121,7 @@ def run_backfill(
     start_time = time.time()
     
     logger.info("=" * 70)
-    logger.info("Wealth Company BACKFILL STARTED")
+    logger.info(f"{AMC_WEALTH} BACKFILL STARTED")
     if DRY_RUN:
         logger.info("MODE: DRY RUN (no network calls)")
     logger.info("=" * 70)

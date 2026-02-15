@@ -1,17 +1,18 @@
 # Canonical AMC Names
-AMC_HDFC = "HDFC Mutual Fund"
-AMC_SBI = "SBI Mutual Fund"
-AMC_KOTAK = "Kotak Mahindra Mutual Fund"
-AMC_ICICI = "ICICI Prudential Mutual Fund"
-AMC_HSBC = "HSBC Mutual Fund"
-AMC_NIPPON = "Nippon India Mutual Fund"
-AMC_AXIS = "Axis Mutual Fund"
-AMC_ABSL = "Aditya Birla Sun Life Mutual Fund"
-AMC_ANGELONE = "Angel One Mutual Fund"
-AMC_UTI = "UTI Mutual Fund"
-AMC_MIRAE = "Mirae Asset Mutual Fund"
-AMC_PPFAS = "PPFAS Mutual Fund"
-AMC_BAJAJ = "Bajaj Finserv Mutual Fund"
+AMC_HDFC = "HDFC MUTUAL FUND"
+AMC_SBI = "SBI MUTUAL FUND"
+AMC_KOTAK = "KOTAK MAHINDRA MUTUAL FUND"
+AMC_ICICI = "ICICI PRUDENTIAL MUTUAL FUND"
+AMC_HSBC = "HSBC MUTUAL FUND"
+AMC_NIPPON = "NIPPON INDIA MUTUAL FUND"
+AMC_AXIS = "AXIS MUTUAL FUND"
+AMC_ABSL = "ADITYA BIRLA SUN LIFE MUTUAL FUND"
+AMC_ANGELONE = "ANGEL ONE MUTUAL FUND"
+AMC_UTI = "UTI MUTUAL FUND"
+AMC_MIRAE = "MIRAE ASSET MUTUAL FUND"
+AMC_PPFAS = "PARAG PARIKH MUTUAL FUND"
+AMC_BAJAJ = "BAJAJ FINSERV MUTUAL FUND"
+AMC_WEALTH = "THE WEALTH COMPANY MUTUAL FUND"
 
 # Mapping of short codes (slugs) to canonical names
 AMC_MAPPING = {
@@ -29,5 +30,6 @@ AMC_MAPPING = {
     "mirae_asset": AMC_MIRAE,
     "ppfas": AMC_PPFAS,
     "bajaj": AMC_BAJAJ,
-    "angelone": AMC_ANGELONE
+    "angelone": AMC_ANGELONE,
+    "wealth_company": AMC_WEALTH
 }

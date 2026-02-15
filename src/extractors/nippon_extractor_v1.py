@@ -128,11 +128,11 @@ class NipponExtractorV1(CommonExtractorV1):
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
                         "isin": row.get("isin"),
-                        "company_name": row.get("company_name"),
+                        "company_name": self.clean_company_name(row.get("company_name")),
                         "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                         "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_to_nav": self.parse_percentage(row.get("percent_to_nav", 0)),
-                        "sector": row.get("sector", None),
+                        "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
+                        "sector": self.clean_company_name(row.get("sector", "N/A")),
                     }
                 )
 

@@ -153,6 +153,10 @@ class AngelOneExtractorV1(BaseExtractor):
                     # Look for "Angel One" or "AO " or starting with "Angel One"
                     v_upper = v_str.upper()
                     if ("ANGEL ONE" in v_upper or v_upper.startswith("AO ")) and "PORTFOLIO" not in v_upper:
+                        # Expand "AO " to "Angel One "
+                        if v_upper.startswith("AO "):
+                            import re
+                            v_str = re.sub(r'^AO\s+', 'Angel One ', v_str, flags=re.IGNORECASE)
                         return v_str
         
         # 2. Fallback to sheet name

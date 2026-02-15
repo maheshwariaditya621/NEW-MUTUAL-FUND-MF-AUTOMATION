@@ -160,6 +160,8 @@ class ABSLExtractorV1(BaseExtractor):
                 cell_val = df_full.iloc[0, 1]
                 if pd.notna(cell_val):
                     name = str(cell_val).strip()
+                    # Remove single quotes as requested (e.g. '95 Fund -> 95 Fund)
+                    name = name.replace("'", "")
                     # Clean up "SEBI " prefix if present in sheet name but not in Row 0
                     return name
             return sheet_name

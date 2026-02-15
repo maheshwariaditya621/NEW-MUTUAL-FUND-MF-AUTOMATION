@@ -100,7 +100,7 @@ class FranklinExtractorV1(BaseExtractor):
                         "company_name": str(row.get('company_name', row.get('instrument_name', ''))).strip(),
                         "quantity": self.safe_float(row.get('quantity', 0)),
                         "market_value_inr": self.safe_float(row.get('market_value_inr', 0)) * 100000.0, # Lakhs to INR
-                        "percent_to_nav": self.safe_float(row.get('percent_to_nav', 0)),
+                        "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)),
                         "sector": str(row.get('sector', row.get('industry', ''))).strip(),
                         **scheme_info
                     }
@@ -131,7 +131,7 @@ class FranklinExtractorV1(BaseExtractor):
             elif 'MARKET VALUE' in c:
                 new_cols[col] = 'market_value_inr'
             elif '% TO NET ASSETS' in c and 'DERIVATIVE' not in c:
-                new_cols[col] = 'percent_to_nav'
+                new_cols[col] = 'percent_of_nav'
             elif 'RATING' in c or 'INDUSTRY' in c or 'SECTOR' in c:
                 new_cols[col] = 'sector'
         

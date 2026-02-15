@@ -57,7 +57,7 @@ class QuantumExtractorV1(CommonExtractorV1):
             "QUANTITY": "quantity",
             "MARKET VALUE (IN RUPEES LACS)": "market_value_inr",
             "MARKET VALUE (IN RUPEES LAKHS)": "market_value_inr",
-            "% TO NAV": "percent_to_nav",
+            "% TO NAV": "percent_of_nav",
             "INDUSTRY": "sector"
         }
         
@@ -123,7 +123,7 @@ class QuantumExtractorV1(CommonExtractorV1):
                         "company_name": self.clean_company_name(row.get("company_name")),
                         "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                         "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_to_nav": self.parse_percentage(row.get("percent_to_nav", 0)),
+                        "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
                         "sector": row.get("sector", None),
                     }
                 )

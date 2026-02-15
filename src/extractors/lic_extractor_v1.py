@@ -54,7 +54,7 @@ class LICExtractorV1(CommonExtractorV1):
             "INDUSTRY / RATING": "sector",
             "QUANTITY": "quantity",
             "MARKET/FAIR VALUE (ROUNDED, RS. IN LACS)": "market_value_inr",
-            "ROUNDED, % TO NET ASSETS": "percent_to_nav"
+            "ROUNDED, % TO NET ASSETS": "percent_of_nav"
         }
         
         new_cols = {}
@@ -116,7 +116,7 @@ class LICExtractorV1(CommonExtractorV1):
                         "company_name": self.clean_company_name(row.get("company_name")),
                         "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                         "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), "LAKHS"),
-                        "percent_to_nav": self.parse_percentage(row.get("percent_to_nav", 0)),
+                        "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
                         "sector": row.get("sector", None),
                     }
                 )
@@ -139,7 +139,7 @@ class LICExtractorV1(CommonExtractorV1):
             logger.error(f"[{scheme_name}] FAILED: No holdings extracted.")
             return False
             
-        total_nav_pct = sum(h.get('percent_to_nav', 0.0) for h in holdings)
+        total_nav_pct = sum(h.get('percent_of_nav', 0.0) for h in holdings)
         
         # Determine threshold based on scheme type
         threshold = 90.0
@@ -166,7 +166,7 @@ class LICExtractorV1(CommonExtractorV1):
             if isin in merged:
                 merged[isin]['quantity'] += h['quantity']
                 merged[isin]['market_value_inr'] += h['market_value_inr']
-                merged[isin]['percent_to_nav'] = float(merged[isin]['percent_to_nav']) + float(h['percent_to_nav'])
+                merged[isin]['percent_of_nav'] = float(merged[isin]['percent_of_nav']) + float(h['percent_of_nav'])
             else:
                 merged[isin] = h
         return list(merged.values())

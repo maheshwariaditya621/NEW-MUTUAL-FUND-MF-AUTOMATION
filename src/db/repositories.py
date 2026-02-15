@@ -86,7 +86,7 @@ def get_canonical_sector(raw_sector_name: Any) -> str:
         return row[0]
     
     # Optional: Logic to auto-seed or just return cleaned name
-    return str(raw_sector_name).title().strip()
+    return str(raw_sector_name).upper().strip()
 
 def upsert_company_master(
     isin: str,
@@ -181,7 +181,7 @@ def upsert_scheme(
             updated_at = CURRENT_TIMESTAMP
         RETURNING scheme_id
         """,
-        (amc_id, scheme_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
+        (amc_id, scheme_name.upper(), plan_type, option_type, is_reinvest, scheme_category, scheme_code)
     )
     
     scheme_id = cursor.fetchone()[0]

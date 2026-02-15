@@ -89,7 +89,7 @@ def debug_load():
                             "company_id": cid,
                             "quantity": h['quantity'],
                             "market_value_inr": h['market_value_inr'],
-                            "percent_of_nav": h['percent_to_nav']
+                            "percent_of_nav": h['percent_of_nav']
                         })
                         
                     # 3. Snapshot

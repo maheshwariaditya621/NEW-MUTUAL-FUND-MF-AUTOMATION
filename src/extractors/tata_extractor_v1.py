@@ -52,7 +52,7 @@ class TataExtractorV1(CommonExtractorV1):
             "INDUSTRY": "sector",
             "QUANTITY": "quantity",
             "MKT VAL": "market_value_inr",
-            "% TO NAV": "percent_to_nav"
+            "% TO NAV": "percent_of_nav"
         }
         
         new_cols = {}
@@ -74,7 +74,7 @@ class TataExtractorV1(CommonExtractorV1):
         if not holdings:
             return False
             
-        total_nav_pct = sum(h.get('percent_to_nav', 0.0) for h in holdings)
+        total_nav_pct = sum(h.get('percent_of_nav', 0.0) for h in holdings)
         
         threshold = 90.0
         hybrid_keywords = ["ARBITRAGE", "BALANCED", "HYBRID", "SAVINGS", "MULTI ASSET", "INSURANCE", "CHILDREN", "CONSUMPTION"]
@@ -147,8 +147,8 @@ class TataExtractorV1(CommonExtractorV1):
                         "company_name": self.clean_company_name(row.get("company_name")),
                         "quantity": safe_qty,
                         "market_value_inr": safe_mkt_val,
-                        "percent_to_nav": self.parse_percentage(row.get("percent_to_nav", 0)),
-                        "sector": row.get("sector", None),
+                        "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
+                        "sector": self.clean_company_name(row.get("sector", "N/A")),
                     }
                 )
 

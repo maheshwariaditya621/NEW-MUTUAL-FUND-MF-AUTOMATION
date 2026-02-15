@@ -35,7 +35,7 @@ class KotakExtractorV1(BaseExtractor):
             "Quantity": "quantity",
             "Market Value (Rs.in Lacs)": "market_value",
             "Market Value(Rs. in Lakhs)": "market_value", # Possible variant
-            "% to Net Assets": "percent_to_nav"
+            "% to Net Assets": "percent_of_nav"
         }
 
     def standardize_columns(self, df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
@@ -70,8 +70,13 @@ class KotakExtractorV1(BaseExtractor):
         return sheet_name
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Delegates to multi-scheme extraction logic to handle stacked schemes (e.g. Midcap 150).
+        """
         logger.info(f"[Kotak] Starting extraction from: {file_path}")
-        
+        return self._extract_multi_scheme_sheet(file_path)
+
+    def _extract_multi_scheme_sheet(self, file_path: str) -> List[Dict[str, Any]]:
         wb = load_workbook(file_path, read_only=True, data_only=True)
         all_holdings = []
         schemes_processed = 0
@@ -79,194 +84,164 @@ class KotakExtractorV1(BaseExtractor):
         
         for sheet_name in wb.sheetnames:
             try:
-                # 1. Skip non-scheme sheets
                 if self._should_skip_sheet(sheet_name):
                     continue
-
-                # 2. Read Sheet
-                # Read raw to find header manually (handling merged cells)
-                df_raw_sheet = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+                    
+                df_raw = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
                 
-                # Keywords to identify header row
-                required_cols_keywords = ["Instrument", "ISIN", "Quantity", "Market Value"]
+                # Find all scheme start rows
+                scheme_starts = []
+                for idx, row in df_raw.iterrows():
+                    # Check first 5 cols for "Portfolio of"
+                    row_str = " ".join([str(x) for x in row.iloc[:5] if pd.notna(x)])
+                    if "Portfolio of " in row_str and " as on " in row_str:
+                         scheme_starts.append(idx)
                 
-                # Find header
-                header_row_idx = self.find_header_row(df_raw_sheet, required_cols_keywords)
-                
-                if header_row_idx is None:
-                    # Fallback or skip
-                     logger.warning(f"[Kotak] Header not found in {sheet_name}, skipping")
-                     continue
-
-                # EXTRACT HEADER ROW & FORWARD FILL (Handle merged cells)
-                # This ensures "Name of Instrument" in Col A covers Data in Col C if merged
-                header_row = df_raw_sheet.iloc[header_row_idx]
-                filled_header = header_row.ffill()
-                
-                # Set columns
-                df_raw_sheet.columns = filled_header
-                
-                # Slice data (rows after header)
-                df = df_raw_sheet.iloc[header_row_idx+1:].reset_index(drop=True)
-                
-                # 3. Extract Scheme Name (from raw header block if needed, but we used df_raw in find_header)
-                # Note: We need a fresh read for scheme name logic if it relies on Row 0 specifically
-                # But _extract_scheme_name uses df_raw.iloc[0], so we can pass df_raw_sheet BEFORE slicing?
-                # Actually, df_raw_sheet contains everything.
-                
-                # 3. Extract Scheme Name
-                raw_scheme_name = self._extract_scheme_name(df_raw_sheet, sheet_name)
-                
-                # 3. Clean Scheme Name (Strip AMC Prefix)
-                scheme_name_clean = self._clean_scheme_name(raw_scheme_name)
-                
-                # 4. Parse Scheme Info (Plan, Option, etc.)
-                try:
-                    scheme_info = self.parse_verbose_scheme_name(scheme_name_clean)
-                except Exception as e:
-                    logger.warning(f"[Kotak] Failed to parse scheme name '{scheme_name_clean}': {e}")
-                    continue
-
-                # 5. Standardize Columns
-                df_clean = self.standardize_columns(df, self.column_mapping)
-                
-                # 5. Extract Date (optional, can use file date)
-                # We typically rely on the filename date passed by orchestrator, 
-                # but if we needed it, it's in Row 0 too.
-                
-                # 6. Iterate Rows
-                sheet_holdings = []
-                # Check required columns (except ISIN which is checked next)
-                required_cols = ['security_name', 'market_value', 'percent_to_nav']
-                if not all(col in df_clean.columns for col in required_cols):
-                    logger.debug(f"[Kotak] Missing columns in {sheet_name}, skipping")
-                    continue
-                
-                if 'isin' not in df_clean.columns:
-                     logger.debug(f"[Kotak] No ISIN column in {sheet_name}, skipping")
-                     continue
-
-                # Filter Equity & Handle Multi-table
-                # Note: filter_equity_isins operates on DataFrame. 
-                # If duplicate columns exist, it might fail?
-                # BaseExtractor.filter_equity_isins uses df[isin_col].str.startswith...
-                # If df[isin_col] is a DataFrame (duplicates), .str accessor fails.
-                
-                # We need to deduplicate columns BEFORE filtering?
-                # Or handle it in loop.
-                # BUT filter_equity_isins IS called before loop.
-                
-                # Fix: Deduplicate columns by keeping the one with "best" data? 
-                # But that's hard to know globally.
-                
-                # Workaround: For filter_equity_isins, we assume ISIN column is NOT merged/duplicated usually.
-                # Or IF it is, we resolve it now.
-                
-                # For Kotak, ISIN column is usually not merged like Security Name.
-                # Let's hope ISIN is unique. If not, we might crash.
-                # If crash, we catch it.
-                
-                try:
-                    df_equity = self.filter_equity_isins(df_clean, 'isin')
-                except Exception as e:
-                    # If ISIN column is duplicated, try to resolve it
-                    if isinstance(df_clean['isin'], pd.DataFrame):
-                        # Combine
-                        # We use the same logic: first non-empty? 
-                        # Actually for ISIN, usually valid ISIN starts with 'IN'.
-                        # This is getting complex.
-                        # For now, let's assume ISIN is fine (Col D usually).
-                        logger.warning(f"[Kotak] Error filtering equity ISINs (dup cols?): {e}")
+                if not scheme_starts:
+                    # Fallback: Maybe just 1 scheme without "Portfolio of"? 
+                    # Try finding header directly.
+                    scheme_starts = [0]
+                    
+                # Process each block
+                for i, start_row in enumerate(scheme_starts):
+                    end_row = scheme_starts[i+1] if i + 1 < len(scheme_starts) else len(df_raw)
+                    
+                    # Slice block
+                    df_block = df_raw.iloc[start_row:end_row].copy().reset_index(drop=True)
+                    
+                    if df_block.empty: continue
+                    
+                    # A. Extract Name (Row 0 of block)
+                    raw_name_cell = " ".join([str(x) for x in df_block.iloc[0].values if pd.notna(x)])
+                    match = re.search(r"Portfolio of\s+(.+?)\s+as on", raw_name_cell, re.IGNORECASE)
+                    if match:
+                        raw_scheme_name = match.group(1).strip()
+                    else:
+                        # Fallback if we guessed start_row=0
+                        raw_scheme_name = sheet_name
+                    
+                    scheme_name_clean = self._clean_scheme_name(raw_scheme_name)
+                    
+                    try:
+                        scheme_info = self.parse_verbose_scheme_name(scheme_name_clean)
+                    except:
                         continue
-                    raise e
-                
-                if df_equity.empty:
-                    schemes_processed += 1
-                    continue
-                    
-                for _, row in df_equity.iterrows():
-                    # Stop at footer
-                    # handle possible duplicate security_name
-                    sec_name_val = self._resolve_merged_column(row, 'security_name')
-                    sec_name = str(sec_name_val if sec_name_val else '').lower()
-                    
-                    if 'total' in sec_name or 'grand total' in sec_name:
-                        break
                         
-                    # ISIN is already filtered
-                    isin = self._resolve_merged_column(row, 'isin')
+                    # B. Find Header in Block
+                    header_keywords = ["Instrument", "ISIN", "Quantity", "Market Value"]
+                    header_idx = self.find_header_row(df_block, header_keywords)
                     
-                    # Transform Data
-                    # Market Value: Lakhs -> INR
+                    if header_idx == -1:
+                        continue
+                        
+                    # C. Extract Data
+                    # Handle merged cells via ffill on header? 
+                    # df_block is from read_excel(header=None), so no merged cell awareness from pandas directly 
+                    # unless we re-read? No, read_excel handles merge by placing value in top-left.
+                    # We need ffill on the header row itself.
+                    
+                    header_row_vals = df_block.iloc[header_idx].ffill()
+                    df_block.columns = header_row_vals
+                    
+                    df_data = df_block.iloc[header_idx+1:].reset_index(drop=True)
+                    
+                    # Standardize
+                    df_clean = self.standardize_columns(df_data, self.column_mapping)
+                    
+                    if 'isin' not in df_clean.columns: continue
+
+                    # Filter Equity
                     try:
-                        mv_val = self._resolve_merged_column(row, 'market_value')
-                        mv_lakhs = self.safe_float(mv_val if mv_val is not None else 0)
-                        mv_inr = mv_lakhs * 100000
-                    except (ValueError, TypeError):
-                        mv_inr = 0.0
-
-                    # NAV: Percentage -> Float
-                    try:
-                        nav_val = self._resolve_merged_column(row, 'percent_to_nav')
-                        nav_pct = self.safe_float(nav_val if nav_val is not None else 0)
-                    except (ValueError, TypeError):
-                        nav_pct = 0.0
-
-                    holding = {
-                        "amc_name": self.amc_name,
-                        "scheme_name": scheme_info['scheme_name'],
-                        "plan_type": scheme_info['plan_type'],
-                        "option_type": scheme_info['option_type'],
-                        "is_reinvest": scheme_info['is_reinvest'],
-                        "isin": isin,
-                        "company_name": self.clean_company_name(sec_name_val),
-                        "quantity": self.safe_float(self._resolve_merged_column(row, 'quantity')),
-                        "market_value_inr": mv_inr,
-                        "percent_to_nav": nav_pct,
-                        "sector": str(self._resolve_merged_column(row, 'sector') or '').strip() or None,
-                        "timestamp": datetime.now()
-                    }
-                    sheet_holdings.append(holding)
-
-                # 7. Validate & Add
-                # Log warning for NAV check but accept (Hybrid support)
-                self.validate_nav_completeness(sheet_holdings, scheme_info['scheme_name'])
-                
-                if sheet_holdings:
-                    all_holdings.extend(sheet_holdings)
-                    schemes_with_equity += 1
-                    logger.info(f"[Kotak] ✓ {scheme_info['scheme_name']}: {len(sheet_holdings)} holdings")
-                
-                schemes_processed += 1
-
+                        df_equity = self.filter_equity_isins(df_clean, 'isin')
+                    except:
+                        continue
+                        
+                    if df_equity.empty: 
+                        schemes_processed += 1
+                        continue
+                        
+                    block_holdings = []
+                    for _, row in df_equity.iterrows():
+                        sec_name = str(self._resolve_merged_column(row, 'security_name') or '').lower()
+                        
+                        # Guard: Skip Total/Sub Total rows if they pass ISIN filter, but DO NOT BREAK.
+                        if 'total' in sec_name or 'sub total' in sec_name or 'net current' in sec_name:
+                            continue
+                            
+                        isin = self._resolve_merged_column(row, 'isin')
+                        qty = self.safe_float(self._resolve_merged_column(row, 'quantity'))
+                        
+                        try:
+                            mv_val = self._resolve_merged_column(row, 'market_value')
+                            mv_inr = self.safe_float(mv_val) * 100000
+                        except: mv_inr = 0.0
+                        
+                        try:
+                            nav_val = self._resolve_merged_column(row, 'percent_of_nav')
+                            nav_pct = self.safe_float(nav_val)
+                        except: nav_pct = 0.0
+                        
+                        if qty < 0 or mv_inr < 0: continue
+                        
+                        holding = {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info['scheme_name'],
+                            "plan_type": scheme_info['plan_type'],
+                            "option_type": scheme_info['option_type'],
+                            "is_reinvest": scheme_info['is_reinvest'],
+                            "isin": isin,
+                            "company_name": self.clean_company_name(sec_name),
+                            "quantity": int(qty),
+                            "market_value_inr": mv_inr,
+                            "percent_of_nav": nav_pct,
+                            "sector": str(self._resolve_merged_column(row, 'sector') or '').strip() or None,
+                            "timestamp": datetime.now()
+                        }
+                        block_holdings.append(holding)
+                        
+                    self.validate_nav_completeness(block_holdings, scheme_info['scheme_name'])
+                    if block_holdings:
+                        all_holdings.extend(block_holdings)
+                        schemes_with_equity += 1
+                        logger.info(f"[Kotak] ✓ {scheme_info['scheme_name']}: {len(block_holdings)} holdings (Block)")
+                        
+                    schemes_processed += 1
+                    
             except Exception as e:
                 logger.error(f"[Kotak] Error processing sheet {sheet_name}: {e}")
-                continue
-
-        logger.info(f"[Kotak] Extraction complete. Found {len(all_holdings)} holdings from {schemes_with_equity}/{schemes_processed} schemes.")
+                
+        logger.info(f"[Kotak] Extraction complete. Found {len(all_holdings)} holdings.")
         return all_holdings
+
 
     def _clean_scheme_name(self, raw_name: str) -> str:
         """
-        Clean scheme name by removing AMC prefix (following HDFC/ICICI pattern).
-        Examples:
-            "Kotak Flexicap Fund" -> "Flexicap Fund"
-            "KOTAK SMALL CAP FUND" -> "SMALL CAP FUND"
+        Clean and normalize scheme name to ensure it starts with 'KOTAK MAHINDRA '.
         """
-        prefixes_to_remove = [
-            "KOTAK MAHINDRA ",
-            "KOTAK "
-        ]
+        cleaned = raw_name.strip().upper()
         
-        cleaned = raw_name.strip()
-        cleaned_upper = cleaned.upper()
+        # Remove "KOTAK MAHINDRA MUTUAL FUND -" prefix first to avoid double prefixing
+        if "KOTAK MAHINDRA MUTUAL FUND" in cleaned:
+             cleaned = cleaned.replace("KOTAK MAHINDRA MUTUAL FUND", "").strip()
+             if cleaned.startswith("-"):
+                 cleaned = cleaned[1:].strip()
+
+        # Ensure it starts with KOTAK MAHINDRA
+        base_prefix = "KOTAK MAHINDRA "
         
-        for prefix in prefixes_to_remove:
-            if cleaned_upper.startswith(prefix):
-                cleaned = cleaned[len(prefix):].strip()
-                break
-        
-        return cleaned
+        if cleaned.startswith(base_prefix):
+            return cleaned
+            
+        elif cleaned.startswith("KOTAK MAHINDRA"): # Missing space
+             return base_prefix + cleaned[14:].strip()
+             
+        elif cleaned.startswith("KOTAK "):
+             # e.g. "KOTAK FLEXICAP FUND" -> "KOTAK MAHINDRA FLEXICAP FUND"
+             return base_prefix + cleaned[5:].strip()
+             
+        else:
+             # Prefix missing entirely, e.g. "AGGRESSIVE HYBRID FUND"
+             return base_prefix + cleaned
 
     def _should_skip_sheet(self, sheet_name: str) -> bool:
         """Skip summary/index sheets."""

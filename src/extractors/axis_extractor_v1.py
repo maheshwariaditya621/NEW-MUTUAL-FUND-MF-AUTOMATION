@@ -25,9 +25,9 @@ class AxisExtractorV1(BaseExtractor):
             "MARKET/FAIR VALUE": "market_value_inr",
             "MARKET VALUE": "market_value_inr",
             "FAIR VALUE": "market_value_inr",
-            "% TO NET ASSETS": "percent_to_nav",
-            "% TO NAV": "percent_to_nav",
-            "NAV": "percent_to_nav"
+            "% TO NET ASSETS": "percent_of_nav",
+            "% TO NAV": "percent_of_nav",
+            "NAV": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -136,11 +136,11 @@ class AxisExtractorV1(BaseExtractor):
                     "option_type": scheme_info["option_type"],
                     "is_reinvest": scheme_info["is_reinvest"],
                     "isin": row.get("isin"),
-                    "company_name": row.get("company_name"),
+                    "company_name": self.clean_company_name(row.get("company_name")),
                     "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                     "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                    "percent_of_nav": self.parse_percentage(row.get("percent_to_nav", 0)),
-                    "sector": row.get("sector", None)
+                    "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
+                    "sector": self.clean_company_name(row.get("sector", "N/A"))
                 }
                 all_holdings.append(holding)
 
@@ -197,6 +197,11 @@ class AxisExtractorV1(BaseExtractor):
         """Clean extracted scheme name."""
         # Remove "Axis Mutual Fund" prefix if present
         name = re.sub(r'^Axis\s+Mutual\s+Fund\s*[-:]?\s*', '', name, flags=re.IGNORECASE)
+        
+        # Encoding/Mojibake Fixes
+        name = name.replace("â€™", "'").replace("’", "'").replace("‘", "'")
+        name = name.replace("â€“", "-").replace("–", "-") # En-dash fixes
+        
         # Remove extra whitespace
         name = re.sub(r'\s+', ' ', name).strip()
         return name

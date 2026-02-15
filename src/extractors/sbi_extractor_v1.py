@@ -21,10 +21,10 @@ class SBIExtractorV1(BaseExtractor):
             "NAME OF THE ISSUER": "company_name",
             "QUANTITY": "quantity",
             "MARKET VALUE": "market_value_inr",
-            "PERCENTAGE TO NAV": "percent_to_nav",
-            "% TO NAV": "percent_to_nav",
-            "% TO AUM": "percent_to_nav",
-            "% TO NET ASSETS": "percent_to_nav",
+            "PERCENTAGE TO NAV": "percent_of_nav",
+            "% TO NAV": "percent_of_nav",
+            "% TO AUM": "percent_of_nav",
+            "% TO NET ASSETS": "percent_of_nav",
             "INDUSTRY": "sector",
             # New mappings from debug
             "EQUITY & EQUITY RELATED": "company_name" # Sometimes header is subsection
@@ -111,11 +111,11 @@ class SBIExtractorV1(BaseExtractor):
                     "option_type": scheme_info["option_type"],
                     "is_reinvest": scheme_info["is_reinvest"],
                     "isin": row.get("isin"),
-                    "company_name": row.get("company_name"),
+                    "company_name": self.clean_company_name(row.get("company_name")),
                     "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                     "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                    "percent_to_nav": self._safe_float(row.get("percent_to_nav", 0)),
-                    "sector": row.get("sector", None)
+                    "percent_of_nav": self._safe_float(row.get("percent_of_nav", 0)),
+                    "sector": self.clean_company_name(row.get("sector", "N/A"))
                 }
                 all_holdings.append(holding)
 
@@ -125,14 +125,33 @@ class SBIExtractorV1(BaseExtractor):
         """
         SBI specific parsing. Avoids over-aggressive splitting that merges 
         different series or sub-plans.
+        Also enforces 'SBI ' prefix as per user request.
         """
+        # 1. Cleanup & Prefix Enforcement
+        if pd.isna(raw_name): name = ""
+        else: name = str(raw_name).strip()
+        
+        # Fix encoding issues
+        name = self.fix_mojibake(name)
+        
+        # Normalize spaces
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        # Remove parenthetical codes (e.g. (SETFBSE1), (SBISENSE))
+        # We target content that looks like a code or description in parens
+        name = re.sub(r'\s*\(.*?\)', '', name).strip()
+        
+        # Enforce SBI Prefix
+        if not name.upper().startswith("SBI "):
+            name = "SBI " + name
+            
         # Call base to get standard plan/option detection
-        info = super().parse_verbose_scheme_name(raw_name)
+        info = super().parse_verbose_scheme_name(name)
         
         # For SBI, if we have a hyphen, we might want to keep the suffix in the name 
         # if it's a "Series" or specific "Plan" that isn't just Regular/Direct.
-        if " - " in raw_name:
-            parts = [p.strip() for p in raw_name.split(" - ")]
+        if " - " in name:
+            parts = [p.strip() for p in name.split(" - ")]
             main_parts = []
             description_parts = []
             

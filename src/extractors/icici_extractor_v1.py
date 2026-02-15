@@ -39,7 +39,7 @@ class ICICIExtractorV1(BaseExtractor):
             "Industry/Rating": "sector",
             "Quantity": "quantity",
             "Exposure/Market Value(Rs.Lakh)": "market_value",
-            "% to Nav": "percent_to_nav"
+            "% to Nav": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -96,9 +96,9 @@ class ICICIExtractorV1(BaseExtractor):
                 # Build holdings
                 sheet_holdings = []
                 
-                # DEBUG: Check if percent_to_nav column exists
-                if 'percent_to_nav' not in equity_df.columns:
-                    logger.error(f"[ICICI] {scheme_name}: percent_to_nav column missing after mapping!")
+                # DEBUG: Check if percent_of_nav column exists
+                if 'percent_of_nav' not in equity_df.columns:
+                    logger.error(f"[ICICI] {scheme_name}: percent_of_nav column missing after mapping!")
                     logger.error(f"[ICICI] Available columns: {equity_df.columns.tolist()}")
                     schemes_processed += 1
                     continue
@@ -109,7 +109,7 @@ class ICICIExtractorV1(BaseExtractor):
                     market_value_inr = market_value_lakhs * 100_000
                     
                     # NAV percentage: convert from decimal to percentage
-                    nav_decimal = self.safe_float(row.get("percent_to_nav", 0))
+                    nav_decimal = self.safe_float(row.get("percent_of_nav", 0))
                     nav_pct = nav_decimal * 100  # 0.061137 -> 6.1137
                     
                     holding = {
@@ -123,21 +123,38 @@ class ICICIExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(row.get("security_name")),
                         "quantity": int(self.safe_float(row.get("quantity", 0))),
                         "market_value_inr": market_value_inr,
-                        "percent_to_nav": nav_pct,
-                        "sector": row.get("sector", None)
+                        "percent_of_nav": nav_pct,
+                        "sector": self.clean_company_name(row.get("sector", "N/A"))
                     }
                     sheet_holdings.append(holding)
 
+                # Pre-validation: Aggregate duplicates by ISIN
+                # Some sheets (e.g. ELSS Tax Saver) may contain duplicate ISINs which fail strict validation.
+                unique_holdings_map = {}
+                for h in sheet_holdings:
+                    isin = h['isin']
+                    if isin in unique_holdings_map:
+                        # Aggregate
+                        existing = unique_holdings_map[isin]
+                        existing['quantity'] += h['quantity']
+                        existing['market_value_inr'] += h['market_value_inr']
+                        existing['percent_of_nav'] += h['percent_of_nav']
+                    else:
+                        unique_holdings_map[isin] = h
+                
+                # Convert back to list
+                final_sheet_holdings = list(unique_holdings_map.values())
+                
                 # Validate
-                logger.debug(f"[ICICI] {scheme_info['scheme_name']}: Built {len(sheet_holdings)} holdings before validation")
-                if len(sheet_holdings) > 0:
-                    total_nav_debug = sum(h['percent_to_nav'] for h in sheet_holdings)
+                logger.debug(f"[ICICI] {scheme_info['scheme_name']}: Built {len(sheet_holdings)} raw -> {len(final_sheet_holdings)} unique holdings")
+                if len(final_sheet_holdings) > 0:
+                    total_nav_debug = sum(h['percent_of_nav'] for h in final_sheet_holdings)
                     logger.debug(f"[ICICI] {scheme_info['scheme_name']}: Total NAV = {total_nav_debug:.2f}%")
                 
-                if self.validate_nav_completeness(sheet_holdings, scheme_info['scheme_name']):
-                    all_holdings.extend(sheet_holdings)
+                if self.validate_nav_completeness(final_sheet_holdings, scheme_info['scheme_name']):
+                    all_holdings.extend(final_sheet_holdings)
                     schemes_with_equity += 1
-                    logger.info(f"[ICICI] ✓ {scheme_info['scheme_name']}: {len(sheet_holdings)} holdings")
+                    logger.info(f"[ICICI] ✓ {scheme_info['scheme_name']}: {len(final_sheet_holdings)} holdings")
                 else:
                     logger.warning(f"[ICICI] ✗ {scheme_info['scheme_name']}: Failed validation")
                 
@@ -152,28 +169,36 @@ class ICICIExtractorV1(BaseExtractor):
 
     def _clean_scheme_name(self, raw_name: str) -> str:
         """
-        Clean scheme name by removing AMC prefix (following HDFC pattern).
-        Examples:
-            "ICICI PRUDENTIAL HOUSING OPPORTUNITIES FUND" -> "HOUSING OPPORTUNITIES FUND"
-            "Active Momentum Fund" -> "Active Momentum Fund" (unchanged)
+        Clean and normalize scheme name to ensure it starts with 'ICICI PRUDENTIAL '.
         """
-        # Remove common AMC prefixes
-        prefixes_to_remove = [
-            "ICICI PRUDENTIAL ",
-            "ICICI Prudential ",
-            "ICICI "
-        ]
+        cleaned = raw_name.strip().upper()
         
-        cleaned = raw_name.strip()
-        for prefix in prefixes_to_remove:
-            if cleaned.startswith(prefix):
-                cleaned = cleaned[len(prefix):]
-                break
+        # Remove any "ICICI PRUDENTIAL MUTUAL FUND -" prefix completely first
+        # to avoid double nesting
+        if "ICICI PRUDENTIAL MUTUAL FUND" in cleaned:
+             cleaned = cleaned.replace("ICICI PRUDENTIAL MUTUAL FUND", "").strip()
+             if cleaned.startswith("-"):
+                 cleaned = cleaned[1:].strip()
         
-        return cleaned
-    
+        # Ensure it starts with ICICI PRUDENTIAL
+        base_prefix = "ICICI PRUDENTIAL "
+        
+        if cleaned.startswith(base_prefix):
+            return cleaned
+            
+        elif cleaned.startswith("ICICI PRUDENTIAL"): # Missing space maybe
+             return base_prefix + cleaned[16:].strip()
+             
+        elif cleaned.startswith("ICICI "):
+             # e.g. "ICICI BLUECHIP FUND" -> "ICICI PRUDENTIAL BLUECHIP FUND"
+             return base_prefix + cleaned[6:].strip()
+             
+        else:
+             # completely missing, e.g. "BLUECHIP FUND" -> "ICICI PRUDENTIAL BLUECHIP FUND"
+             return base_prefix + cleaned
+
     def _extract_scheme_name(self, df_raw: pd.DataFrame, sheet_name: str) -> str:
-        """Extract and clean scheme name from row 1."""
+        """Extract scheme name from row 1."""
         scheme_name = sheet_name
         
         # Row 1 has the full scheme name
@@ -183,10 +208,6 @@ class ICICIExtractorV1(BaseExtractor):
                 if len(val) > 10 and "FUND" in val.upper():
                     scheme_name = val
                     break
-        
-        # Clean prefixes
-        scheme_name = scheme_name.replace("ICICI Prudential Mutual Fund - ", "")
-        scheme_name = scheme_name.replace("ICICI Prudential ", "")
         
         # Remove trailing codes (e.g., "MOMACT")
         scheme_name = re.sub(r'\s+[A-Z]{5,}$', '', scheme_name).strip()

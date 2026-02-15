@@ -100,7 +100,7 @@ class WhiteOakExtractorV1(BaseExtractor):
                     # Implementation plan noted 0.0139. safe_float returns the float.
                     # We need to multiply by 100 to get percentage points.
                     pct_raw = self.safe_float(row[col_pct])
-                    percent_to_nav = pct_raw * 100.0
+                    percent_of_nav = pct_raw * 100.0
 
                     # Sector
                     sector = str(row[col_rating]).strip() if col_rating else "N/A"
@@ -116,7 +116,7 @@ class WhiteOakExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(company),
                         "quantity": qty_val,
                         "market_value_inr": market_value_inr,
-                        "percent_to_nav": percent_to_nav,
+                        "percent_of_nav": percent_of_nav,
                         "sector": self.clean_company_name(sector)
                     }
                     holdings.append(record)

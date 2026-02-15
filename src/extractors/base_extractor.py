@@ -12,7 +12,7 @@ class BaseExtractor(abc.ABC):
     """
 
     def __init__(self, amc_name: str, version: str):
-        self.amc_name = amc_name
+        self.amc_name = amc_name.upper()
         self.version = version
 
     @abc.abstractmethod
@@ -67,10 +67,15 @@ class BaseExtractor(abc.ABC):
         - Trim
         - Remove multiple spaces
         - Remove trailing punctuation
+        - CAPITAL LETTERS
         """
         if pd.isna(name) or not name:
             return "N/A"
-        s = str(name).strip()
+        s = str(name).strip().upper()
+        # Remove common noise characters from the end or anywhere if appropriate
+        # User requested: remove '*', '^'. We should also catch '$', '#'.
+        # We replace them with empty string.
+        s = re.sub(r'[\*\^\$\#]+', '', s)
         s = re.sub(r'\s+', ' ', s)
         s = s.rstrip('., ')
         return s
@@ -186,36 +191,89 @@ class BaseExtractor(abc.ABC):
         except (ValueError, TypeError):
             return 0.0
 
+    def fix_mojibake(self, text: str) -> str:
+        """
+        Fixes common encoding issues (Mojibake) where UTF-8 characters
+        are misinterpreted as Windows-1252.
+        Example: "Childrenâ€™S" -> "Children's"
+        """
+        if not text:
+            return ""
+            
+        replacements = {
+            "â€™": "'",
+            "â€": "-",  # dash variations
+            "â€“": "-",
+            "â€”": "-",
+            "Â": "",    # non-breaking space artifact
+            "â€¦": "...",
+            "â€˜": "'"
+        }
+        
+        fixed_text = text
+        for bad, good in replacements.items():
+            fixed_text = fixed_text.replace(bad, good)
+            
+        return fixed_text
+
     def parse_verbose_scheme_name(self, raw_name: str) -> Dict[str, Any]:
         """
         Splits verbose scheme name into name, plan, option, and reinvestment flag.
-        Example: "HDFC Balanced Advantage Fund - Direct Plan - Growth Option"
+        Handles multi-part names like "HDFC Retirement Savings Fund - Equity Plan - Direct - Growth"
         """
-        name_clean = raw_name.replace("_", " ").strip()
-        parts = name_clean.split(" - ", 1)
+        # 0. Global Encoding Fix
+        decoded_name = self.fix_mojibake(raw_name)
+        name_clean = decoded_name.replace("_", " ").strip()
         
-        main_name = parts[0].strip()
-        description = parts[1].strip() if len(parts) > 1 else ""
-
-        upper_name = main_name.upper()
+        # Split by " - " but don't limit to 1 split
+        parts = [p.strip() for p in name_clean.split(" - ")]
         
-        # 1. Plan Detection
+        # 1. Detection state
         plan_type = "Regular"
-        if "DIRECT" in upper_name:
-            plan_type = "Direct"
-            
-        # 2. Option Detection
         option_type = "Growth"
-        if any(kw in upper_name for kw in ["IDCW", "DIVIDEND", "PAYOUT", "INCOME"]):
-            option_type = "IDCW"
-
-        # 3. Reinvestment Flag
         is_reinvest = False
-        if "REINVEST" in upper_name:
-            is_reinvest = True
+        
+        # We need to distinguish between "Plan" as in "Equity Plan" vs "Direct Plan"
+        # and "Plan" as as share class metadata.
+        
+        # Keywords that indicate share class metadata (Direct/Regular) 
+        # NOT to be confused with fund identity parts (Equity Plan, Gold Plan)
+        share_class_keywords = ["DIRECT", "REGULAR", "GROWTH", "IDCW", "DIVIDEND", "PAYOUT", "REINVEST"]
+        
+        remaining_name_parts = []
+        metadata_parts = []
+        
+        for i, part in enumerate(parts):
+            p_upper = part.upper()
+            
+            # If it's the very first part, it's ALWAYS part of the name
+            if i == 0:
+                remaining_name_parts.append(part)
+                continue
+                
+            # Check if this part looks like share class metadata
+            # Rule: If it contains one of our keywords but is NOT "Equity Plan", "Hybrid Plan", etc.
+            is_metadata = any(kw in p_upper for kw in share_class_keywords)
+            
+            # Special protection for "Equity Plan", "Debt Plan", "Hybrid Plan", "Gold Plan"
+            # which are fund IDs in HDFC/Retirement types
+            if "EQUITY PLAN" in p_upper or "DEBT PLAN" in p_upper or "HYBRID PLAN" in p_upper or "GOLD PLAN" in p_upper:
+                is_metadata = False
+                
+            if is_metadata:
+                metadata_parts.append(part)
+                # Update flags
+                if "DIRECT" in p_upper: plan_type = "Direct"
+                if any(kw in p_upper for kw in ["IDCW", "DIVIDEND", "PAYOUT", "INCOME"]): option_type = "IDCW"
+                if "REINVEST" in p_upper: is_reinvest = True
+            else:
+                remaining_name_parts.append(part)
+
+        main_name = " - ".join(remaining_name_parts)
+        description = " - ".join(metadata_parts)
 
         return {
-            "scheme_name": main_name,
+            "scheme_name": main_name.upper(),
             "description": description,
             "plan_type": plan_type,
             "option_type": option_type,
@@ -234,7 +292,7 @@ class BaseExtractor(abc.ABC):
             logger.error(f"[{scheme_name}] FAILED: No holdings extracted.")
             return False
             
-        total_nav_pct = sum(h.get('percent_to_nav', 0.0) for h in holdings)
+        total_nav_pct = sum(h.get('percent_of_nav', 0.0) for h in holdings)
         isin_count = len(holdings)
         isins = [h.get('isin') for h in holdings]
         unique_isins = set(isins)
@@ -260,7 +318,7 @@ class BaseExtractor(abc.ABC):
             return False
             
         # 4. Top Weight Guard
-        top_weight = max(h.get('percent_to_nav', 0.0) for h in holdings)
+        top_weight = max(h.get('percent_of_nav', 0.0) for h in holdings)
         if top_weight > 15.0:
             # Note: ETFs/Indices can have more (e.g. HDFC/Reliance in Nifty 50), so this is a warning/conditional
             is_etf = any(kw in scheme_name.upper() for kw in ["ETF", "INDEX", "ARBITRAGE", "CONCENTRATED"])
@@ -274,7 +332,7 @@ class BaseExtractor(abc.ABC):
         return [
             "amc_name", "scheme_name", "scheme_description", "isin", 
             "company_name", "quantity", "market_value_inr", 
-            "percent_to_nav", "sector"
+            "percent_of_nav", "sector"
         ]
 
     def extract_from_excel_config(self, file_path: str, config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -392,7 +450,7 @@ class BaseExtractor(abc.ABC):
                         "company_name": row_data.get('Company Name', 'N/A'),
                         "quantity": qty,
                         "market_value_inr": market_val_norm,
-                        "percent_to_nav": self.safe_float(row_data.get('Percent to NAV', 0)),
+                        "percent_of_nav": self.safe_float(row_data.get('Percent to NAV', 0)),
                         "sector": row_data.get('Sector', 'N/A')
                     }
                     all_data.append(record)

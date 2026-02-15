@@ -31,7 +31,7 @@ class HSBCExtractorV1(BaseExtractor):
             "Rating/Industries": "sector",
             "Quantity": "quantity",
             "Market Value": "market_value",  # Partial match suffices
-            "Percentage to Net Assets": "percent_to_nav"
+            "Percentage to Net Assets": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -101,7 +101,7 @@ class HSBCExtractorV1(BaseExtractor):
                     continue
 
                 # 7. Check for critical columns
-                if "market_value" not in equity_df.columns or "percent_to_nav" not in equity_df.columns:
+                if "market_value" not in equity_df.columns or "percent_of_nav" not in equity_df.columns:
                     logger.warning(f"[HSBC] Missing MV or NAV column in {cleaned_scheme_name}")
                     schemes_processed += 1
                     continue
@@ -110,7 +110,7 @@ class HSBCExtractorV1(BaseExtractor):
                 sheet_holdings = []
                 for _, row in equity_df.iterrows():
                     market_val = self.safe_float(row.get("market_value", 0))
-                    nav_val = self.safe_float(row.get("percent_to_nav", 0))
+                    nav_val = self.safe_float(row.get("percent_of_nav", 0))
                     
                     # Logic: 
                     # Market Value is in Lakhs -> * 100,000
@@ -127,7 +127,7 @@ class HSBCExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(row.get("security_name")),
                         "quantity": int(self.safe_float(row.get("quantity", 0))),
                         "market_value_inr": market_val * 100_000,
-                        "percent_to_nav": nav_val * 100,
+                        "percent_of_nav": nav_val * 100,
                         "sector": row.get("sector", None)
                     }
                     sheet_holdings.append(holding)

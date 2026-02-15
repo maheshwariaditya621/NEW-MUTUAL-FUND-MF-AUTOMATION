@@ -1,4 +1,5 @@
 import pandas as pd
+import re
 from typing import List, Dict, Any
 from src.extractors.base_extractor import BaseExtractor
 from src.config import logger
@@ -12,6 +13,29 @@ class TrustExtractorV1(BaseExtractor):
         super().__init__(amc_name="Trust Mutual Fund", version="V1")
         # STRICT RULE: Must find ISIN AND (Instrument OR Issuer OR Company).
         self.header_keywords = ["ISIN", "INSTRUMENT"]
+
+    def parse_verbose_scheme_name(self, raw_name: str) -> Dict[str, Any]:
+        """
+        Trust specific parsing.
+        Enforces 'TRUST ' prefix and replaces 'TRUSTMF' with 'TRUST'.
+        """
+        if pd.isna(raw_name): name = ""
+        else: name = str(raw_name).strip()
+        
+        # Fix encoding issues
+        name = self.fix_mojibake(name)
+        
+        # Replace TRUSTMF with TRUST (case insensitive)
+        name = re.sub(r'(?i)TRUSTMF', 'TRUST', name)
+        
+        # Normalize spaces
+        name = re.sub(r'\s+', ' ', name).strip()
+        
+        # Enforce TRUST Prefix
+        if not name.upper().startswith("TRUST "):
+            name = "TRUST " + name
+            
+        return super().parse_verbose_scheme_name(name)
 
     def extract_scheme_info(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -72,7 +96,7 @@ class TrustExtractorV1(BaseExtractor):
                     "ISIN": "isin",
                     "QUANTITY": "quantity",
                     "MARKET VALUE": "market_value_inr",
-                    "% TO NET ASSETS": "percent_to_nav"
+                    "% TO NET ASSETS": "percent_of_nav"
                 }
 
                 final_map = {}
@@ -121,7 +145,7 @@ class TrustExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(raw_data.get('company_name', 'N/A')),
                         "quantity": self.safe_float(raw_data.get('quantity')),
                         "market_value_inr": self.normalize_currency(raw_data.get('market_value_inr'), "LAKHS"),
-                        "percent_to_nav": self.parse_percentage(raw_data.get('percent_to_nav', 0.0)),
+                        "percent_of_nav": self.parse_percentage(raw_data.get('percent_of_nav', 0.0)),
                         "sector": self.clean_company_name(row.get('Rating/Industry', row.get('Rating', 'N/A')))
                     }
                     sheet_holdings.append(record)

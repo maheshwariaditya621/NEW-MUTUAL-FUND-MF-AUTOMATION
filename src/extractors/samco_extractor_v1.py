@@ -25,7 +25,7 @@ class SamcoExtractorV1(BaseExtractor):
             "MARKET/FAIR VALUE": "market_value_inr",
             "MARKET/ FAIR VALUE": "market_value_inr",
             "LAKHS": "market_value_inr",
-            "% TO NET": "percent_to_nav"
+            "% TO NET": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -110,7 +110,7 @@ class SamcoExtractorV1(BaseExtractor):
                             # Convert Lakhs to Rupees
                             "market_value_inr": self.normalize_currency(row.get('market_value_inr', 0), "LAKHS"),
                             # Samco values are often decimals (e.g. 0.0691 -> 6.91%)
-                            "percent_to_nav": self.parse_percentage(row.get('percent_to_nav', 0)),
+                            "percent_of_nav": self.parse_percentage(row.get('percent_of_nav', 0)),
                             "sector": str(row.get('sector', '')).strip(),
                             
                             # Scheme Info

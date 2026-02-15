@@ -13,7 +13,8 @@ class PPFASExtractorV1(BaseExtractor):
     """
     
     def __init__(self):
-        super().__init__(amc_name=AMC_PPFAS, version="v1")
+        # User requested AMC name change from 'PPFAS' to 'PARAG PARIKH'
+        super().__init__(amc_name="PARAG PARIKH MUTUAL FUND", version="v1")
         self.logger = logging.getLogger(__name__)
 
     def standardize_columns(self, df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
@@ -86,7 +87,7 @@ class PPFASExtractorV1(BaseExtractor):
                     "Industry / Rating": "sector",
                     "Quantity": "quantity",
                     "Market/Fair Value": "market_value", 
-                    "% to Net": "percent_to_nav"
+                    "% to Net": "percent_of_nav"
                 }
                 
                 # Use fuzzy match for column mapping to handle watermarked/newlines
@@ -131,7 +132,7 @@ class PPFASExtractorV1(BaseExtractor):
                         mv_inr = mv_lakhs * 100000.0 if mv_lakhs is not None else 0.0
                         
                         # NAV Percentage (Handle decimal vs scaled)
-                        nav_pct = self.parse_percentage(row.get('percent_to_nav'))
+                        nav_pct = self.parse_percentage(row.get('percent_of_nav'))
                         
                         sector = str(row.get('sector', '')).strip()
                         if not sector or sector.lower() == 'nan': sector = None
@@ -145,7 +146,7 @@ class PPFASExtractorV1(BaseExtractor):
                             existing = scheme_holdings_map[cleaned_isin]
                             existing['quantity'] += qty
                             existing['market_value_inr'] += mv_inr
-                            existing['percent_to_nav'] += nav_pct
+                            existing['percent_of_nav'] += nav_pct
                         else:
                             # New Entry
                             holding = {
@@ -157,7 +158,7 @@ class PPFASExtractorV1(BaseExtractor):
                                 "company_name": self.clean_company_name(sec_name),
                                 "quantity": qty,
                                 "market_value_inr": mv_inr,
-                                "percent_to_nav": nav_pct,
+                                "percent_of_nav": nav_pct,
                                 "sector": sector
                             }
                             scheme_holdings_map[cleaned_isin] = holding
@@ -182,6 +183,36 @@ class PPFASExtractorV1(BaseExtractor):
         return sheet_name
 
     def _clean_scheme_name(self, raw_name: str) -> str:
-        name = re.sub(r'\(.*?\)', '', raw_name)
-        name = name.replace("Parag Parikh", "").replace("PPFAS", "").replace("Report", "").strip()
-        return name
+        """
+        Clean and normalize scheme name to ensure it starts with 'PARAG PARIKH '.
+        """
+        if pd.isna(raw_name): return ""
+        
+        # 0. Global Encoding Fix (Inherited from Base)
+        cleaned = self.fix_mojibake(str(raw_name).strip())
+        
+        # Remove parenthesized content only if it's metadata (e.g. "(An open ended...)")
+        cleaned = re.sub(r'\(.*?\)', '', cleaned).strip()
+        
+        # Normalize spaces
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        cleaned_upper = cleaned.upper()
+        
+        # Prefix Logic
+        base_prefix = "PARAG PARIKH "
+        
+        # Remove existing "PPFAS" or "PARAG PAREKH" variations to start fresh
+        cleaned = re.sub(r'(?i)^PPFAS\s+MUTUAL\s+FUND\s*-\s*', '', cleaned).strip()
+        cleaned = re.sub(r'(?i)^PPFAS\s+', '', cleaned).strip()
+        
+        # Check startups
+        if cleaned.upper().startswith("PARAG PARIKH"):
+             return cleaned # It's good
+             
+        if cleaned.upper().startswith("PARAG PAREKH"):
+             # Fix spelling: Parekh -> Parikh
+             return base_prefix + cleaned[12:].strip()
+             
+        # Else prepend
+        return base_prefix + cleaned

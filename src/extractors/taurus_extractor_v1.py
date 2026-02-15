@@ -81,7 +81,7 @@ class TaurusExtractorV1(BaseExtractor):
                     "ISIN": "isin",
                     "QUANTITY": "quantity",
                     "VALUE": "market_value_inr",
-                    "AUM": "percent_to_nav",
+                    "AUM": "percent_of_nav",
                     "EQUITY": "company_name",
                     "ISSUER": "company_name"
                 }
@@ -126,7 +126,7 @@ class TaurusExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(raw_data.get('company_name', 'N/A')),
                         "quantity": self.safe_float(raw_data.get('quantity')),
                         "market_value_inr": self.normalize_currency(raw_data.get('market_value_inr'), unit_norm),
-                        "percent_to_nav": self.safe_float(raw_data.get('percent_to_nav', 0.0)),
+                        "percent_of_nav": self.safe_float(raw_data.get('percent_of_nav', 0.0)),
                         "sector": self.clean_company_name(row.get('Industry ^', 'N/A'))
                     }
                     sheet_holdings.append(record)

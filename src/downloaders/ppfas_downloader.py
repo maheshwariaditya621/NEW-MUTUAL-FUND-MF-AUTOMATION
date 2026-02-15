@@ -10,6 +10,7 @@ from typing import Dict, List
 from src.downloaders.base_downloader import BaseDownloader
 import time
 from src.config import logger
+from src.config.constants import AMC_PPFAS
 from src.alerts.telegram_notifier import get_notifier
 
 # Import downloader config
@@ -33,7 +34,7 @@ class PPFASDownloader(BaseDownloader):
     """
     
     def __init__(self):
-        super().__init__("PPFAS Mutual Fund")
+        super().__init__(AMC_PPFAS)
         self.notifier = get_notifier()
 
     def _normalize_month_name(self, month: int) -> str:
@@ -211,7 +212,7 @@ class PPFASDownloader(BaseDownloader):
             logger.info(f"Status: UNSUPPORTED PERIOD")
             logger.info(f"Duration: {duration:.2f}s")
             logger.info("=" * 60)
-            return {"amc": "PPFAS Mutual Fund", "year": year, "month": month, "status": "skipped", "reason": "before_supported_period"}
+            return {"amc": AMC_PPFAS, "year": year, "month": month, "status": "skipped", "reason": "before_supported_period"}
             
         # 2) Idempotency
         target_dir = Path(self.get_target_folder("ppfas", year, month))
@@ -230,7 +231,7 @@ class PPFASDownloader(BaseDownloader):
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "amc": "PPFAS Mutual Fund", 
+                    "amc": AMC_PPFAS, 
                     "year": year, 
                     "month": month, 
                     "status": "skipped", 
@@ -258,7 +259,7 @@ class PPFASDownloader(BaseDownloader):
                     logger.info(f"Status: SIMULATED")
                     logger.info(f"Duration: {duration:.2f}s")
                     logger.info("=" * 60)
-                    return {"amc": "PPFAS Mutual Fund", "year": year, "month": month, "status": "success", "dry_run": True}
+                    return {"amc": AMC_PPFAS, "year": year, "month": month, "status": "success", "dry_run": True}
                 
                 file_path = self._download_via_playwright(year, month_name, target_dir)
                 
@@ -287,7 +288,7 @@ class PPFASDownloader(BaseDownloader):
                 logger.info("=" * 60)
                 
                 return {
-                    "amc": "PPFAS Mutual Fund",
+                    "amc": AMC_PPFAS,
                     "year": year,
                     "month": month,
                     "status": "success",
@@ -315,7 +316,7 @@ class PPFASDownloader(BaseDownloader):
                     logger.info(f"Status: NOT PUBLISHED")
                     logger.info(f"Duration: {duration:.2f}s")
                     logger.info("=" * 60)
-                    return {"amc": "PPFAS Mutual Fund", "year": year, "month": month, "status": "not_published", "reason": last_error}
+                    return {"amc": AMC_PPFAS, "year": year, "month": month, "status": "not_published", "reason": last_error}
 
                 if attempt < MAX_RETRIES:
                     backoff = RETRY_BACKOFF[attempt]
@@ -347,7 +348,7 @@ class PPFASDownloader(BaseDownloader):
         logger.info("=" * 60)
 
         return {
-            "amc": "PPFAS Mutual Fund",
+            "amc": AMC_PPFAS,
             "year": year,
             "month": month,
             "status": "failed",

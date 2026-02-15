@@ -1,4 +1,5 @@
 import pandas as pd
+import re
 from typing import Dict, Any, List
 from src.extractors.base_extractor import BaseExtractor
 from src.config import logger
@@ -25,7 +26,7 @@ class HDFCExtractorV1(BaseExtractor):
             "FAIR VALUE": "market_value_inr",
             "MARKET/ FAIR VALUE": "market_value_inr",
             "VALUE": "market_value_inr",
-            "NAV": "percent_to_nav",
+            "NAV": "percent_of_nav",
             "INDUSTRY": "sector",
             "SECTOR": "sector"
         }
@@ -97,13 +98,27 @@ class HDFCExtractorV1(BaseExtractor):
             equity_df = self.filter_equity_isins(df, "isin")
             
             # 5. Parse Scheme Info
-            import re
-            # Clean HDFC Suffix (e.g., "Arbitrage HDFCAR" -> "Arbitrage")
-            clean_sheet_name = re.sub(r'\sHDFC[A-Z0-9]+$', '', sheet_name).strip()
-            # Also handle cases like "Index HDFCNY" -> "Index"
-            clean_sheet_name = re.sub(r'\sHD[A-Z0-9]+$', '', clean_sheet_name).strip()
+            # 5. Extract Scheme Name
+            # Prefer Row 0, Col 0 which contains the full legal name
+            # Example: 'HDFC Balanced Advantage Fund (An open ended Balanced Advantage Fund)'
+            scheme_name = self._extract_scheme_name_from_row_zero(xls, sheet_name)
             
-            scheme_info = self.parse_verbose_scheme_name(clean_sheet_name)
+            # Clean up the name
+            # Remove parenthetical descriptions like "(An open ended...)"
+            scheme_name = re.sub(r'\s*\(An open ended.*?\)', '', scheme_name, flags=re.IGNORECASE).strip()
+            # Remove other common parentheses if they look like descriptions (optional, but HDFC uses them heavily)
+            # Actually, let's stick to the "An open ended" pattern first, or generic parentheses if safe.
+            # User wants "HDFC BALANCED ADVANTAGE" not "HDFC BALANCED ADVANTAGE FUND (AN OPEN ENDED...)"
+            
+            # General cleaning of parenthetical content if it's long description
+            if "(" in scheme_name:
+                 scheme_name = re.sub(r'\s*\(.*?\)', '', scheme_name).strip()
+
+            # Ensure "HDFC" prefix
+            if not scheme_name.upper().startswith("HDFC"):
+                scheme_name = f"HDFC {scheme_name}"
+            
+            scheme_info = self.parse_verbose_scheme_name(scheme_name)
             
             # 6. Build final records
             sheet_holdings = []
@@ -116,11 +131,11 @@ class HDFCExtractorV1(BaseExtractor):
                     "option_type": scheme_info["option_type"],
                     "is_reinvest": scheme_info["is_reinvest"],
                     "isin": row.get("isin"),
-                    "company_name": row.get("company_name"),
+                    "company_name": self.clean_company_name(row.get("company_name")),
                     "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                     "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                    "percent_to_nav": self.safe_float(row.get("percent_to_nav", 0)),
-                    "sector": row.get("sector", None)
+                    "percent_of_nav": self.safe_float(row.get("percent_of_nav", 0)),
+                    "sector": self.clean_company_name(row.get("sector", "N/A"))
                 }
                 sheet_holdings.append(holding)
 
@@ -141,3 +156,25 @@ class HDFCExtractorV1(BaseExtractor):
                     new_cols[col] = canonical
                     break
         return df.rename(columns=new_cols)
+
+    def _extract_scheme_name_from_row_zero(self, xls: pd.ExcelFile, sheet_name: str) -> str:
+        """
+        Extract scheme name from row 0, column 0 or 1.
+        """
+        try:
+            df = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=1)
+            # Check Col 0 first
+            if not df.empty:
+                val = str(df.iloc[0, 0]).strip()
+                if val and val.lower() != 'nan' and len(val) > 5:
+                    return val
+                
+                # Check Col 1
+                if len(df.columns) > 1:
+                    val = str(df.iloc[0, 1]).strip()
+                    if val and val.lower() != 'nan' and len(val) > 5:
+                        return val
+            
+            return sheet_name
+        except:
+            return sheet_name

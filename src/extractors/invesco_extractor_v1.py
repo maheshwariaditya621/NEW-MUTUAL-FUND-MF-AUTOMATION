@@ -38,7 +38,7 @@ class InvescoExtractorV1(BaseExtractor):
             elif 'MARKET/FAIR VALUE' in c and 'LAKH' in c:
                 new_cols[col] = 'market_value_inr'
             elif '% TO NET ASSETS' in c:
-                new_cols[col] = 'percent_to_nav'
+                new_cols[col] = 'percent_of_nav'
             elif 'RATING' in c or 'INDUSTRY' in c:
                 new_cols[col] = 'sector'
                 
@@ -87,14 +87,28 @@ class InvescoExtractorV1(BaseExtractor):
                          continue
 
                     # Clean scheme name
-                    # Remove "Scheme Name:" prefix if present (though Invesco usually doesn't have it in the main cell)
+                    # Remove "Scheme Name:" prefix if present
                     scheme_name = re.sub(r'(?i)SCHEME NAME\s*:\s*', '', raw_scheme_name).strip()
                     # Replace newlines with space
                     scheme_name = scheme_name.replace('\n', ' ')
+                    
                     # Remove parenthesized description e.g. (An open ended...)
                     scheme_name = re.sub(r'\(.*?\)', '', scheme_name, flags=re.DOTALL).strip()
+                    
+                    # Remove " . A relatively high ..." pattern (Riskometer text often starts with dot)
+                    # Pattern: dot, space, "A relatively", ... ending with ) or end of string
+                    scheme_name = re.sub(r'\.\s+A\s+relatively\s+high.*?(?:\)|$)', '', scheme_name, flags=re.DOTALL | re.IGNORECASE).strip()
+
+                    # Remove theme/strategy descriptions often found in Invesco names
+                    # e.g. "theme following integration strategy)" or "(theme following...)"
+                    # Catch trailing "theme following..." with optional closing paren
+                    scheme_name = re.sub(r'(?i)\s+theme\s+following.*?(?:\)|$)', '', scheme_name).strip()
+                    
                     # Extra cleanup of spaces
                     scheme_name = re.sub(r'\s+', ' ', scheme_name).strip()
+                    
+                    # Remove trailing dot or closing parenthesis if any (leftover artifacts)
+                    scheme_name = scheme_name.rstrip('.)').strip()
                     
                     # Identify Plan/Option
                     # Invesco consolidated -> defaulting
@@ -141,7 +155,7 @@ class InvescoExtractorV1(BaseExtractor):
                                 "quantity": self.safe_float(row.get('quantity', 0)),
                                 # Convert Lakhs to Rupees
                                 "market_value_inr": self.safe_float(row.get('market_value_inr', 0)) * 100000,
-                                "percent_to_nav": self.safe_float(row.get('percent_to_nav', 0)),
+                                "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)),
                                 "sector": str(row.get('sector', '')).strip(),
                                 
                                 # Scheme Info

@@ -26,7 +26,7 @@ class SundaramExtractorV1(BaseExtractor):
             "MKT VALUE": "market_value_inr",
             "MARKET VALUE": "market_value_inr",
             "LACS": "market_value_inr",
-            "% OF NET ASSET": "percent_to_nav"
+            "% OF NET ASSET": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -123,7 +123,7 @@ class SundaramExtractorV1(BaseExtractor):
                             # Convert Lakhs (Lacs) to Rupees
                             "market_value_inr": self.normalize_currency(row.get('market_value_inr', 0), "INR LACS"),
                             # Sundaram values are often decimals (e.g. 0.0922 -> 9.22%)
-                            "percent_to_nav": self.parse_percentage(row.get('percent_to_nav', 0)),
+                            "percent_of_nav": self.parse_percentage(row.get('percent_of_nav', 0)),
                             "sector": str(row.get('sector', '')).strip(),
                             
                             # Scheme Info

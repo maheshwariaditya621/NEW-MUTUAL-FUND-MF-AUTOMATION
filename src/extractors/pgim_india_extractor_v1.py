@@ -25,7 +25,7 @@ class PGIMIndiaExtractorV1(BaseExtractor):
             "MARKET/FAIR VALUE": "market_value_inr",
             "MARKET/ FAIR VALUE": "market_value_inr",
             "INR LACS": "market_value_inr",
-            "% TO NET ASSETS": "percent_to_nav"
+            "% TO NET ASSETS": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -110,7 +110,7 @@ class PGIMIndiaExtractorV1(BaseExtractor):
                             # Convert INR Lacs to Rupees
                             "market_value_inr": self.normalize_currency(row.get('market_value_inr', 0), "INR LACS"),
                             # PGIM values are already percentages (e.g. 7.73)
-                            "percent_to_nav": self.safe_float(row.get('percent_to_nav', 0)),
+                            "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)),
                             "sector": str(row.get('sector', '')).strip(),
                             
                             # Scheme Info

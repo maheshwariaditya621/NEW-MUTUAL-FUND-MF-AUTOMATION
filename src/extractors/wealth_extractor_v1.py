@@ -3,6 +3,7 @@ import re
 from typing import List, Dict, Any
 from src.extractors.base_extractor import BaseExtractor
 from src.config import logger
+from src.config.constants import AMC_WEALTH
 
 class WealthExtractorV1(BaseExtractor):
     """
@@ -15,7 +16,7 @@ class WealthExtractorV1(BaseExtractor):
     """
 
     def __init__(self):
-        super().__init__(amc_name="The Wealth Company", version="V1")
+        super().__init__(amc_name=AMC_WEALTH, version="V1")
         self.header_keywords = ["ISIN", "Name of Instrument"]
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -65,7 +66,7 @@ class WealthExtractorV1(BaseExtractor):
                     "ISIN": "isin",
                     "Quantity": "quantity",
                     "Market Value (In Rs. lakh)": "market_value_inr",
-                    "% To Net Assets": "percent_to_nav",
+                    "% To Net Assets": "percent_of_nav",
                     "Rating/Industry": "sector"
                 }
 
@@ -100,7 +101,7 @@ class WealthExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(raw_data.get('company_name', 'N/A')),
                         "quantity": self.safe_float(raw_data.get('quantity')),
                         "market_value_inr": self.normalize_currency(raw_data.get('market_value_inr'), "LAKHS"),
-                        "percent_to_nav": self.safe_float(raw_data.get('percent_to_nav', 0.0)),
+                        "percent_of_nav": self.safe_float(raw_data.get('percent_of_nav', 0.0)),
                         "sector": self.clean_company_name(raw_data.get('sector', 'N/A'))
                     }
                     holdings.append(record)

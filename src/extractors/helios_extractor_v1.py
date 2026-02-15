@@ -38,7 +38,7 @@ class HeliosExtractorV1(BaseExtractor):
             elif 'MARKET VALUE' in c and 'LAKH' in c:
                 new_cols[col] = 'market_value_inr'
             elif '% TO AUM' in c:
-                new_cols[col] = 'percent_to_nav'
+                new_cols[col] = 'percent_of_nav'
             elif 'RATING' in c or 'INDUSTRY' in c:
                 new_cols[col] = 'sector'
                 
@@ -133,7 +133,7 @@ class HeliosExtractorV1(BaseExtractor):
                                 "quantity": self.safe_float(row.get('quantity', 0)),
                                 # Convert Lakhs to Rupees
                                 "market_value_inr": self.safe_float(row.get('market_value_inr', 0)) * 100000,
-                                "percent_to_nav": self.safe_float(row.get('percent_to_nav', 0)),
+                                "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)),
                                 "sector": str(row.get('sector', '')).strip(),
                                 
                                 # Scheme Info

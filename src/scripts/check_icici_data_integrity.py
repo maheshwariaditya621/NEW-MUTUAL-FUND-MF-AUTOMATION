@@ -34,7 +34,7 @@ def check_integrity():
 
     # Inspect a few random records
     print("\nSample records:")
-    print(df.sample(min(10, len(df)))[['scheme_name', 'isin', 'company_name', 'quantity', 'market_value_inr', 'percent_to_nav']])
+    print(df.sample(min(10, len(df)))[['scheme_name', 'isin', 'company_name', 'quantity', 'market_value_inr', 'percent_of_nav']])
 
 if __name__ == "__main__":
     check_integrity()

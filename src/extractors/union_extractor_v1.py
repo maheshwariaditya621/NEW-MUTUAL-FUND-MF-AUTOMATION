@@ -13,6 +13,26 @@ class UnionExtractorV1(BaseExtractor):
         super().__init__(amc_name="Union Mutual Fund", version="V1")
         self.header_keywords = ["ISIN", "Name of the Instrument"]
 
+    def parse_verbose_scheme_name(self, raw_name: str) -> Dict[str, Any]:
+        """
+        Union specific parsing.
+        Removes '(FORMERLY ...)' suffixes.
+        """
+        if pd.isna(raw_name): name = ""
+        else: name = str(raw_name).strip()
+        
+        # Fix encoding issues
+        name = self.fix_mojibake(name)
+        
+        # Remove (FORMERLY ...) suffix (case insensitive)
+        # Handles nested parentheses like (FORMERLY UNION TAX SAVER (ELSS) FUND)
+        name = re.sub(r'(?i)\(FORMERLY(?:[^()]*|\([^()]*\))*\)', '', name).strip()
+        
+        # Normalize spaces
+        name = re.sub(r'\s+', ' ', name).strip()
+        
+        return super().parse_verbose_scheme_name(name)
+
     def extract_scheme_info(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
         Extracts scheme name from Row 6.
@@ -86,7 +106,7 @@ class UnionExtractorV1(BaseExtractor):
                     "RATING / INDUSTRY": "sector",
                     "QUANTITY": "quantity",
                     "MARKET VALUE": "market_value_inr",
-                    "% TO NAV": "percent_to_nav"
+                    "% TO NAV": "percent_of_nav"
                 }
 
                 final_map = {}
@@ -135,7 +155,7 @@ class UnionExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(raw_data.get('company_name', 'N/A')),
                         "quantity": self.safe_float(raw_data.get('quantity')),
                         "market_value_inr": self.normalize_currency(raw_data.get('market_value_inr'), "LAKHS"),
-                        "percent_to_nav": self.safe_float(raw_data.get('percent_to_nav', 0.0)),
+                        "percent_of_nav": self.safe_float(raw_data.get('percent_of_nav', 0.0)),
                         "sector": self.clean_company_name(raw_data.get('sector', 'N/A'))
                     }
                     sheet_holdings.append(record)

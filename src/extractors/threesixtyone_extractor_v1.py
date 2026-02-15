@@ -22,8 +22,10 @@ class ThreeSixtyOneExtractorV1(BaseExtractor):
             row_values = [str(val).strip() for val in df.iloc[i].values if not pd.isna(val)]
             row_text = " ".join(row_values)
             if row_text and not any(kw in row_text.upper() for kw in ["MONTHLY PORTFOLIO", "STATEMENT AS ON"]):
-                # Take the first non-empty line that isn't the statement header
-                return self.parse_verbose_scheme_name(row_text)
+                # Clean up: remove text in parentheses (e.g. "(Formerly known as ...)")
+                cleaned_text = re.sub(r'\(.*?\)', '', row_text).strip()
+                cleaned_text = " ".join(cleaned_text.split())
+                return self.parse_verbose_scheme_name(cleaned_text)
         
         return self.parse_verbose_scheme_name("Unknown 360 ONE Scheme")
 
@@ -63,7 +65,7 @@ class ThreeSixtyOneExtractorV1(BaseExtractor):
                     "ISIN": "isin",
                     "QUANTITY": "quantity",
                     "VALUE": "market_value_inr",
-                    "ROUNDED % TO NET ASSETS": "percent_to_nav"
+                    "ROUNDED % TO NET ASSETS": "percent_of_nav"
                 }
 
                 final_map = {}
@@ -113,7 +115,7 @@ class ThreeSixtyOneExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(raw_data.get('company_name', 'N/A')),
                         "quantity": self.safe_float(raw_data.get('quantity')),
                         "market_value_inr": self.normalize_currency(raw_data.get('market_value_inr'), "LAKHS"),
-                        "percent_to_nav": self.parse_percentage(raw_data.get('percent_to_nav', 0.0)),
+                        "percent_of_nav": self.parse_percentage(raw_data.get('percent_of_nav', 0.0)),
                         "sector": self.clean_company_name(row.get('Industry', row.get('Industry / Rating', 'N/A')))
                     }
                     sheet_holdings.append(record)

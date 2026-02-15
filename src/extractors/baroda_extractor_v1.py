@@ -21,8 +21,8 @@ class BarodaExtractorV1(BaseExtractor):
             "INDUSTRY / RATING": "sector",
             "INDUSTRY/RATING": "sector",
             "RATINGS / INDUSTRY": "sector",
-            "% TO NET ASSETS": "percent_to_nav",
-            "% TO NAV": "percent_to_nav"
+            "% TO NET ASSETS": "percent_of_nav",
+            "% TO NAV": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -80,7 +80,7 @@ class BarodaExtractorV1(BaseExtractor):
             sheet_holdings: List[Dict[str, Any]] = []
             for _, row in equity_df.iterrows():
                 # Baroda percentage can be decimal (0.0691) or string with %
-                raw_nav = row.get("percent_to_nav", 0)
+                raw_nav = row.get("percent_of_nav", 0)
                 if isinstance(raw_nav, str):
                     raw_nav = raw_nav.replace("%", "").strip()
                 
@@ -98,7 +98,7 @@ class BarodaExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(row.get("company_name")),
                         "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                         "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_to_nav": nav_parsed,
+                        "percent_of_nav": nav_parsed,
                         "sector": row.get("sector", None),
                     }
                 )
@@ -113,7 +113,7 @@ class BarodaExtractorV1(BaseExtractor):
     def validate_nav_completeness_custom(self, holdings: List[Dict[str, Any]], scheme_name: str) -> bool:
         if not holdings: return False
         
-        total_nav_pct = sum(h.get('percent_to_nav', 0.0) for h in holdings)
+        total_nav_pct = sum(h.get('percent_of_nav', 0.0) for h in holdings)
         isin_count = len(holdings)
         
         # User Policy: Warning only for low NAV

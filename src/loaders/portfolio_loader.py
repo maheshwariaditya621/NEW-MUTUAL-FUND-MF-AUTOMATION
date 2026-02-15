@@ -73,7 +73,7 @@ class PortfolioLoader:
                             logger.info(f"Merging split holding for {isin} in {s_key[0]}")
                             existing['quantity'] += h['quantity']
                             existing['market_value_inr'] += h['market_value_inr']
-                            existing['percent_to_nav'] = float(existing['percent_to_nav']) + float(h['percent_to_nav'])
+                            existing['percent_of_nav'] = float(existing['percent_of_nav']) + float(h['percent_of_nav'])
                             continue
 
                     merged_holdings_map[isin] = h.copy() # Copy to avoid mutating original
@@ -116,7 +116,7 @@ class PortfolioLoader:
                         "company_id": PortfolioLoader._company_cache[isin],
                         "quantity": h['quantity'],
                         "market_value_inr": h['market_value_inr'],
-                        "percent_of_nav": h['percent_to_nav']
+                        "percent_of_nav": h['percent_of_nav']
                     })
 
                 # 4. Atomic Load per Scheme

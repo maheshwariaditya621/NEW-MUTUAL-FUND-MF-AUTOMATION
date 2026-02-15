@@ -17,7 +17,7 @@ class DSPExtractorV1(BaseExtractor):
             "RATING/INDUSTRY": "sector",
             "QUANTITY": "quantity",
             "MARKET VALUE (RS. IN LAKHS)": "market_value_inr",
-            "% TO NET ASSETS": "percent_to_nav"
+            "% TO NET ASSETS": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -86,11 +86,11 @@ class DSPExtractorV1(BaseExtractor):
                         "company_name": self.clean_company_name(row.get("company_name")),
                         "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
                         "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_to_nav": self.safe_float(row.get("percent_to_nav", 0)) * 100.0,
+                        "percent_of_nav": self.safe_float(row.get("percent_of_nav", 0)) * 100.0,
                         "sector": row.get("sector", "Other"),
                     })
                 
-                sheet_total_nav = sum(h.get('percent_to_nav', 0.0) for h in sheet_holdings)
+                sheet_total_nav = sum(h.get('percent_of_nav', 0.0) for h in sheet_holdings)
                 logger.info(f"[{sheet_name}] Extracted {len(sheet_holdings)} holdings. Total NAV: {sheet_total_nav:.2f}%")
                 
                 if self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):

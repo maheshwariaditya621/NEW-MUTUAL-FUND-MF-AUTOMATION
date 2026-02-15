@@ -14,6 +14,7 @@ from playwright_stealth import Stealth
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
+from src.config.constants import AMC_WEALTH
 from src.alerts.telegram_notifier import get_notifier
 
 # Import downloader config
@@ -53,14 +54,14 @@ class WealthCompanyDownloader(BaseDownloader):
     }
 
     def __init__(self):
-        super().__init__("Wealth Company Mutual Fund")
+        super().__init__(AMC_WEALTH)
         self.notifier = get_notifier()
         self.AMC_NAME = "wealth_company"
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
         marker_data = {
-            "amc": "Wealth Company",
+            "amc": AMC_WEALTH,
             "year": year,
             "month": month,
             "files_downloaded": file_count,
@@ -80,7 +81,7 @@ class WealthCompanyDownloader(BaseDownloader):
         
         logger.warning(f"{self.AMC_NAME}: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
-        self.notifier.notify_error("Wealth Company", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
+        self.notifier.notify_error(AMC_WEALTH, year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
 
     def download(self, year: int, month: int) -> Dict:
@@ -102,7 +103,7 @@ class WealthCompanyDownloader(BaseDownloader):
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
                 # Month already complete - check for missing consolidation
-                logger.info(f"Wealth Company: {year}-{month:02d} files already downloaded.")
+                logger.info(f"{AMC_WEALTH}: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
 
                 # Always try consolidation in case it was missed/errored previously
@@ -133,7 +134,7 @@ class WealthCompanyDownloader(BaseDownloader):
                 
                 if files_downloaded == 0:
                     logger.warning(f"{self.AMC_NAME}: No portfolios found for {month_abbr} {year}")
-                    self.notifier.notify_not_published("Wealth Company", year, month)
+                    self.notifier.notify_not_published(AMC_WEALTH, year, month)
                     if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
@@ -143,7 +144,7 @@ class WealthCompanyDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                self.notifier.notify_success("Wealth Company", year, month, files_downloaded=files_downloaded, duration=duration)
+                self.notifier.notify_success(AMC_WEALTH, year, month, files_downloaded=files_downloaded, duration=duration)
                 logger.success(f"✅ {self.AMC_NAME} download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
@@ -157,7 +158,7 @@ class WealthCompanyDownloader(BaseDownloader):
                 if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
 
         if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
-        self.notifier.notify_error("Wealth Company", year, month, "Download Failure", last_error[:100])
+        self.notifier.notify_error(AMC_WEALTH, year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
