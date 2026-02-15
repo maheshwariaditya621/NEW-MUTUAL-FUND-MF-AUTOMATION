@@ -23,6 +23,7 @@ from src.extractors.bandhan_extractor_v1 import BandhanExtractorV1
 from src.extractors.baroda_extractor_v1 import BarodaExtractorV1
 from src.extractors.canara_extractor_v1 import CanaraExtractorV1
 from src.extractors.boi_extractor_v1 import BOIExtractorV1
+from src.extractors.capitalmind_extractor_v1 import CapitalmindExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -149,6 +150,7 @@ class ExtractorFactory:
             "baroda": lambda: BarodaExtractorV1(),
             "canara": lambda: CanaraExtractorV1(),
             "boi": lambda: BOIExtractorV1(),
+            "capitalmind": lambda: CapitalmindExtractorV1(),
         }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
