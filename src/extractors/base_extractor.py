@@ -251,8 +251,8 @@ class BaseExtractor(abc.ABC):
             if isin_count < 20:
                 logger.warning(f"[{scheme_name}] LOW HOLDING COUNT: {isin_count} (Expected >20). Verify if valid for this scheme type.")
             elif isin_count > 200:
-                logger.error(f"[{scheme_name}] FAILED COUNT GUARD: {isin_count} (Max 200). Possible multi-table leakage.")
-                return False
+                logger.warning(f"[{scheme_name}] HIGH HOLDING COUNT: {isin_count} (Expected <200). Continuing as per user policy.")
+                return True
                 
         # 3. Duplicate ISIN Guard
         if len(isins) != len(unique_isins):

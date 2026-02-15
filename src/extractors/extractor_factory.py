@@ -25,6 +25,7 @@ from src.extractors.canara_extractor_v1 import CanaraExtractorV1
 from src.extractors.boi_extractor_v1 import BOIExtractorV1
 from src.extractors.capitalmind_extractor_v1 import CapitalmindExtractorV1
 from src.extractors.choice_extractor_v1 import ChoiceExtractorV1
+from src.extractors.dsp_extractor_v1 import DSPExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -153,6 +154,7 @@ class ExtractorFactory:
             "boi": lambda: BOIExtractorV1(),
             "capitalmind": lambda: CapitalmindExtractorV1(),
             "choice": lambda: ChoiceExtractorV1(),
+            "dsp": lambda: DSPExtractorV1(),
         }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
