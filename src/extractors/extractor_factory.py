@@ -42,6 +42,7 @@ from src.extractors.samco_extractor_v1 import SamcoExtractorV1
 from src.extractors.sundaram_extractor_v1 import SundaramExtractorV1
 from src.extractors.taurus_extractor_v1 import TaurusExtractorV1
 from src.extractors.threesixtyone_extractor_v1 import ThreeSixtyOneExtractorV1
+from src.extractors.trust_extractor_v1 import TrustExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -196,6 +197,7 @@ class ExtractorFactory:
     "mahindra": MahindraManulifeExtractorV1,
     "taurus": TaurusExtractorV1,
     "threesixtyone": ThreeSixtyOneExtractorV1,
+    "trust": TrustExtractorV1,
 }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
