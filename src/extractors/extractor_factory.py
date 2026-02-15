@@ -43,6 +43,7 @@ from src.extractors.sundaram_extractor_v1 import SundaramExtractorV1
 from src.extractors.taurus_extractor_v1 import TaurusExtractorV1
 from src.extractors.threesixtyone_extractor_v1 import ThreeSixtyOneExtractorV1
 from src.extractors.trust_extractor_v1 import TrustExtractorV1
+from src.extractors.unifi_extractor_v1 import UnifiExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -198,6 +199,7 @@ class ExtractorFactory:
     "taurus": TaurusExtractorV1,
     "threesixtyone": ThreeSixtyOneExtractorV1,
     "trust": TrustExtractorV1,
+    "unifi": UnifiExtractorV1,
 }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
