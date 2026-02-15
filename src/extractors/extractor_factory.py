@@ -33,6 +33,7 @@ from src.extractors.invesco_extractor_v1 import InvescoExtractorV1
 from src.extractors.iti_extractor_v1 import ITIExtractorV1
 from src.extractors.jio_br_extractor_v1 import JioBRExtractorV1
 from src.extractors.jm_financial_extractor_v1 import JMFinancialExtractorV1
+from src.extractors.mahindra_manulife_extractor_v1 import MahindraManulifeExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -169,6 +170,7 @@ class ExtractorFactory:
     "iti": ITIExtractorV1,
     "jio_br": JioBRExtractorV1,
     "jmfinancial": JMFinancialExtractorV1,
+    "mahindra": MahindraManulifeExtractorV1,
         }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
