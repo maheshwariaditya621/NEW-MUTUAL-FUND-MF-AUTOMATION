@@ -241,8 +241,9 @@ class BaseExtractor(abc.ABC):
         
         # 1. NAV Guard
         if not (90.0 <= total_nav_pct <= 105.0):
-            logger.error(f"[{scheme_name}] FAILED NAV GUARD: {total_nav_pct:.2f}% (Range 90-105%)")
-            return False
+            logger.warning(f"[{scheme_name}] NAV GUARD WARNING: {total_nav_pct:.2f}% (Range 90-105%). Continuing as per user policy.")
+            # Note: We return True now to avoid skipping the scheme, but log a warning.
+            return True
             
         # 2. Holdings Count Guard
         if not (20 <= isin_count <= 200):

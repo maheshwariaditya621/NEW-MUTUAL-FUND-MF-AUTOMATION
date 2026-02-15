@@ -19,6 +19,7 @@ from src.extractors.quantum_extractor_v1 import QuantumExtractorV1
 from src.extractors.edelweiss_extractor_v1 import EdelweissExtractorV1
 from src.extractors.lic_extractor_v1 import LICExtractorV1
 from src.extractors.tata_extractor_v1 import TataExtractorV1
+from src.extractors.bandhan_extractor_v1 import BandhanExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -129,6 +130,9 @@ class ExtractorFactory:
 
         if amc_slug == "tata":
             return TataExtractorV1()
+
+        if amc_slug == "bandhan":
+            return BandhanExtractorV1()
 
         if amc_slug in ADDITIONAL_AMC_NAMES:
             # Default to CommonExtractorV1 if no dedicated version exists
