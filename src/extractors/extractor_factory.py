@@ -49,6 +49,7 @@ from src.extractors.union_extractor_v1 import UnionExtractorV1
 from src.extractors.uti_extractor_v1 import UTIExtractorV1
 from src.extractors.wealth_extractor_v1 import WealthExtractorV1
 from src.extractors.whiteoak_extractor_v1 import WhiteOakExtractorV1
+from src.extractors.shriram_extractor_v1 import ShriramExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -81,6 +82,7 @@ ADDITIONAL_AMC_NAMES = {
     "quant": "QUANT MUTUAL FUND",
     "quantum": "QUANTUM MUTUAL FUND",
     "samco": "SAMCO MUTUAL FUND",
+    "shriram": "SHRIRAM MUTUAL FUND",
     "sundaram": "SUNDARAM MUTUAL FUND",
     "tata": "TATA MUTUAL FUND",
     "taurus": "TAURUS MUTUAL FUND",
@@ -213,6 +215,7 @@ class ExtractorFactory:
     "unifi": UnifiExtractorV1,
     "union": UnionExtractorV1,
     "uti": UTIExtractorV1,
+    "shriram": ShriramExtractorV1,
     "wealth_company": WealthExtractorV1,
     "whiteoak": WhiteOakExtractorV1,
 }
