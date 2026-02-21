@@ -111,6 +111,16 @@ class BaseExtractor(abc.ABC):
             if not cleaned_isin:
                 continue
             
+            # Zero-Value Guard: Skip if both quantity and market value are zero/missing
+            # We check if 'quantity' and 'market_value_inr' keys exist in row (post-mapping)
+            # or if the raw values are detectable as zero.
+            qty = self.safe_float(row.get('quantity', 0))
+            mval = self.safe_float(row.get('market_value_inr', 0))
+            
+            if qty <= 0 and mval <= 0:
+                # If quantity and mval are zero, it might be a header or sub-total or rogue FOF holding
+                continue
+
             has_started = True
 
             # Filter Equity
@@ -150,10 +160,13 @@ class BaseExtractor(abc.ABC):
         median_val = numeric_vals.median()
         max_val = numeric_vals.max()
         
-        # Exact thresholds from user (corrected for Lakhs/Rupees scale)
-        if max_val > 10_000_000: # 1 Crore
+        # Heuristic: 
+        # In absolute RUPEES, individual stock holdings for almost any fund 
+        # will have values > 1,000,000 (Rs 10 Lakhs).
+        # In LAKHS, values > 1,000,000 (Rs 10,000 Crores) are extremely rare for single stocks.
+        if max_val > 10_000_000: # 1 Crore absolute
             return "RUPEES"
-        if median_val < 10_000:
+        if median_val < 1_000_000: # Below 10,000 Crores (if Lakhs)
             return "LAKHS"
             
         return "RUPEES"
@@ -172,9 +185,17 @@ class BaseExtractor(abc.ABC):
     def normalize_currency(self, value: Any, source_unit: str = "RUPEES") -> float:
         """
         Normalizes currency values to base ₹ Rupees.
-        source_unit: 'RUPEES', 'LAKHS', 'CRORES'
+        Handles various Lakhs/Crores notations.
         """
-        return self.safe_float(value) * (100_000 if source_unit == "LAKHS" else 10_000_000 if source_unit == "CRORES" else 1)
+        val = self.safe_float(value)
+        u = str(source_unit).upper()
+        
+        if "LAKH" in u or "LAC" in u:
+            return val * 100_000.0
+        if "CRORE" in u or "CR" in u:
+            return val * 10_000_000.0
+        
+        return val
 
     def safe_float(self, value: Any) -> float:
         """Safely converts a value to float, handling commas, '@', and other artifacts."""
@@ -237,9 +258,10 @@ class BaseExtractor(abc.ABC):
         # and "Plan" as as share class metadata.
         
         # Keywords that indicate share class metadata (Direct/Regular) 
-        # NOT to be confused with fund identity parts (Equity Plan, Gold Plan)
+        # or legal fund descriptions (An Open Ended...)
         share_class_keywords = ["DIRECT", "REGULAR", "GROWTH", "IDCW", "DIVIDEND", "PAYOUT", "REINVEST"]
-        
+        legal_desc_keywords = ["AN OPEN ENDED", "A CLOSE ENDED", "A DYNAMIC", "A CONCENTRATED", "INVESTING IN", "REPLICATING/TRACKING"]
+
         remaining_name_parts = []
         metadata_parts = []
         
@@ -251,16 +273,15 @@ class BaseExtractor(abc.ABC):
                 remaining_name_parts.append(part)
                 continue
                 
-            # Check if this part looks like share class metadata
-            # Rule: If it contains one of our keywords but is NOT "Equity Plan", "Hybrid Plan", etc.
-            is_metadata = any(kw in p_upper for kw in share_class_keywords)
+            # Check if this part looks like share class metadata or legal description
+            is_class_metadata = any(kw in p_upper for kw in share_class_keywords)
+            is_legal_desc = any(kw in p_upper for kw in legal_desc_keywords)
             
             # Special protection for "Equity Plan", "Debt Plan", "Hybrid Plan", "Gold Plan"
             # which are fund IDs in HDFC/Retirement types
-            if "EQUITY PLAN" in p_upper or "DEBT PLAN" in p_upper or "HYBRID PLAN" in p_upper or "GOLD PLAN" in p_upper:
-                is_metadata = False
-                
-            if is_metadata:
+            is_protected_plan = any(kw in p_upper for kw in ["EQUITY PLAN", "DEBT PLAN", "HYBRID PLAN", "GOLD PLAN"])
+            
+            if (is_class_metadata or is_legal_desc) and not is_protected_plan:
                 metadata_parts.append(part)
                 # Update flags
                 if "DIRECT" in p_upper: plan_type = "Direct"

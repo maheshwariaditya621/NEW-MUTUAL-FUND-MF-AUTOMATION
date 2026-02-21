@@ -4,7 +4,9 @@ from src.config import logger
 from src.db import (
     upsert_scheme, upsert_company_master, create_snapshot, 
     insert_holdings, check_snapshot_exists, get_isin_details,
-    get_canonical_sector, upsert_isin_master, upsert_company
+    get_canonical_sector, upsert_isin_master, upsert_company,
+    find_entity_by_name, find_entity_by_symbol, fuzzy_search_entity,
+    create_corporate_entity, log_resolution_audit
 )
 
 class PortfolioLoader:
@@ -16,6 +18,39 @@ class PortfolioLoader:
     """
     
     _company_cache = {} # Static cache across instances
+
+    @staticmethod
+    def _resolve_security_entity(isin: str, company_name: str, period_id: int) -> int:
+        """
+        Production-grade security resolution engine.
+        Order: ISIN -> Exact Name -> Symbol -> Fuzzy -> Create.
+        """
+        # 1. Direct ISIN Match (Fast Path)
+        isin_meta = get_isin_details(isin)
+        if isin_meta and isin_meta.get('entity_id'):
+            log_resolution_audit(isin, company_name, isin_meta['entity_id'], "TIER 1 (ISIN)")
+            return isin_meta['entity_id']
+
+        # 2. Exact Name Match
+        entity_id = find_entity_by_name(company_name)
+        if entity_id:
+            log_resolution_audit(isin, company_name, entity_id, "TIER 2 (EXACT NAME)")
+            return entity_id
+
+        # 3. Symbol Match (Usually not in AMC files, but can be derived if available)
+        # symbol = derive_symbol(isin, company_name)
+        # entity_id = find_entity_by_symbol(symbol)
+        
+        # 4. Fuzzy Match Fallback (Audit Logged)
+        entity_id = fuzzy_search_entity(company_name, threshold=0.95)
+        if entity_id:
+            log_resolution_audit(isin, company_name, entity_id, "TIER 4 (FUZZY)")
+            return entity_id
+
+        # 5. Create new logical entity
+        entity_id = create_corporate_entity(company_name)
+        log_resolution_audit(isin, company_name, entity_id, "TIER 5 (NEW ENTITY)")
+        return entity_id
 
     @staticmethod
     def load_holdings(amc_id: int, period_id: int, holdings: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -79,34 +114,42 @@ class PortfolioLoader:
                     merged_holdings_map[isin] = h.copy() # Copy to avoid mutating original
 
                     if isin not in PortfolioLoader._company_cache:
+                        # NEW Security Resolution Engine
+                        entity_id = PortfolioLoader._resolve_security_entity(isin, h['company_name'], period_id)
+                        
                         isin_meta = get_isin_details(isin)
                         
-                        # CRITICAL FIX: Prefer extractor's company_name when ISIN master has stale "N/A"
-                        # This ensures fresh data from extractors updates stale ISIN master entries
                         if isin_meta and isin_meta['canonical_name'] and isin_meta['canonical_name'] != 'N/A':
                             canonical_name = isin_meta['canonical_name']
                         else:
                             canonical_name = h['company_name']
                         
-                        # Upsert ISIN master with fresh data (will update if canonical_name changed)
+                        # Upsert ISIN master with fresh data and mapping to entity
                         upsert_isin_master(
                             isin=isin,
                             canonical_name=canonical_name,
                             sector=isin_meta['sector'] if isin_meta else h.get('sector'),
-                            industry=isin_meta.get('industry') if isin_meta else h.get('industry')
+                            industry=isin_meta.get('industry') if isin_meta else h.get('industry'),
+                            entity_id=entity_id,
+                            period_id=period_id
                         )
 
                         # 2. Canonical Sector Resolution
                         raw_sector = isin_meta['sector'] if isin_meta else h.get('sector', 'Unknown')
                         canonical_sector = get_canonical_sector(raw_sector)
 
-                        # Use upsert_company to satisfy the FK in equity_holdings (which points to 'companies' table)
+                        # Use upsert_company with entity_id link
                         company_id = upsert_company(
                             isin=isin,
                             company_name=canonical_name,
                             sector=canonical_sector,
-                            industry=isin_meta.get('industry') if isin_meta else h.get('industry')
+                            industry=isin_meta.get('industry') if isin_meta else h.get('industry'),
+                            # We should ideally pass entity_id here too if upsert_company supports it
+                             # nse_symbol/bse_code can be passed if we had them
                         )
+                        # Ensure companies table has parity with entity_id (optional if upsert_company doesn't have it yet)
+                        # For now, company_id is our internal record ID.
+                        
                         PortfolioLoader._company_cache[isin] = company_id
                 
                 # Build final db_holdings from merged map
@@ -120,6 +163,10 @@ class PortfolioLoader:
                     })
 
                 # 4. Atomic Load per Scheme
+                if not db_holdings:
+                    logger.info(f"Scheme '{s_key[0]}' has no valid equity holdings. Skipping DB store.")
+                    continue
+
                 total_value = sum(h['market_value_inr'] for h in db_holdings)
                 total_nav_percent = sum(float(h['percent_of_nav']) for h in db_holdings)
 

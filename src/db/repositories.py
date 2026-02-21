@@ -17,36 +17,43 @@ def upsert_isin_master(
     nse_symbol: Optional[str] = None,
     bse_code: Optional[str] = None,
     sector: Optional[str] = None,
-    industry: Optional[str] = None
+    industry: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    period_id: Optional[int] = None
 ) -> str:
     """
-    Insert or update the ISIN Master (Source of Truth).
+    Insert or update the ISIN Master (Source of Truth) with Entity and Period tracking.
     """
     cursor = get_cursor()
     cursor.execute(
         """
-        INSERT INTO isin_master (isin, canonical_name, nse_symbol, bse_code, sector, industry)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO isin_master (
+            isin, canonical_name, nse_symbol, bse_code, sector, industry, 
+            entity_id, first_seen_period_id, last_seen_period_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (isin) DO UPDATE SET 
             canonical_name = EXCLUDED.canonical_name,
             nse_symbol = COALESCE(EXCLUDED.nse_symbol, isin_master.nse_symbol),
             bse_code = COALESCE(EXCLUDED.bse_code, isin_master.bse_code),
             sector = COALESCE(EXCLUDED.sector, isin_master.sector),
             industry = COALESCE(EXCLUDED.industry, isin_master.industry),
+            entity_id = COALESCE(EXCLUDED.entity_id, isin_master.entity_id),
+            last_seen_period_id = EXCLUDED.last_seen_period_id,
             updated_at = CURRENT_TIMESTAMP
         RETURNING isin
         """,
-        (isin, canonical_name, nse_symbol, bse_code, sector, industry)
+        (isin, canonical_name, nse_symbol, bse_code, sector, industry, entity_id, period_id, period_id)
     )
     return cursor.fetchone()[0]
 
 def get_isin_master_details(isin: str) -> Optional[Dict[str, Any]]:
     """
-    Lookup details from ISIN Master.
+    Lookup details from ISIN Master, including the mapped entity_id.
     """
     cursor = get_cursor()
     cursor.execute(
-        "SELECT canonical_name, nse_symbol, bse_code, sector, industry FROM isin_master WHERE isin = %s",
+        "SELECT canonical_name, nse_symbol, bse_code, sector, industry, entity_id FROM isin_master WHERE isin = %s",
         (isin,)
     )
     row = cursor.fetchone()
@@ -56,9 +63,96 @@ def get_isin_master_details(isin: str) -> Optional[Dict[str, Any]]:
             "nse_symbol": row[1],
             "bse_code": row[2],
             "sector": row[3],
-            "industry": row[4]
+            "industry": row[4],
+            "entity_id": row[5]
         }
     return None
+
+def find_entity_by_name(canonical_name: str) -> Optional[int]:
+    """Tier 2: Exact Name Match"""
+    cursor = get_cursor()
+    cursor.execute(
+        "SELECT entity_id FROM corporate_entities WHERE UPPER(canonical_name) = %s AND is_active = TRUE",
+        (canonical_name.upper(),)
+    )
+    row = cursor.fetchone()
+    if row: return row[0]
+    
+    # Tier 2.5: Reverse Match (If the DB name is a single word like 'RELIANCE' 
+    # and it is contained in the input name 'RELIANCE INDUSTRIES LTD')
+    cursor.execute(
+        """
+        SELECT entity_id FROM corporate_entities 
+        WHERE %s ILIKE '%%' || canonical_name || '%%' 
+        AND LENGTH(canonical_name) >= 5
+        AND is_active = TRUE
+        """,
+        (canonical_name.upper(),)
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def find_entity_by_symbol(name: str) -> Optional[int]:
+    """Tier 3: Symbol containment Match"""
+    # Check if any group_symbol is contained as a word within the company name
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        SELECT entity_id FROM corporate_entities 
+        WHERE %s ~* ('\y' || group_symbol || '\y')
+        AND group_symbol IS NOT NULL
+        AND is_active = TRUE
+        LIMIT 1
+        """,
+        (name,)
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def fuzzy_search_entity(name: str, threshold: float = 0.6) -> Optional[int]:
+    """Tier 4: Fuzzy Match fallback using pg_trgm (Lowered to 0.6 for name variations)"""
+    cursor = get_cursor()
+    # Ensure threshold set for session
+    cursor.execute("SET pg_trgm.similarity_threshold = %s", (threshold,))
+    cursor.execute(
+        """
+        SELECT entity_id, similarity(canonical_name, %s) as sml
+        FROM corporate_entities 
+        WHERE canonical_name %% %s AND is_active = TRUE
+        ORDER BY sml DESC LIMIT 1
+        """,
+        (name, name)
+    )
+    row = cursor.fetchone()
+    if row:
+        logger.info(f"[FUZZY RESOLUTION] Matched '{name}' to entity_id {row[0]} (Similarity: {row[1]:.2f})")
+        return row[0]
+    return None
+
+def create_corporate_entity(canonical_name: str, symbol: Optional[str] = None, sector: Optional[str] = None) -> int:
+    """Create a new logical business identity."""
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        INSERT INTO corporate_entities (canonical_name, group_symbol, sector)
+        VALUES (%s, %s, %s)
+        RETURNING entity_id
+        """,
+        (canonical_name, symbol, sector)
+    )
+    return cursor.fetchone()[0]
+
+def log_resolution_audit(isin: str, company_name: str, resolved_entity_id: int, tier: str, details: Optional[str] = None):
+    """Log the decision process for security resolution to the database."""
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        INSERT INTO resolution_audit (isin, raw_name, resolved_entity_id, resolution_tier, details)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (isin, company_name, resolved_entity_id, tier, details)
+    )
+    logger.info(f"[RESOLUTION AUDIT] ISIN: {isin} | Name: {company_name} | Resolved ID: {resolved_entity_id} via {tier}")
 
 def get_canonical_sector(raw_sector_name: Any) -> str:
     """
@@ -221,6 +315,22 @@ def upsert_period(year: int, month: int, period_end_date: date) -> int:
     logger.debug(f"Period upserted: {year}-{month:02d} (period_id={period_id})")
     
     return period_id
+
+def get_previous_period_id(period_id: int) -> Optional[int]:
+    """
+    Find the period_id immediately preceding the given one.
+    """
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        SELECT period_id FROM periods 
+        WHERE period_end_date < (SELECT period_end_date FROM periods WHERE period_id = %s)
+        ORDER BY period_end_date DESC LIMIT 1
+        """,
+        (period_id,)
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
 
 def check_period_locked(year: int, month: int) -> bool:
     """
@@ -434,7 +544,7 @@ def get_isin_details(isin: str) -> Optional[Dict[str, Any]]:
     # 2. Fallback to existing company record
     cursor = get_cursor()
     cursor.execute(
-        "SELECT company_name, sector, industry, nse_symbol, bse_code FROM companies WHERE isin = %s",
+        "SELECT company_name, sector, industry, nse_symbol, bse_code, entity_id FROM companies WHERE isin = %s",
         (isin,)
     )
     row = cursor.fetchone()
@@ -444,7 +554,8 @@ def get_isin_details(isin: str) -> Optional[Dict[str, Any]]:
             "sector": row[1],
             "industry": row[2],
             "nse_symbol": row[3],
-            "bse_code": row[4]
+            "bse_code": row[4],
+            "entity_id": row[5]
         }
     return None
 

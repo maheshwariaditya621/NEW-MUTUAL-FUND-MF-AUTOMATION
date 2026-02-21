@@ -1,0 +1,247 @@
+/* Rupeevest Style Tables & Components */
+
+:root {
+    --rv-blue: #2c8ed6;
+    --rv-header-bg: #2c8ed6;
+    --rv-border: var(--border-color);
+    --rv-text: var(--text-primary);
+    --rv-text-muted: var(--text-secondary);
+    --rv-row-hover: var(--bg-tertiary);
+    --rv-bg: var(--bg-primary);
+    --rv-card-bg: var(--bg-secondary);
+}
+
+[data-theme="dark"] {
+    --rv-blue: #4d9fff;
+    --rv-border: #404040;
+    --rv-bg: #1a1a1a;
+    --rv-card-bg: #2d2d2d;
+}
+
+/* Metadata Bar */
+.rv-meta-bar {
+    background: var(--rv-card-bg);
+    border: 1px solid var(--rv-border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-family: inherit;
+}
+
+.rv-meta-item {
+    margin-bottom: 4px;
+    font-size: 14px;
+}
+
+.rv-shares-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    width: 100%;
+}
+
+.rv-sortable-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    user-select: none;
+}
+
+.rv-sortable-header:hover {
+    text-decoration: underline;
+}
+
+.rv-company-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--rv-text-muted);
+}
+
+.rv-isin {
+    font-family: monospace;
+    background: var(--bg-tertiary);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.rv-meta-sep {
+    opacity: 0.5;
+}
+
+.rv-mcap-val {
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.rv-mcap-type {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-top: 4px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.rv-mcap-type.large-cap {
+    background: #e1f5fe;
+    color: #01579b;
+}
+
+.rv-mcap-type.mid-cap {
+    background: #fff8e1;
+    color: #ff8f00;
+}
+
+.rv-mcap-type.small-cap {
+    background: #f1f8e9;
+    color: #33691e;
+}
+
+[data-theme="dark"] .rv-mcap-type.large-cap {
+    background: #01579b;
+    color: #e1f5fe;
+}
+
+[data-theme="dark"] .rv-mcap-type.mid-cap {
+    background: #ff8f00;
+    color: #fff8e1;
+}
+
+[data-theme="dark"] .rv-mcap-type.small-cap {
+    background: #33691e;
+    color: #f1f8e9;
+}
+
+.rv-aum-label {
+    font-size: 10px;
+    font-weight: normal;
+    margin-top: 2px;
+    opacity: 0.9;
+}
+
+.rv-meta-label {
+    color: var(--rv-text-muted);
+    font-weight: 500;
+    width: 100px;
+    display: inline-block;
+}
+
+.rv-meta-value {
+    color: var(--rv-text);
+    font-weight: 600;
+}
+
+/* Rupeevest Table */
+.rv-table-container {
+    overflow-x: auto;
+    margin-bottom: 20px;
+    background: white;
+    border-radius: 4px;
+}
+
+.rv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    color: var(--rv-text);
+    border: 1px solid var(--rv-border);
+}
+
+.rv-table th {
+    background-color: var(--rv-header-bg);
+    color: white;
+    text-align: center;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.rv-table th.rv-sub-header {
+    background-color: #3fa1e9;
+    /* Slightly lighter blue for subheaders */
+    font-size: 11px;
+}
+
+.rv-table td {
+    padding: 8px 12px;
+    border: 1px solid var(--rv-border);
+    vertical-align: middle;
+}
+
+.rv-table tr:hover {
+    background-color: var(--rv-row-hover);
+}
+
+/* Alignment Utilities */
+.text-left {
+    text-align: left !important;
+}
+
+.text-right {
+    text-align: right !important;
+}
+
+.text-center {
+    text-align: center !important;
+}
+
+/* Typography */
+.rv-company-name {
+    font-weight: 500;
+    color: var(--rv-blue);
+    text-decoration: none;
+}
+
+.rv-company-name:hover {
+    text-decoration: underline;
+}
+
+.rv-sector {
+    font-size: 11px;
+    color: var(--rv-text-muted);
+    display: block;
+}
+
+/* Trend Indicators */
+.rv-trend {
+    margin-left: 4px;
+    font-size: 10px;
+}
+
+.rv-trend.up {
+    color: #28a745;
+}
+
+.rv-trend.down {
+    color: #dc3545;
+}
+
+/* Empty/Placeholder */
+.rv-empty {
+    color: #ccc;
+    text-align: center;
+}
+
+/* Summary Box */
+.rv-summary-box {
+    background: white;
+    border: 1px solid var(--rv-border);
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.rv-summary-title {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 12px;
+    color: var(--rv-text);
+}

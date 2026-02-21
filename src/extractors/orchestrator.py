@@ -138,6 +138,10 @@ class ExtractionOrchestrator:
                 backup_path = backup_database()
                 if backup_path:
                     prune_old_backups(keep_count=6)
+
+                # 7. Post-Load Hook: Anomaly Detection (Splits/Bonuses)
+                from src.loaders.anomaly_detector import AnomalyDetector
+                AnomalyDetector.run(period_id)
             
             return {"status": "success", "rows_inserted": rows_inserted, "duration": duration}
 

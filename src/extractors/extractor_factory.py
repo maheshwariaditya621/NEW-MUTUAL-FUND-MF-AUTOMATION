@@ -53,6 +53,7 @@ from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
 ADDITIONAL_AMC_NAMES = {
+    "abakkus": "ABAKKUS MUTUAL FUND",
     "bandhan": "BANDHAN MUTUAL FUND",
     "baroda": "BARODA BNP PARIBAS MUTUAL FUND",
     "boi": "BANK OF INDIA MUTUAL FUND",
@@ -92,6 +93,8 @@ ADDITIONAL_AMC_NAMES = {
     "whiteoak": "WHITEOAK CAPITAL MUTUAL FUND",
 }
 
+from src.extractors.abakkus_extractor_v1 import AbakkusExtractorV1
+
 class ExtractorFactory:
     """
     Factory to return the appropriate version of an AMC extractor
@@ -104,6 +107,9 @@ class ExtractorFactory:
         Returns the extractor instance for the given AMC and date.
         """
         amc_slug = amc_slug.lower()
+        
+        if amc_slug == "abakkus":
+            return AbakkusExtractorV1()
         
         # HDFC Versioning Logic
         if amc_slug == "hdfc":

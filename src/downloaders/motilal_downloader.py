@@ -195,16 +195,21 @@ class MotilalDownloader(BaseDownloader):
             time.sleep(2)
             logger.info(f"  ✓ Month {selection_month_name} selected")
 
-            # Click document icon
-            logger.info("Clicking document icon...")
-            page.locator("div:nth-child(2) > .downloadWithPagination_rightSide__E_PDE > .downloadWithPagination_documentIcon__ph7xA > img").click()
+            # Click document icon for Scheme Portfolio
+            logger.info("Locating Scheme Portfolio document icon...")
+            # Find the card that specifically mentions 'Scheme Portfolio Details' to avoid 'Fortnightly'
+            card = page.locator("div").filter(has_text="Scheme Portfolio Details").filter(has_text=month_name).first
+            
+            # Click the XLS icon within that card
+            card.locator("img[src*='xls']").first.click()
             time.sleep(2)
-            logger.info("  ✓ Document icon clicked")
+            logger.info("  ✓ XLS icon clicked, waiting for popup")
 
-            # Download file
-            logger.info("Downloading file...")
+            # Download file from popup
+            logger.info("Downloading file from popup...")
             with page.expect_download(timeout=60000) as download_info:
-                page.get_by_role("link", name="Download cloud").click()
+                # The subagent verified get_by_role("link", name="Download") works
+                page.get_by_role("link", name="Download").click()
 
             download = download_info.value
             suggested = download.suggested_filename

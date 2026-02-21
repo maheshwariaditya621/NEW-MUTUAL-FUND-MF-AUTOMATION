@@ -1,0 +1,41 @@
+[
+  {
+    "name": "COMPUTER AGE MANAGEMENT SERVICES",
+    "isin_count": 2,
+    "entity_count": 2,
+    "isins": [
+      "INE596I01012",
+      "INE596I01020"
+    ],
+    "entity_ids": [
+      1092,
+      9674
+    ]
+  },
+  {
+    "name": "MRS. BECTORS FOOD SPECIALITIES",
+    "isin_count": 2,
+    "entity_count": 2,
+    "isins": [
+      "INE495P01012",
+      "INE495P01020"
+    ],
+    "entity_ids": [
+      585,
+      839
+    ]
+  },
+  {
+    "name": "NUVAMA WEALTH MANAGEMENT",
+    "isin_count": 2,
+    "entity_count": 2,
+    "isins": [
+      "INE531F01015",
+      "INE531F01023"
+    ],
+    "entity_ids": [
+      1159,
+      8404
+    ]
+  }
+]

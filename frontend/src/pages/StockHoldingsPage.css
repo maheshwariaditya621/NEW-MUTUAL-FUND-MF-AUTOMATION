@@ -1,0 +1,246 @@
+.stock-holdings-page {
+    padding: 32px 0;
+}
+
+.page-header {
+    margin-bottom: 32px;
+}
+
+.page-header h2 {
+    margin-bottom: 8px;
+}
+
+.search-section {
+    margin-bottom: 32px;
+    display: flex;
+    justify-content: center;
+}
+
+/* Stock Suggestion Styling */
+.stock-suggestion {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.stock-suggestion-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.stock-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.stock-symbol {
+    padding: 2px 8px;
+    background-color: var(--accent-light);
+    color: var(--accent-primary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.stock-suggestion-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.stock-isin {
+    font-family: monospace;
+}
+
+.stock-sector {
+    padding: 2px 6px;
+    background-color: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+/* Holdings Section */
+.holdings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.stock-info h3 {
+    margin: 0 0 12px 0;
+}
+
+.stock-info-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.badge {
+    padding: 4px 12px;
+    background-color: var(--accent-light);
+    color: var(--accent-primary);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: monospace;
+}
+
+.badge-secondary {
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: inherit;
+}
+
+.badge-info {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+    font-family: inherit;
+}
+
+.mcap-badge {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: inherit;
+}
+
+.mcap-badge.large-cap {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.mcap-badge.mid-cap {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.mcap-badge.small-cap {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.holdings-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 24px;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-color);
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.summary-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.summary-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.holdings-table-section h4 {
+    margin-bottom: 16px;
+}
+
+/* Scheme Name in Table */
+.scheme-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.scheme-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Empty State */
+.empty-state {
+    padding: 64px 24px;
+    text-align: center;
+}
+
+.empty-state p {
+    font-size: 16px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .holdings-summary {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .summary-value {
+        font-size: 20px;
+    }
+}
+
+/* Trend Indicators */
+.trend-up {
+    color: #10b981;
+    font-size: 14px;
+    margin-left: 4px;
+}
+
+.trend-down {
+    color: #ef4444;
+    font-size: 14px;
+    margin-left: 4px;
+}
+
+.shares-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+
+.shares-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background-color: var(--accent-light);
+    color: var(--accent-primary);
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: help;
+    font-style: normal;
+    font-family: serif;
+    line-height: 1;
+}
+
+.mcap-info {
+    margin-left: 4px;
+    background-color: rgba(255, 255, 255, 0.2);
+    color: #3b82f6;
+}
+
+.text-right {
+    text-align: right;
+}
+
+.th-content.text-right {
+    justify-content: flex-end;
+}

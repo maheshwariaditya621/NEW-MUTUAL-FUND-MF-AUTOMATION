@@ -1,0 +1,143 @@
+.scheme-portfolio-page {
+    padding: 32px 0;
+}
+
+/* Scheme Suggestion Styling */
+.scheme-suggestion {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.scheme-name-text {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.scheme-suggestion-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* Portfolio Section */
+.portfolio-section {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.scheme-info h3 {
+    margin: 0 0 12px 0;
+    font-size: 1.5rem;
+}
+
+.scheme-info-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* AUM Timeline */
+.aum-timeline {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-color);
+}
+
+.aum-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    background-color: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.aum-month {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.aum-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent-primary);
+}
+
+.aum-holdings {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Portfolio Table */
+.portfolio-table-section h4 {
+    margin-bottom: 16px;
+}
+
+.company-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.company-sector {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Monthly Cell */
+.monthly-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.monthly-percent {
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.monthly-shares {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Trend Icons */
+.trend-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.trend-up {
+    color: var(--success);
+}
+
+.trend-down {
+    color: var(--danger);
+}
+
+.trend-neutral {
+    color: var(--text-tertiary);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .aum-timeline {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .aum-value {
+        font-size: 16px;
+    }
+}

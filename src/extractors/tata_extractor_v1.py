@@ -130,10 +130,11 @@ class TataExtractorV1(CommonExtractorV1):
                 qty = self.normalize_currency(row.get("quantity", 0), "RUPEES")
 
                 # The DB has a CHECK constraint (market_value >= 0 and quantity >= 0).
-                # To maintain the user's expected count (~2634) while allowing short/futures rows,
-                # we clamp negatives to 0.
-                safe_mkt_val = max(0.0, mkt_val)
-                safe_qty = max(0, int(qty))
+                # Arbitrage funds have negative rows (Shorts/Hedges) which we should skip
+                # to avoid netting out the gross exposure percentages.
+                if mkt_val < 0 or qty < 0:
+                    logger.debug(f"[{full_scheme_name}] Skipping negative holding (Hedge): {row.get('company_name')} ({row.get('isin')})")
+                    continue
 
                 sheet_holdings.append(
                     {
@@ -145,8 +146,8 @@ class TataExtractorV1(CommonExtractorV1):
                         "is_reinvest": scheme_info["is_reinvest"],
                         "isin": row.get("isin"),
                         "company_name": self.clean_company_name(row.get("company_name")),
-                        "quantity": safe_qty,
-                        "market_value_inr": safe_mkt_val,
+                        "quantity": int(qty),
+                        "market_value_inr": mkt_val,
                         "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
                         "sector": self.clean_company_name(row.get("sector", "N/A")),
                     }
