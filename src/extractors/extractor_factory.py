@@ -50,6 +50,7 @@ from src.extractors.uti_extractor_v1 import UTIExtractorV1
 from src.extractors.wealth_extractor_v1 import WealthExtractorV1
 from src.extractors.whiteoak_extractor_v1 import WhiteOakExtractorV1
 from src.extractors.shriram_extractor_v1 import ShriramExtractorV1
+from src.extractors.zerodha_extractor_v1 import ZerodhaExtractorV1
 from src.extractors.common_extractor_v1 import CommonExtractorV1
 
 
@@ -93,6 +94,7 @@ ADDITIONAL_AMC_NAMES = {
     "uti": "UTI MUTUAL FUND",
     "wealth_company": AMC_WEALTH,
     "whiteoak": "WHITEOAK CAPITAL MUTUAL FUND",
+    "zerodha": "ZERODHA MUTUAL FUND",
 }
 
 from src.extractors.abakkus_extractor_v1 import AbakkusExtractorV1
@@ -218,6 +220,7 @@ class ExtractorFactory:
     "shriram": ShriramExtractorV1,
     "wealth_company": WealthExtractorV1,
     "whiteoak": WhiteOakExtractorV1,
+    "zerodha": ZerodhaExtractorV1,
 }
 
         extractor_func = EXTRACTOR_MAP.get(amc_slug)
