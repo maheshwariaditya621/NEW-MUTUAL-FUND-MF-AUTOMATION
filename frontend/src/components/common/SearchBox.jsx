@@ -55,6 +55,28 @@ export default function SearchBox({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // Scroll active item into view when navigating with keyboard
+    useEffect(() => {
+        if (showDropdown && selectedIndex >= 0 && searchRef.current) {
+            const container = searchRef.current.querySelector('.search-dropdown');
+            const activeItem = searchRef.current.querySelector('.search-suggestion.selected');
+
+            if (activeItem && container) {
+                // Calculate if the item is outside the visible view
+                const containerRect = container.getBoundingClientRect();
+                const itemRect = activeItem.getBoundingClientRect();
+
+                if (itemRect.bottom > containerRect.bottom) {
+                    // Scroll down
+                    activeItem.scrollIntoView({ block: 'nearest' });
+                } else if (itemRect.top < containerRect.top) {
+                    // Scroll up
+                    activeItem.scrollIntoView({ block: 'nearest' });
+                }
+            }
+        }
+    }, [selectedIndex, showDropdown]);
+
     // Keyboard navigation
     const handleKeyDown = (e) => {
         if (!showDropdown || suggestions.length === 0) return;

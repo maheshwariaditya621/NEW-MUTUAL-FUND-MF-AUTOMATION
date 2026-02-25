@@ -59,6 +59,8 @@ class StockHoldingsSummary(BaseModel):
     market_cap: Optional[Decimal] = Field(None, description="Market capitalization in INR Crores")
     mcap_type: Optional[str] = Field(None, description="Market cap category (Large/Mid/Small Cap)")
     mcap_updated_at: Optional[datetime] = Field(None, description="Timestamp when market cap was last updated")
+    shares_outstanding: Optional[int] = Field(None, description="Total shares outstanding for the company")
+    shares_last_updated_at: Optional[datetime] = Field(None, description="Timestamp when shares outstanding was last updated")
     
     # Current month data
     as_of_date: str = Field(..., description="Latest data month (YYYY-MM)")

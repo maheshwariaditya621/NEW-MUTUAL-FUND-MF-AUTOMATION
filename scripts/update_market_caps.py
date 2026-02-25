@@ -32,7 +32,7 @@ def update_market_caps():
         companies = cur.fetchall()
         print(f"Total companies in DB: {len(companies)}")
         
-        mcap_data = [] # List of {company_id, market_cap}
+        mcap_data = [] # List of {company_id, market_cap, shares}
         
         # 2. Fetch Market Cap from yfinance
         print("\nFetching market caps from Yahoo Finance...")
@@ -50,14 +50,37 @@ def update_market_caps():
                 ticker = yf.Ticker(ticker_symbol)
                 # We use fast_info if available or info
                 mcap = ticker.info.get("marketCap")
+                shares = ticker.info.get("sharesOutstanding")
                 
                 if mcap:
                     mcap_data.append({
                         "id": comp_id,
                         "name": name,
-                        "mcap": mcap
+                        "mcap": mcap,
+                        "shares": shares
                     })
                     print(f"  [OK] {name}: ₹{mcap/10000000:,.2f} Cr")
+                    
+                    # Update DB immediately for mcap and shares
+                    update_timestamp = datetime.now()
+                    cur.execute(
+                        """
+                        UPDATE companies 
+                        SET market_cap = %s, 
+                            mcap_updated_at = %s,
+                            shares_outstanding = %s,
+                            shares_last_updated_at = %s
+                        WHERE company_id = %s
+                        """,
+                        (
+                            int(mcap), 
+                            update_timestamp, 
+                            int(shares) if shares else None,
+                            update_timestamp if shares else None,
+                            comp_id
+                        )
+                    )
+                    conn.commit()
                 else:
                     print(f"  [MISSING] {name} ({ticker_symbol})")
             except Exception as e:
@@ -85,16 +108,16 @@ def update_market_caps():
         
         print(f"\nUpdating {len(df)} companies in database...")
         
-        # 4. Update Database
-        update_timestamp = datetime.now()
+        # 4. Final Update for MCAP Types
+        print(f"\nUpdating cap types for {len(df)} companies...")
         for _, row in df.iterrows():
             cur.execute(
-                "UPDATE companies SET market_cap = %s, mcap_type = %s, mcap_updated_at = %s WHERE company_id = %s",
-                (int(row['mcap']), row['mcap_type'], update_timestamp, row['id'])
+                "UPDATE companies SET mcap_type = %s WHERE company_id = %s",
+                (row['mcap_type'], row['id'])
             )
         
         conn.commit()
-        print("\nSuccessfully updated market caps and categories.")
+        print("\nSuccessfully updated all data.")
         
     except Exception as e:
         conn.rollback()

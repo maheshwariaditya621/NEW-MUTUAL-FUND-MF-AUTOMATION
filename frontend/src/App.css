@@ -11,7 +11,7 @@
   padding: 16px 0;
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 9999;
   backdrop-filter: blur(10px);
   background-color: rgba(var(--bg-secondary-rgb), 0.95);
 }

@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import StockHoldingsPage from './pages/StockHoldingsPage';
 import SchemePortfolioPage from './pages/SchemePortfolioPage';
 import HeaderSearch from './components/common/HeaderSearch';
+import Chatbot from './components/Chatbot';
 import './App.css';
 
 function App() {
@@ -49,6 +50,9 @@ function App() {
               </p>
             </div>
           </footer>
+
+          {/* AI Chatbot widget — visible on every page */}
+          <Chatbot />
         </div>
       </BrowserRouter>
     </ThemeProvider>

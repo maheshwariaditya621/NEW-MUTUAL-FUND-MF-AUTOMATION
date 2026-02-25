@@ -144,7 +144,7 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
     """
     # Try exact ISIN match first
     cur.execute(
-        "SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at FROM companies WHERE isin = %s",
+        "SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at FROM companies WHERE isin = %s",
         (identifier.upper(),)
     )
     result = cur.fetchone()
@@ -153,7 +153,7 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
     
     # Try exact NSE symbol match
     cur.execute(
-        "SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at FROM companies WHERE nse_symbol = %s",
+        "SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at FROM companies WHERE nse_symbol = %s",
         (identifier.upper(),)
     )
     result = cur.fetchone()
@@ -164,7 +164,7 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
     search_pattern = f"%{identifier}%"
     cur.execute(
         """
-        SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at 
+        SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at 
         FROM companies 
         WHERE company_name ILIKE %s
         ORDER BY 
@@ -225,7 +225,7 @@ async def get_holdings_by_identifier(
     """
     try:
         # 1. Resolve identifier to ISIN and metadata
-        isin, company_name, sector, market_cap, mcap_type, mcap_updated_at = _resolve_company_isin(q, cur)
+        isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated = _resolve_company_isin(q, cur)
         
         # 2. Check if this ISIN belongs to an Entity
         cur.execute("SELECT entity_id FROM isin_master WHERE isin = %s", (isin,))
@@ -233,7 +233,10 @@ async def get_holdings_by_identifier(
         entity_id = entity_row[0] if entity_row else None
         
         # 3. Get holdings (aggregated by entity if available)
-        return await _get_stock_holdings_aggregated(isin, entity_id, company_name, sector, market_cap, mcap_type, mcap_updated_at, months, end_month, cur)
+        return await _get_stock_holdings_aggregated(
+            isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated, 
+            shares, shares_updated, months, end_month, cur
+        )
         
     except HTTPException:
         raise
@@ -262,26 +265,18 @@ async def get_stock_holdings(
         Detailed holdings summary with scheme-wise breakdown
     """
     try:
-        # Verify company exists and get its metadata/entity
-        cur.execute("""
-            SELECT c.company_name, c.sector, c.entity_id, c.market_cap, c.mcap_type, c.mcap_updated_at 
-            FROM companies c 
-            WHERE c.isin = %s
-        """, (isin.upper(),))
-        company_row = cur.fetchone()
+        # Resolve company metadata using the helper function
+        res_isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated = _resolve_company_isin(isin, cur)
         
-        if not company_row:
-            # Check isin_master if not in companies yet
-            cur.execute("SELECT canonical_name, sector, entity_id, NULL as market_cap, NULL as mcap_type, NULL as mcap_updated_at FROM isin_master WHERE isin = %s", (isin.upper(),))
-            company_row = cur.fetchone()
-            
-        if not company_row:
-            raise HTTPException(status_code=404, detail=f"Company with ISIN {isin} not found")
+        # Check if this ISIN belongs to an Entity
+        cur.execute("SELECT entity_id FROM isin_master WHERE isin = %s", (res_isin,))
+        entity_row = cur.fetchone()
+        entity_id = entity_row[0] if entity_row else None
         
-        company_name, sector, entity_id, market_cap, mcap_type, mcap_updated_at = company_row
-        company_name = company_name.upper()
-        
-        return await _get_stock_holdings_aggregated(isin.upper(), entity_id, company_name, sector, market_cap, mcap_type, mcap_updated_at, months, end_month, cur)
+        return await _get_stock_holdings_aggregated(
+            res_isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated,
+            shares, shares_updated, months, end_month, cur
+        )
         
     except HTTPException:
         raise
@@ -323,7 +318,9 @@ async def _get_stock_holdings_aggregated(
     sector: Optional[str],
     market_cap: Optional[Decimal],
     mcap_type: Optional[str],
-    mcap_updated_at: Optional[str],
+    mcap_updated_at: Optional[datetime],
+    shares_outstanding: Optional[int],
+    shares_last_updated_at: Optional[datetime],
     months: int,
     end_month: Optional[str],
     cur: cursor
@@ -617,5 +614,7 @@ async def _get_stock_holdings_aggregated(
         total_shares=total_shares_current,
         total_funds=num_funds_current,
         monthly_trend=monthly_trend,
-        holdings=final_holdings
+        holdings=final_holdings,
+        shares_outstanding=shares_outstanding,
+        shares_last_updated_at=shares_last_updated_at
     )

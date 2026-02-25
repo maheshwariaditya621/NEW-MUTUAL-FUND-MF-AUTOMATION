@@ -169,57 +169,55 @@ export default function SchemePortfolioPage() {
                     <div className="portfolio-section">
 
                         <div className="shp-identity-bar" style={{ marginBottom: '16px', background: 'var(--bg-card)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div className="shp-identity-left" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <div className="shp-company-name" style={{ fontSize: '20px', fontWeight: 'bold' }}>{portfolio.scheme_name}</div>
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    <span className="shp-isin-chip" style={{ background: 'rgba(37,99,235,0.1)', color: '#2563eb', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '600' }}>{portfolio.category || 'Portfolio'}</span>
-                                    <span className="shp-sector-chip" style={{ background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: '4px', fontSize: '12px' }}>{portfolio.plan_type} - {portfolio.option_type}</span>
-                                </div>
+                            <div className="shp-identity-left" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                <div className="shp-company-name" style={{ fontSize: '18px', fontWeight: 'bold' }}>{portfolio.scheme_name}</div>
+                                <span className="shp-sector-chip" style={{ background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '500' }}>
+                                    {portfolio.plan_type} • {portfolio.option_type}
+                                </span>
                             </div>
                             <div className="shp-identity-right" style={{ display: 'flex', gap: '24px' }}>
                                 <div className="shp-identity-stat" style={{ textAlign: 'right' }}>
-                                    <div className="shp-stat-label" style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '4px' }}>AMC</div>
-                                    <div className="shp-stat-val" style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{portfolio.amc_name}</div>
+                                    <div className="shp-stat-label" style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '4px' }}>AMC</div>
+                                    <div className="shp-stat-val" style={{ color: 'var(--text-primary)', fontWeight: 'bold', fontSize: '14px' }}>{portfolio.amc_name}</div>
                                 </div>
                                 <div className="shp-identity-stat" style={{ paddingLeft: '24px', borderLeft: '1px solid var(--border-color)', textAlign: 'right' }}>
-                                    <div className="shp-stat-label" style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '4px' }}>TOTAL FUNDS</div>
-                                    <div className="shp-stat-val" style={{ fontSize: '18px', fontWeight: 'bold', color: 'var(--accent-primary)' }}>{formatNumber(portfolio.total_holdings)}</div>
+                                    <div className="shp-stat-label" style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '4px' }}>EQUITY COMPANIES</div>
+                                    <div className="shp-stat-val" style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--accent-primary)' }}>{formatNumber(portfolio.total_holdings)}</div>
                                 </div>
                             </div>
                         </div>
 
                         <div className="portfolio-table-section">
-                            {/* ── Controls Header ── */}
-                            <div className="shp-controls-header shp-controls-row">
-                                <div className="shp-section-title" style={{ margin: 0, color: 'var(--shp-header-color)' }}>Equity Holdings</div>
-                                <div className="shp-controls-right">
-                                    <div className="shp-month-picker">
-                                        <span className="shp-picker-label">Period</span>
-                                        <select
-                                            className="shp-picker-select"
-                                            value={selectedMonth || ''}
-                                            onChange={(e) => handleMonthChange(e.target.value)}
-                                        >
-                                            <option value="">Latest</option>
-                                            {allAvailableMonths.map(m => (
-                                                <option key={m} value={m}>{m}</option>
-                                            ))}
-                                        </select>
+                            <div className="shp-table-wrap" style={{ borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
+                                {/* ── Controls Header ── */}
+                                <div className="shp-controls-header shp-controls-row">
+                                    <div className="shp-section-title" style={{ margin: 0, color: 'var(--shp-header-color)' }}>Equity Holdings</div>
+                                    <div className="shp-controls-right">
+                                        <div className="shp-month-picker">
+                                            <span className="shp-picker-label">Period</span>
+                                            <select
+                                                className="shp-picker-select"
+                                                value={selectedMonth || ''}
+                                                onChange={(e) => handleMonthChange(e.target.value)}
+                                            >
+                                                <option value="">Latest</option>
+                                                {allAvailableMonths.map(m => (
+                                                    <option key={m} value={m}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            className="shp-search-input"
+                                            placeholder="Filter by Name, ISIN, Sector..."
+                                            value={filterText}
+                                            onChange={(e) => setFilterText(e.target.value)}
+                                        />
                                     </div>
-                                    <input
-                                        type="text"
-                                        className="shp-search-input"
-                                        placeholder="Filter by Name, ISIN, Sector..."
-                                        value={filterText}
-                                        onChange={(e) => setFilterText(e.target.value)}
-                                    />
                                 </div>
-                            </div>
-
-                            <div className="shp-table-wrap" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 0 }}>
                                 <table className="shp-table">
                                     <thead>
-                                        <tr>
+                                        <tr className="shp-head-row">
                                             <th rowSpan="2" className="shp-th shp-th-name" onClick={() => handleSort('company_name')} style={{ cursor: 'pointer' }}>
                                                 COMPANY NAME {renderSortArrow('company_name')}
                                             </th>
@@ -237,7 +235,7 @@ export default function SchemePortfolioPage() {
                                                 );
                                             })}
                                         </tr>
-                                        <tr>
+                                        <tr className="shp-head-row">
                                             {displayMonths.map((_, idx) => (
                                                 <React.Fragment key={idx}>
                                                     <th className={`shp-th shp-th-num shp-th-sub shp-group-start shp-month-${idx}`}>% OF AUM</th>

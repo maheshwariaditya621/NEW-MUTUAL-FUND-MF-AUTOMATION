@@ -160,6 +160,10 @@ export default function StockHoldingsPage() {
                         entry.history[idx].num_shares += h.num_shares;
                     }
                     entry.history[idx].month_change = (entry.history[idx].month_change || 0) + (h.month_change || 0);
+                    // Stake % for AMC
+                    if (holdings.shares_outstanding) {
+                        entry.history[idx].stake_pct = (entry.history[idx].num_shares / holdings.shares_outstanding) * 100;
+                    }
                 }
             });
         }
@@ -258,7 +262,7 @@ export default function StockHoldingsPage() {
                         </th>
                         <th className="shp-th shp-th-sub shp-month-0">
                             <span className="shp-sortable" onClick={() => handleSort('shares_0')}>
-                                Shares Held{sortArrow('shares_0')}
+                                Quantity{sortArrow('shares_0')}
                             </span>
                         </th>
                         <th className="shp-th shp-th-sub shp-month-0">Month Change</th>
@@ -270,7 +274,7 @@ export default function StockHoldingsPage() {
                         {/* First sub-col of older month gets shp-group-start */}
                         <th className={`shp-th shp-th-sub shp-month-${i + 1} shp-group-start`}>
                             <span className="shp-sortable" onClick={() => handleSort(`shares_${i + 1}`)}>
-                                Shares Held{sortArrow(`shares_${i + 1}`)}
+                                Quantity{sortArrow(`shares_${i + 1}`)}
                             </span>
                         </th>
                         <th className={`shp-th shp-th-sub shp-month-${i + 1}`}>Month Change</th>
@@ -379,6 +383,21 @@ export default function StockHoldingsPage() {
                                             </span>
                                         </span>
                                     )}
+                                    {holdings.shares_outstanding && (
+                                        <span className="shp-mcap-chip">
+                                            Outstanding Shares: {fmt(holdings.shares_outstanding)}
+                                            {/* (i) info button */}
+                                            <span className="shp-mcap-info">
+                                                <span className="shp-mcap-info-icon">i</span>
+                                                <span className="shp-mcap-tooltip">
+                                                    Shares as on{' '}
+                                                    {holdings.shares_last_updated_at
+                                                        ? new Date(holdings.shares_last_updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                                                        : 'N/A'}
+                                                </span>
+                                            </span>
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="shp-stat-chips">
                                     <div className="shp-stat-chip">
@@ -386,7 +405,7 @@ export default function StockHoldingsPage() {
                                         <span className="shp-stat-value">{holdings.total_funds}</span>
                                     </div>
                                     <div className="shp-stat-chip">
-                                        <span className="shp-stat-label">Total Shares</span>
+                                        <span className="shp-stat-label">Total MF Shares</span>
                                         <span className="shp-stat-value shp-accent">{fmt(holdings.total_shares)}</span>
                                     </div>
                                 </div>
@@ -395,13 +414,11 @@ export default function StockHoldingsPage() {
                         </div>
 
                         {/* ── SUMMARY TABLE ── */}
-                        <div className="shp-summary-table-wrap" style={{ marginBottom: '24px' }}>
+                        <div className="shp-summary-table-wrap" style={{ marginBottom: '24px', position: 'relative', zIndex: 200 }}>
                             <table className="shp-table shp-summary-table">
                                 <thead>
                                     <tr>
-                                        <th className="shp-th shp-th-name" rowSpan={2} style={{ width: '25%' }}>Sector</th>
-                                        <th className="shp-th shp-th-num" rowSpan={2} style={{ textAlign: 'center' }}>No. of Funds</th>
-                                        <th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>No. of Shares</th>
+                                        <th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>Industry Holding</th>
                                     </tr>
                                     <tr>
                                         {displayMonths.map((m, i) => (
@@ -413,8 +430,6 @@ export default function StockHoldingsPage() {
                                 </thead>
                                 <tbody>
                                     <tr className="shp-row">
-                                        <td className="shp-td">{holdings.sector || 'N/A'}</td>
-                                        <td className="shp-td shp-num" style={{ textAlign: 'center', fontWeight: 600 }}>{holdings.total_funds}</td>
                                         {displayMonths.map((m, i) => {
                                             const trendData = holdings.monthly_trend.find(t => t.month === m);
                                             if (!trendData) return <td key={m} className={`shp-td shp-num shp-month-${i}`}>-</td>;
@@ -435,6 +450,19 @@ export default function StockHoldingsPage() {
                                                         {hasChange && (
                                                             <div className={`shp-change-pct ${isPos ? 'shp-pos' : 'shp-neg'}`}>
                                                                 {isPos ? '+' : ''}{fmt(trendData.month_change)} ({isPos ? '+' : ''}{trendData.percent_change.toFixed(2)}%)
+                                                            </div>
+                                                        )}
+                                                        {holdings.shares_outstanding && (
+                                                            <div className="shp-stake-badge shp-mcap-info" style={{ marginTop: '4px', fontSize: '10px', fontWeight: 700, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', padding: '2px 6px', borderRadius: '4px', cursor: 'help' }}>
+                                                                Ownership: {((trendData.total_shares / holdings.shares_outstanding) * 100).toFixed(2)}%
+                                                                <span className="shp-mcap-tooltip" style={{ fontSize: '10px', minWidth: '150px', textAlign: 'center', fontWeight: 'normal', top: '100%', bottom: 'auto', marginTop: '6px', padding: '6px 8px', zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.3)', borderRadius: '6px', color: '#f8fafc', whiteSpace: 'nowrap' }}>
+                                                                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '8.5px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Calculated As</div>
+                                                                    <div style={{ fontWeight: 500, color: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                                                        <span>Total shares held by all funds</span>
+                                                                        <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 300 }}>/</span>
+                                                                        <span>Total outstanding shares</span>
+                                                                    </div>
+                                                                </span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -518,25 +546,51 @@ export default function StockHoldingsPage() {
                                                 </th>
                                                 <th className="shp-th shp-th-num" rowSpan={2}>Schemes</th>
                                                 {displayMonths[0] && (
-                                                    <th className="shp-th shp-th-month-group shp-month-0" colSpan={2}>{displayMonths[0]}</th>
+                                                    <th className="shp-th shp-th-month-group shp-month-0" colSpan={3}>{displayMonths[0]}</th>
                                                 )}
                                                 {displayMonths.slice(1).map((m, i) => (
-                                                    <th key={m} className={`shp-th shp-th-month-group shp-month-${i + 1}`} colSpan={2}>{m}</th>
+                                                    <th key={m} className={`shp-th shp-th-month-group shp-month-${i + 1}`} colSpan={3}>{m}</th>
                                                 ))}
                                             </tr>
                                             <tr>
                                                 {displayMonths[0] && (
                                                     <>
+                                                        <th className="shp-th shp-th-sub shp-month-0 shp-group-start">
+                                                            <span className="shp-sortable" onClick={() => handleSort('shares_0')}>Quantity{sortArrow('shares_0')}</span>
+                                                        </th>
                                                         <th className="shp-th shp-th-sub shp-month-0">
-                                                            <span className="shp-sortable" onClick={() => handleSort('shares_0')}>Shares Held{sortArrow('shares_0')}</span>
+                                                            <div className="shp-mcap-info" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}>
+                                                                Ownership %
+                                                                <span className="shp-mcap-tooltip" style={{ fontSize: '10px', minWidth: '150px', textAlign: 'center', fontWeight: 'normal', top: '100%', bottom: 'auto', marginTop: '10px', padding: '6px 8px', zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.3)', borderRadius: '6px', color: '#f8fafc', whiteSpace: 'nowrap', textTransform: 'none', letterSpacing: 'normal' }}>
+                                                                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '8.5px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Calculated As</div>
+                                                                    <div style={{ fontWeight: 500, color: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                                                        <span>Total shares held by all funds</span>
+                                                                        <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 300 }}>/</span>
+                                                                        <span>Total outstanding shares</span>
+                                                                    </div>
+                                                                </span>
+                                                            </div>
                                                         </th>
                                                         <th className="shp-th shp-th-sub shp-month-0">Month Change</th>
                                                     </>
                                                 )}
                                                 {displayMonths.slice(1).map((m, i) => (
                                                     <React.Fragment key={m}>
+                                                        <th className={`shp-th shp-th-sub shp-month-${i + 1} shp-group-start`}>
+                                                            <span className="shp-sortable" onClick={() => handleSort(`shares_${i + 1}`)}>Quantity{sortArrow(`shares_${i + 1}`)}</span>
+                                                        </th>
                                                         <th className={`shp-th shp-th-sub shp-month-${i + 1}`}>
-                                                            <span className="shp-sortable" onClick={() => handleSort(`shares_${i + 1}`)}>Shares Held{sortArrow(`shares_${i + 1}`)}</span>
+                                                            <div className="shp-mcap-info" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}>
+                                                                Ownership %
+                                                                <span className="shp-mcap-tooltip" style={{ fontSize: '10px', minWidth: '150px', textAlign: 'center', fontWeight: 'normal', top: '100%', bottom: 'auto', marginTop: '10px', padding: '6px 8px', zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.3)', borderRadius: '6px', color: '#f8fafc', whiteSpace: 'nowrap', textTransform: 'none', letterSpacing: 'normal' }}>
+                                                                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '8.5px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Calculated As</div>
+                                                                    <div style={{ fontWeight: 500, color: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                                                        <span>Total shares held by all funds</span>
+                                                                        <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 300 }}>/</span>
+                                                                        <span>Total outstanding shares</span>
+                                                                    </div>
+                                                                </span>
+                                                            </div>
                                                         </th>
                                                         <th className={`shp-th shp-th-sub shp-month-${i + 1}`}>Month Change</th>
                                                     </React.Fragment>
@@ -544,27 +598,38 @@ export default function StockHoldingsPage() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {amcToRender.map((amc, aIdx) => (
-                                                <tr key={aIdx} className="shp-row">
-                                                    <td className="shp-td shp-td-name">
-                                                        <div className="shp-fund-name">{amc.amc_name}</div>
-                                                        <div className="shp-fund-sub">{amc.scheme_count} scheme{amc.scheme_count !== 1 ? 's' : ''}</div>
-                                                    </td>
-                                                    <td className="shp-td shp-td-num">
-                                                        <span className="shp-scheme-badge">{amc.scheme_count}</span>
-                                                    </td>
-                                                    {amc.history.map((h, hIdx) => (
-                                                        <React.Fragment key={hIdx}>
-                                                            <td className={`shp-td shp-td-num shp-month-${hIdx}`}>
-                                                                {h.num_shares === null ? <span className="shp-not-uploaded" title="AMC Data Not Uploaded">N/A</span> : (h.num_shares > 0 ? fmt(h.num_shares) : '-')}
-                                                            </td>
-                                                            <td className={`shp-td shp-td-num shp-month-${hIdx}`}>
-                                                                <ChangeCell change={h.month_change} pct={null} isLatest={false} />
-                                                            </td>
-                                                        </React.Fragment>
-                                                    ))}
-                                                </tr>
-                                            ))}
+                                            {amcToRender.map((amc, aIdx) => {
+                                                const histMap = {};
+                                                (amc.history || []).forEach(h => { histMap[h.month] = h; });
+
+                                                return (
+                                                    <tr key={aIdx} className="shp-row">
+                                                        <td className="shp-td shp-td-name">
+                                                            <div className="shp-fund-name">{amc.amc_name}</div>
+                                                            <div className="shp-fund-sub">{amc.scheme_count} scheme{amc.scheme_count !== 1 ? 's' : ''}</div>
+                                                        </td>
+                                                        <td className="shp-td shp-td-num">
+                                                            <span className="shp-scheme-badge">{amc.scheme_count}</span>
+                                                        </td>
+                                                        {displayMonths.map((monthLabel, hIdx) => {
+                                                            const h = histMap[monthLabel];
+                                                            return (
+                                                                <React.Fragment key={monthLabel}>
+                                                                    <td className={`shp-td shp-td-num shp-month-${hIdx} shp-group-start`}>
+                                                                        {h && h.num_shares === null ? <span className="shp-not-uploaded" title="AMC Data Not Uploaded">N/A</span> : (h && h.num_shares > 0 ? fmt(h.num_shares) : '-')}
+                                                                    </td>
+                                                                    <td className={`shp-td shp-td-num shp-month-${hIdx}`} style={{ fontWeight: 600 }}>
+                                                                        {holdings.shares_outstanding && h && h.num_shares != null ? fmtPct((h.num_shares / holdings.shares_outstanding) * 100, 4) : '-'}
+                                                                    </td>
+                                                                    <td className={`shp-td shp-td-num shp-month-${hIdx}`}>
+                                                                        {h ? <ChangeCell change={h.month_change} pct={null} /> : <span className="shp-neutral">-</span>}
+                                                                    </td>
+                                                                </React.Fragment>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
