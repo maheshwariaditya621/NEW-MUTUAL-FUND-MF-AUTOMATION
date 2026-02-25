@@ -4,6 +4,7 @@ import ThemeToggle from './components/common/ThemeToggle';
 import Home from './pages/Home';
 import StockHoldingsPage from './pages/StockHoldingsPage';
 import SchemePortfolioPage from './pages/SchemePortfolioPage';
+import HeaderSearch from './components/common/HeaderSearch';
 import './App.css';
 
 function App() {
@@ -14,16 +15,21 @@ function App() {
           <header className="app-header">
             <div className="container">
               <div className="header-content">
-                <Link to="/" className="logo">
-                  <h1>MF Analytics</h1>
-                </Link>
+                <div className="header-left">
+                  <Link to="/" className="logo">
+                    <h1>MF Analytics</h1>
+                  </Link>
 
-                <nav className="nav">
-                  <Link to="/stocks" className="nav-link">Stock Holdings</Link>
-                  <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
-                </nav>
+                  <nav className="nav">
+                    <Link to="/stocks" className="nav-link">Stock Holdings</Link>
+                    <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
+                  </nav>
+                </div>
 
-                <ThemeToggle />
+                <div className="header-right">
+                  <HeaderSearch />
+                  <ThemeToggle />
+                </div>
               </div>
             </div>
           </header>

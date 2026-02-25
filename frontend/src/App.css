@@ -20,14 +20,27 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 32px;
+  height: 64px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
 }
 
 .logo h1 {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   color: var(--accent-primary);
   margin: 0;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  text-transform: uppercase;
 }
 
 .logo:hover h1 {
@@ -37,9 +50,7 @@
 .nav {
   display: flex;
   align-items: center;
-  gap: 24px;
-  flex: 1;
-  justify-content: center;
+  gap: 8px;
 }
 
 .nav-link {

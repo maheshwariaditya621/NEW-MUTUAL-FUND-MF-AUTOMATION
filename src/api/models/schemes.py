@@ -22,7 +22,7 @@ class MonthlyHoldingSnapshot(BaseModel):
     month: str = Field(..., description="Month in YYYY-MM format")
     aum_cr: Decimal = Field(..., description="Assets Under Management in crores")
     percent_to_aum: Decimal = Field(..., description="% of AUM for this holding")
-    num_shares: int = Field(..., description="Number of shares held")
+    num_shares: Optional[int] = Field(None, description="Number of shares held. None if AMC data not uploaded.")
     is_adjusted: bool = Field(False, description="Whether share count was adjusted for corporate actions")
 
 

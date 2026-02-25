@@ -73,14 +73,20 @@ class ZerodhaExtractorV1(BaseExtractor):
                 scheme_info = self.parse_verbose_scheme_name(raw_scheme_name)
                 
                 # Always apply Zerodha-specific cleaning if it looks like a header
-                if "PORTFOLIO" in scheme_info["scheme_name"].upper() or "STATEMENT" in scheme_info["scheme_name"].upper():
+                if "PORTFOLIO" in scheme_info["scheme_name"].upper() or "STATEMENT" in scheme_info["scheme_name"].upper() or "ZERODHA" in scheme_info["scheme_name"].upper():
                     # Surgical extraction of full fund name
                     # Clean up common header junk first
                     name = raw_scheme_name
                     name = re.sub(r'(?i).*?STATEMENTS?\s+OF\s+', '', name)
                     name = re.sub(r'(?i).*?PORTFOLIO\s+OF\s+', '', name)
                     name = re.sub(r'(?i).*?SCHEME\s+PORTFOLIO\s+OF\s+', '', name)
-                    name = re.sub(r'(?i)\s+FOR\s+(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER).*', '', name)
+                    
+                    # Remove "FOR [MONTH] [YEAR]" or standalone "[MONTH] [YEAR]" at the end
+                    months_pattern = r'JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER'
+                    # Remove "FOR NOVEMBER 2025" or similar
+                    name = re.sub(r'(?i)\s+FOR\s+(' + months_pattern + r')\s+\d{4}.*', '', name)
+                    # Remove standalone "NOVEMBER 2025" or "NOVEMBER-2025" or "NOV 2025"
+                    name = re.sub(r'(?i)\s+(' + months_pattern + r'|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[\s-]*\d{4}.*', '', name)
                     
                     # Ensure name still starts with ZERODHA
                     if "ZERODHA" in name.upper():

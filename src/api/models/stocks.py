@@ -24,15 +24,19 @@ class MonthlyHoldingData(BaseModel):
     num_funds: int = Field(..., description="Number of funds holding this stock")
     trend: Optional[str] = Field(None, description="Trend indicator: up/down/same")
     is_adjusted: bool = Field(False, description="Whether the quantity was adjusted for corporate actions")
+    month_change: Optional[int] = Field(None, description="Absolute change in shares from previous month")
+    percent_change: Optional[float] = Field(None, description="Percentage change in shares from previous month")
 
 
 class HistoricalHolding(BaseModel):
     """Holding data for a specific month within a scheme."""
     month: str = Field(..., description="Month in YYYY-MM format")
-    num_shares: int = Field(..., description="Number of shares held")
+    num_shares: Optional[int] = Field(None, description="Number of shares held. None if AMC data not uploaded for this month.")
     percent_to_aum: Decimal = Field(..., description="Percentage of AUM")
     trend: Optional[str] = Field(None, description="Trend indicator: up/down/same")
     is_adjusted: bool = Field(False, description="Whether the quantity was adjusted for corporate actions")
+    month_change: Optional[int] = Field(None, description="Absolute change in shares from previous month")
+    percent_change: Optional[float] = Field(None, description="Percentage change in shares from previous month")
 
 
 class SchemeHolding(BaseModel):

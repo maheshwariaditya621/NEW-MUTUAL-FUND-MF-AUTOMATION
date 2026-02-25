@@ -17,7 +17,7 @@ from src.api.models.stocks import (
     MonthlyHoldingData,
     HistoricalHolding
 )
-from datetime import date
+from datetime import date, datetime
 import calendar
 from src.api.dependencies import get_db_cursor
 from src.config import logger
@@ -28,75 +28,78 @@ router = APIRouter()
 @router.get("/search", response_model=StockSearchResponse)
 async def search_stocks(
     q: str = Query(..., min_length=2, description="Search query (company name, ISIN, or NSE symbol)"),
-    limit: int = Query(1000, ge=1, le=2000, description="Maximum number of results"),
+    limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """
     Search for stocks by company name, ISIN, or NSE symbol.
     
-    Supports ultra-fuzzy multi-word matching on all fields.
+    Supports ultra-fuzzy multi-word matching on all fields with similarity ranking.
     """
     try:
-        # Split query into words and build fuzzy conditions
+        # Clean query
+        q = q.strip()
         words = [w.strip() for w in q.split() if w.strip()]
         if not words:
             return StockSearchResponse(query=q, results=[], total_results=0)
 
-        # Build conditions: Each word must match at least one of the fields
-        placeholders = []
+        # Build conditions: Each word must match via ILIKE or 전체 query similarity
+        # We use a combined approach: ILIKE for word-by-word precision + similarity for overall ranking
+        word_placeholders = []
         conditions = []
+        
+        # Word-based ILIKE conditions (precision)
         for word in words:
             pattern = f"%{word}%"
             conditions.append("(c.company_name ILIKE %s OR c.isin ILIKE %s OR c.nse_symbol ILIKE %s)")
-            placeholders.extend([pattern, pattern, pattern])
+            word_placeholders.extend([pattern, pattern, pattern])
         
-        where_clause = " AND ".join(conditions)
+        conditions_str = " AND ".join(conditions)
         
-        # We need the original query for relevance sorting at the end
-        placeholders.extend([q, q, q, q + '%'])
-        
+        # Final set of placeholders for the query
+        # 1. Ranking CASE (5 %s)
+        # 2. WHERE word conditions (len(word_placeholders) %s)
+        # 3. WHERE OR condition (3 %s)
+        # 4. LIMIT (1 %s)
+        query_placeholders = [
+            q, q, q, q + '%', q  # CASE ranking
+        ] + word_placeholders + [
+            q, f'%{q}%', f'%{q}%', # WHERE OR
+            limit # LIMIT
+        ]
+
+        # For ranking, use global similarity + field priority
+        # Similarity priority is highest for company_name
         cur.execute(
             f"""
-            SELECT DISTINCT ON (COALESCE(c.entity_id::text, c.company_id::text))
+            SELECT DISTINCT ON (relevance_score, COALESCE(c.entity_id::text, c.company_id::text))
                 c.isin,
                 c.company_name,
                 c.sector,
                 c.nse_symbol,
                 c.bse_code,
-                COALESCE(c.entity_id::text, c.company_id::text) as sort_id
-            FROM companies c
-            WHERE {where_clause}
-            ORDER BY 
-                COALESCE(c.entity_id::text, c.company_id::text),
                 CASE 
-                    WHEN UPPER(c.company_name) = UPPER(%s) THEN 1
-                    WHEN c.isin = UPPER(%s) THEN 2
-                    WHEN c.nse_symbol = UPPER(%s) THEN 3
-                    WHEN c.company_name ILIKE %s THEN 4
-                    ELSE 5
-                END,
+                    WHEN UPPER(c.company_name) = UPPER(%s) THEN 100
+                    WHEN c.isin = UPPER(%s) THEN 95
+                    WHEN c.nse_symbol = UPPER(%s) THEN 90
+                    WHEN c.company_name ILIKE %s THEN 85
+                    ELSE (similarity(c.company_name, %s) * 80)::int
+                END as relevance_score
+            FROM companies c
+            WHERE ({conditions_str}) OR (c.company_name %% %s OR c.isin ILIKE %s OR c.nse_symbol ILIKE %s)
+            ORDER BY 
+                relevance_score DESC,
+                COALESCE(c.entity_id::text, c.company_id::text),
                 c.company_name
+            LIMIT %s
             """,
-            placeholders
+            query_placeholders
         )
 
         rows = cur.fetchall()
         
-        # Sort results by relevance
-        def get_relevance(row):
-            isin, name, sector, nse, bse, sort_id = row
-            if name.upper() == q.upper(): return 1
-            if isin == q.upper(): return 2
-            if nse and nse.upper() == q.upper(): return 3
-            if name.upper().startswith(q.upper()): return 4
-            return 5
-
-        sorted_rows = sorted(rows, key=get_relevance)
-        # Apply limit to sorted results
-        sorted_rows = sorted_rows[:limit]
-        
         results = []
-        for row in sorted_rows:
+        for row in rows:
             isin = row[0]
             # Triple equity filter (mandatory in workflow.md)
             if (len(isin) == 12 and 
@@ -116,7 +119,6 @@ async def search_stocks(
             total_results=len(results)
         )
 
-        
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
@@ -199,6 +201,7 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
 async def get_holdings_by_identifier(
     q: str = Query(..., min_length=2, description="Company identifier (ISIN, company name, or NSE symbol)"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
+    end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -230,7 +233,7 @@ async def get_holdings_by_identifier(
         entity_id = entity_row[0] if entity_row else None
         
         # 3. Get holdings (aggregated by entity if available)
-        return await _get_stock_holdings_aggregated(isin, entity_id, company_name, sector, market_cap, mcap_type, mcap_updated_at, months, cur)
+        return await _get_stock_holdings_aggregated(isin, entity_id, company_name, sector, market_cap, mcap_type, mcap_updated_at, months, end_month, cur)
         
     except HTTPException:
         raise
@@ -243,6 +246,7 @@ async def get_holdings_by_identifier(
 async def get_stock_holdings(
     isin: str = Path(..., description="12-character ISIN code"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
+    end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -277,7 +281,7 @@ async def get_stock_holdings(
         company_name, sector, entity_id, market_cap, mcap_type, mcap_updated_at = company_row
         company_name = company_name.upper()
         
-        return await _get_stock_holdings_aggregated(isin.upper(), entity_id, company_name, sector, market_cap, mcap_type, mcap_updated_at, months, cur)
+        return await _get_stock_holdings_aggregated(isin.upper(), entity_id, company_name, sector, market_cap, mcap_type, mcap_updated_at, months, end_month, cur)
         
     except HTTPException:
         raise
@@ -321,6 +325,7 @@ async def _get_stock_holdings_aggregated(
     mcap_type: Optional[str],
     mcap_updated_at: Optional[str],
     months: int,
+    end_month: Optional[str],
     cur: cursor
 ) -> StockHoldingsSummary:
     """
@@ -328,28 +333,40 @@ async def _get_stock_holdings_aggregated(
     Supports multi-month history for each scheme.
     """
     # Always use exactly 4 months window as requested by user
-    # 1. Get the single latest period available in the system
-    cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
-    latest_row = cur.fetchone()
-    if not latest_row:
-        raise HTTPException(status_code=404, detail="No portfolio data available")
-    
-    latest_yr, latest_mo = latest_row
+    # 1. Determine the anchor (latest) period
+    latest_yr, latest_mo = None, None
+    if end_month:
+        try:
+            # Parse 'MMM-YY' like 'NOV-25' -> year 2025, month 11
+            d = datetime.strptime(end_month, "%b-%y")
+            latest_yr = d.year
+            latest_mo = d.month
+        except ValueError:
+            pass
+            
+    if not latest_yr:
+        cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
+        latest_row = cur.fetchone()
+        if not latest_row:
+            raise HTTPException(status_code=404, detail="No portfolio data available")
+        latest_yr, latest_mo = latest_row
+
     current_month_label = date(latest_yr, latest_mo, 1).strftime("%b-%y").upper()
     
-    # 2. Generate exactly 5 months ending at latest_yr, latest_mo (+1 for trend calculation)
-    # We use 5 so we can show 4 months and have the 5th for the 'trend' of the 4th month if needed
-    all_target_periods = [] # list of (year, month)
+    # Use `months` parameter to control how many display periods to show
+    # We fetch months+1 so we can compute month_change for the oldest visible month
+    fetch_count = months + 1
+    all_target_periods = []  # list of (year, month)
     curr_yr, curr_mo = latest_yr, latest_mo
-    for _ in range(5):
+    for _ in range(fetch_count):
         all_target_periods.append((curr_yr, curr_mo))
         curr_mo -= 1
         if curr_mo == 0:
             curr_mo = 12
             curr_yr -= 1
-    
-    # display_periods are the first 4 (newest to oldest)
-    display_periods = all_target_periods[:4]
+
+    # display_periods are the first `months` (newest to oldest)
+    display_periods = all_target_periods[:months]
     
     # 3. Resolve these months to period_ids if they exist
     period_ids_map = {} # (year, month) -> period_id
@@ -421,12 +438,21 @@ async def _get_stock_holdings_aggregated(
         
         # Calculate trend relative to previous month in all_target_periods
         trend = None
+        month_change = None
+        percent_change = None
         prev_idx = idx + 1
         if prev_idx < len(all_target_periods):
             adj_prev_shares = adj_shares_map[all_target_periods[prev_idx]]
-            if adj_shares > adj_prev_shares: trend = "up"
-            elif adj_shares < adj_prev_shares: trend = "down"
-            elif adj_shares > 0: trend = "same"
+            
+            # Only calculate trend and changes if we have previous data (>0).
+            # If prev is 0, it's likely the edge of our dataset, so we shouldn't show +100% or absolute leaps.
+            if adj_prev_shares > 0:
+                if adj_shares > adj_prev_shares: trend = "up"
+                elif adj_shares < adj_prev_shares: trend = "down"
+                else: trend = "same"
+                
+                month_change = adj_shares - adj_prev_shares
+                percent_change = round((month_change / adj_prev_shares) * 100, 2)
         
         # Multiplier check for is_adjusted flag
         mult = 1.0
@@ -438,7 +464,9 @@ async def _get_stock_holdings_aggregated(
             total_shares=adj_shares,
             num_funds=int(funds),
             trend=trend,
-            is_adjusted=mult > 1.001 or mult < 0.999
+            is_adjusted=mult > 1.001 or mult < 0.999,
+            month_change=month_change,
+            percent_change=percent_change
         ))
     
     # 4. Detailed scheme-wise holdings history
@@ -471,6 +499,17 @@ async def _get_stock_holdings_aggregated(
     
     raw_holdings = cur.fetchall()
     
+    # Identify which snapshots actually exist for these schemes to differentiate Missing vs zero holdings
+    scheme_ids = list(set(row[0] for row in raw_holdings))
+    valid_snapshots = set()
+    if scheme_ids:
+        cur.execute("""
+            SELECT scheme_id, period_id 
+            FROM scheme_snapshots 
+            WHERE scheme_id = ANY(%s) AND period_id = ANY(%s)
+        """, (scheme_ids, all_period_ids))
+        valid_snapshots = set((row[0], row[1]) for row in cur.fetchall())
+        
     # Pre-calculate multipliers and organize data
     period_multipliers = {}
     if entity_id:
@@ -496,29 +535,59 @@ async def _get_stock_holdings_aggregated(
 
     holdings = []
     for sid, data in schemes_data.items():
+        # Pre-resolve qtys for all target periods
+        month_qtys = {}
+        for yr, mo in all_target_periods:
+            pid = period_ids_map.get((yr, mo))
+            has_snapshot = (sid, pid) in valid_snapshots if pid else False
+            m_data = data["monthly_data"].get((yr, mo))
+            
+            if m_data:
+                month_qtys[(yr, mo)] = m_data["qty"]
+            elif has_snapshot:
+                month_qtys[(yr, mo)] = 0
+            else:
+                month_qtys[(yr, mo)] = None
+
         history = []
         for idx, (yr, mo) in enumerate(display_periods):
             month_str = date(yr, mo, 1).strftime("%b-%y").upper()
-            m_data = data["monthly_data"].get((yr, mo), {"qty": 0, "pnav": Decimal('0'), "is_adjusted": False})
+            m_data = data["monthly_data"].get((yr, mo), {})
+            
+            curr_qty = month_qtys.get((yr, mo))
+            pnav = m_data.get("pnav", Decimal('0'))
+            is_adj = m_data.get("is_adjusted", False)
             
             trend = None
+            month_change = None
+            percent_change = None
             prev_idx = idx + 1
             if prev_idx < len(all_target_periods):
                 prev_p = all_target_periods[prev_idx]
-                prev_m_data = data["monthly_data"].get(prev_p)
-                if prev_m_data:
-                    if m_data["qty"] > prev_m_data["qty"]: trend = "up"
-                    elif m_data["qty"] < prev_m_data["qty"]: trend = "down"
-                    elif m_data["qty"] > 0: trend = "same"
-                else:
-                    if m_data["qty"] > 0: trend = "up"
+                prev_qty = month_qtys.get(prev_p)
+                
+                if curr_qty is not None and prev_qty is not None:
+                    if curr_qty > prev_qty: trend = "up"
+                    elif curr_qty < prev_qty: trend = "down"
+                    elif curr_qty > 0: trend = "same"
+                    
+                    month_change = curr_qty - prev_qty
+                    if prev_qty > 0:
+                        percent_change = round((month_change / prev_qty) * 100, 2)
+                    elif curr_qty > 0:
+                        percent_change = None
+                elif curr_qty is not None and prev_qty is None:
+                    # Previous month not uploaded, so we can't show change
+                    if curr_qty > 0: trend = "up"
 
             history.append(HistoricalHolding(
                 month=month_str,
-                num_shares=m_data["qty"],
-                percent_to_aum=m_data["pnav"],
+                num_shares=curr_qty,
+                percent_to_aum=pnav,
                 trend=trend,
-                is_adjusted=m_data.get("is_adjusted", False)
+                is_adjusted=is_adj,
+                month_change=month_change,
+                percent_change=percent_change
             ))
 
         if history:

@@ -221,7 +221,8 @@ textarea:focus-visible {
 /* ===== STOCK SUMMARY TABLE (Rupeevest Style) ===== */
 .stock-summary-table-wrapper {
   margin-top: 20px;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 75vh;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
@@ -247,6 +248,10 @@ textarea:focus-visible {
   text-transform: uppercase;
   font-size: 0.75rem;
   letter-spacing: 0.05em;
+  /* Sticky header */
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .stock-summary-table td {

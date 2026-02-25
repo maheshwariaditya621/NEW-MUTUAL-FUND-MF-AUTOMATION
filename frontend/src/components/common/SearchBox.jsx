@@ -10,6 +10,7 @@ export default function SearchBox({
     onSelect,
     loading = false,
     renderSuggestion,
+    dropdownHeader,
     minChars = 2,
     debounceMs = 300
 }) {
@@ -19,11 +20,16 @@ export default function SearchBox({
     const searchRef = useRef(null);
     const inputRef = useRef(null);
 
+    const onSearchRef = useRef(onSearch);
+    useEffect(() => {
+        onSearchRef.current = onSearch;
+    }, [onSearch]);
+
     // Debounced search function
     const debouncedSearch = useRef(
         debounce((value) => {
-            if (value.length >= minChars && onSearch) {
-                onSearch(value);
+            if (value.length >= minChars && onSearchRef.current) {
+                onSearchRef.current(value);
             }
         }, debounceMs)
     ).current;
@@ -127,28 +133,32 @@ export default function SearchBox({
                 )}
             </div>
 
-            {showDropdown && suggestions.length > 0 && (
+            {showDropdown && (query.length >= minChars || dropdownHeader) && (
                 <div className="search-dropdown">
-                    {suggestions.map((item, index) => (
-                        <div
-                            key={index}
-                            className={`search-suggestion ${index === selectedIndex ? 'selected' : ''}`}
-                            onClick={() => handleSelect(item)}
-                            onMouseEnter={() => setSelectedIndex(index)}
-                        >
-                            {renderSuggestion ? renderSuggestion(item) : (
-                                <span>{item.name || item.label || String(item)}</span>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            )}
+                    {dropdownHeader}
 
-            {showDropdown && !loading && suggestions.length === 0 && query.length >= minChars && (
-                <div className="search-dropdown">
-                    <div className="search-empty">
-                        No results found for "{query}"
-                    </div>
+                    {suggestions.length > 0 ? (
+                        <div className="search-results">
+                            {suggestions.map((item, index) => (
+                                <div
+                                    key={index}
+                                    className={`search-suggestion ${index === selectedIndex ? 'selected' : ''}`}
+                                    onClick={() => handleSelect(item)}
+                                    onMouseEnter={() => setSelectedIndex(index)}
+                                >
+                                    {renderSuggestion ? renderSuggestion(item) : (
+                                        <span>{item.name || item.label || String(item)}</span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        !loading && query.length >= minChars && (
+                            <div className="search-empty">
+                                No results found for "{query}"
+                            </div>
+                        )
+                    )}
                 </div>
             )}
         </div>

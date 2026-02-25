@@ -140,10 +140,13 @@
 
 /* Rupeevest Table */
 .rv-table-container {
-    overflow-x: auto;
+    overflow: auto;
+    max-height: 75vh;
     margin-bottom: 20px;
     background: white;
     border-radius: 4px;
+    /* border needed so border-radius shows on scroll container */
+    border: 1px solid var(--rv-border);
 }
 
 .rv-table {
@@ -162,6 +165,10 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
     font-weight: 500;
     white-space: nowrap;
+    /* Sticky header */
+    position: sticky;
+    top: 0;
+    z-index: 2;
 }
 
 .rv-table th.rv-sub-header {

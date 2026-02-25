@@ -7,7 +7,7 @@ Provides APIs for searching schemes and viewing their equity portfolios.
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, Depends, Path
 from psycopg2.extensions import cursor
-from datetime import date
+from datetime import date, datetime
 import calendar
 from decimal import Decimal
 from collections import defaultdict
@@ -31,21 +31,22 @@ router = APIRouter()
 @router.get("/search", response_model=SchemeSearchResponse)
 async def search_schemes(
     q: str = Query(..., min_length=2, description="Search query (scheme name or AMC name)"),
-    limit: int = Query(1000, ge=1, le=2000, description="Maximum number of results"),
+    limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """
     Search for mutual fund schemes by name or AMC.
     
-    Supports ultra-fuzzy multi-word matching on scheme names and AMC names.
+    Supports ultra-fuzzy multi-word matching on scheme names and AMC names with similarity ranking.
     """
     try:
-        # Split query into words and build fuzzy conditions
+        # Clean query
+        q = q.strip()
         words = [w.strip() for w in q.split() if w.strip()]
         if not words:
             return SchemeSearchResponse(query=q, results=[], total_results=0)
 
-        # Build conditions: Each word must match at least one of the fields
+        # Build conditions: Each word must match via ILIKE on scheme or AMC
         placeholders = []
         conditions = []
         for word in words:
@@ -53,11 +54,22 @@ async def search_schemes(
             conditions.append("(s.scheme_name ILIKE %s OR a.amc_name ILIKE %s)")
             placeholders.extend([pattern, pattern])
         
-        where_clause = " AND ".join(conditions)
+        conditions_str = " AND ".join(conditions)
         
-        # Original query placeholders for CASE relevance
-        placeholders.extend([q, q + '%', limit])
-        
+        # word_placeholders contains 2 * len(words) entries
+        # query_placeholders order:
+        # 1. CASE ranking (3 %s)
+        # 2. WHERE word conditions (len(placeholders) %s)
+        # 3. WHERE OR condition (2 %s)
+        # 4. LIMIT (1 %s)
+        query_placeholders = [
+            q, q + '%', q  # CASE ranking
+        ] + placeholders + [
+            q, f'%{q}%',   # WHERE OR
+            limit          # LIMIT
+        ]
+
+        # Original query placeholders for CASE relevance + similarity
         cur.execute(
             f"""
             SELECT 
@@ -65,22 +77,23 @@ async def search_schemes(
                 s.scheme_name,
                 a.amc_name,
                 s.plan_type,
-                s.option_type
+                s.option_type,
+                CASE 
+                    WHEN UPPER(s.scheme_name) = UPPER(%s) THEN 100
+                    WHEN s.scheme_name ILIKE %s THEN 85
+                    ELSE (similarity(s.scheme_name, %s) * 80)::int
+                END as relevance_score
             FROM schemes s
             JOIN amcs a ON s.amc_id = a.amc_id
-            WHERE {where_clause}
+            WHERE ({conditions_str}) OR (s.scheme_name %% %s OR s.scheme_name ILIKE %s)
             ORDER BY 
-                CASE 
-                    WHEN UPPER(s.scheme_name) = UPPER(%s) THEN 1
-                    WHEN s.scheme_name ILIKE %s THEN 2
-                    ELSE 3
-                END,
+                relevance_score DESC,
                 s.scheme_name,
                 s.plan_type,
                 s.option_type
             LIMIT %s
             """,
-            placeholders
+            query_placeholders
         )
         
         results = []
@@ -91,7 +104,7 @@ async def search_schemes(
                 amc_name=row[2],
                 plan_type=row[3],
                 option_type=row[4],
-                category=None  # We don't have category in DB yet
+                category=None
             ))
         
         return SchemeSearchResponse(
@@ -192,6 +205,7 @@ def _resolve_scheme_id(identifier: str, cur: cursor) -> tuple[int, str, str, str
 async def get_portfolio_by_identifier(
     q: str = Query(..., min_length=2, description="Scheme identifier (scheme ID or scheme name)"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show"),
+    end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -219,7 +233,7 @@ async def get_portfolio_by_identifier(
         
         # Get portfolio using the resolved scheme_id
         return await _get_scheme_portfolio_by_id(
-            scheme_id, scheme_name, amc_name, plan_type, option_type, months, cur
+            scheme_id, scheme_name, amc_name, plan_type, option_type, months, end_month, cur
         )
         
     except HTTPException:
@@ -233,6 +247,7 @@ async def get_portfolio_by_identifier(
 async def get_scheme_portfolio(
     scheme_id: int = Path(..., description="Scheme ID"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show"),
+    end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -271,7 +286,7 @@ async def get_scheme_portfolio(
         scheme_id, scheme_name, amc_name, plan_type, option_type = scheme_row
         
         return await _get_scheme_portfolio_by_id(
-            scheme_id, scheme_name, amc_name, plan_type, option_type, months, cur
+            scheme_id, scheme_name, amc_name, plan_type, option_type, months, end_month, cur
         )
         
     except HTTPException:
@@ -314,6 +329,7 @@ async def _get_scheme_portfolio_by_id(
     plan_type: str,
     option_type: str,
     months: int,
+    end_month: Optional[str],
     cur: cursor
 ) -> SchemePortfolioSummary:
     """
@@ -332,13 +348,23 @@ async def _get_scheme_portfolio_by_id(
         SchemePortfolioSummary
     """
     # Always return exactly 4 months window as requested by user
-    # 1. Get the single latest period available in the system
-    cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
-    latest_row = cur.fetchone()
-    if not latest_row:
-        raise HTTPException(status_code=404, detail="No portfolio data available")
-    
-    latest_yr, latest_mo = latest_row
+    # 1. Determine the anchor (latest) period
+    latest_yr, latest_mo = None, None
+    if end_month:
+        try:
+            # Parse 'MMM-YY' like 'NOV-25' -> year 2025, month 11
+            d = datetime.strptime(end_month, "%b-%y")
+            latest_yr = d.year
+            latest_mo = d.month
+        except ValueError:
+            pass
+            
+    if not latest_yr:
+        cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
+        latest_row = cur.fetchone()
+        if not latest_row:
+            raise HTTPException(status_code=404, detail="No portfolio data available")
+        latest_yr, latest_mo = latest_row
     
     # 2. Generate exactly 4 months ending at latest_yr, latest_mo
     target_months = [] # list of (year, month)
@@ -363,7 +389,7 @@ async def _get_scheme_portfolio_by_id(
             
     period_ids_list = [pid for pid in period_ids_map.values()]
     
-    # Get snapshots map for efficient lookup
+    # Get snapshots map for efficient lookup (and to know what truly exists in DB)
     cur.execute(
         """
         SELECT 
@@ -376,6 +402,11 @@ async def _get_scheme_portfolio_by_id(
         (scheme_id, period_ids_list)
     )
     snapshots_map = {row[0]: row for row in cur.fetchall()}
+    
+    # Track valid snapshots explicitly
+    valid_snapshots = set()
+    for pid in snapshots_map.keys():
+        valid_snapshots.add(pid)
     
     monthly_aum = []
     for yr, mo in target_months:
@@ -475,10 +506,12 @@ async def _get_scheme_portfolio_by_id(
             for yr, mo in target_months:
                 multipliers[date(yr, mo, 1).strftime("%b-%y").upper()] = await _get_cumulative_multiplier(entity_data["entity_id"], yr, mo, cur)
         
-        # Create snapshots for each month in the 4-month target window (fill with zeros if missing)
+        # Create snapshots for each month in the 4-month target window
         for year, month in target_months:
             month_str = date(year, month, 1).strftime("%b-%y").upper()
+            pid = period_ids_map.get((year, month))
             
+            # Scenario A: Snapshot exists, and holding data exists for it
             if month_str in entity_data["monthly_data"]:
                 data = entity_data["monthly_data"][month_str]
                 multiplier = multipliers.get(month_str, 1.0)
@@ -491,13 +524,23 @@ async def _get_scheme_portfolio_by_id(
                     num_shares=adjusted_qty,
                     is_adjusted=multiplier > 1.001 or multiplier < 0.999
                 ))
+            # Scenario B: Snapshot exists, but holding NOT present (0 shares now)
+            elif pid in valid_snapshots:
+                sn = snapshots_map[pid]
+                monthly_snapshots.append(MonthlyHoldingSnapshot(
+                    month=month_str,
+                    aum_cr=Decimal(str(sn[1])).quantize(Decimal('0.01')),
+                    percent_to_aum=Decimal('0.0'),
+                    num_shares=0,
+                    is_adjusted=False
+                ))
+            # Scenario C: Snapshot DOES NOT exist (AMC data not uploaded)
             else:
-                # Add empty snapshot to maintain fixed 4-month alignment
                 monthly_snapshots.append(MonthlyHoldingSnapshot(
                     month=month_str,
                     aum_cr=Decimal('0.0'),
                     percent_to_aum=Decimal('0.0'),
-                    num_shares=0,
+                    num_shares=None,
                     is_adjusted=False
                 ))
         

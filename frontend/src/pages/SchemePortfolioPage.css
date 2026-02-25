@@ -141,3 +141,449 @@
         font-size: 16px;
     }
 }
+
+/* ── Merged Header Controls Toolbar ── */
+.shp-controls-header {
+    padding: 12px 16px;
+    background: var(--shp-header-bg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+.shp-controls-header .shp-picker-label {
+    color: var(--shp-header-color);
+    opacity: 0.9;
+}
+
+.shp-controls-header .shp-view-toggle {
+    background: rgba(0, 0, 0, 0.2);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.shp-controls-header .shp-toggle-btn {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.shp-controls-header .shp-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.shp-controls-header .shp-toggle-btn.active {
+    background: var(--accent-primary, #3b82f6);
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.shp-controls-header .shp-picker-select,
+.shp-controls-header .shp-search-input {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: transparent;
+    color: #111827;
+}
+
+.shp-controls-header .shp-search-input::placeholder {
+    color: #6b7280;
+}
+
+[data-theme="dark"] .shp-controls-header .shp-picker-select,
+[data-theme="dark"] .shp-controls-header .shp-search-input {
+    background: rgba(0, 0, 0, 0.35);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .shp-controls-header .shp-search-input::placeholder {
+    color: #cbd5e1;
+}
+
+.shp-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TABLE
+   ══════════════════════════════════════════════════════════════ */
+.shp-table-wrap {
+    overflow: auto;
+    max-height: 75vh;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+}
+
+.shp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    table-layout: auto;
+}
+
+/* ── Headers ─────────────────────────────────────────────────── */
+.shp-th {
+    padding: 10px 12px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-align: center;
+    background: var(--shp-header-bg);
+    color: var(--shp-header-color);
+    position: sticky;
+    top: 0;
+    /* Row 1: month group headers */
+    z-index: 3;
+}
+
+.shp-th.shp-th-name {
+    text-align: left;
+    min-width: 200px;
+    max-width: 270px;
+}
+
+.shp-th.shp-th-num {
+    min-width: 80px;
+}
+
+.shp-th.shp-th-month-group {
+    font-size: 11.5px;
+    letter-spacing: 1px;
+    padding: 9px 12px;
+    border-bottom: 1.5px solid rgba(255, 255, 255, 0.18);
+}
+
+.shp-th.shp-th-sub {
+    font-size: 9.5px;
+    letter-spacing: 0.4px;
+    padding: 7px 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+    color: var(--shp-subheader-color);
+    top: 38px;
+    /* Row 2: sits below the 38px group header row */
+    z-index: 2;
+}
+
+/* ── Month group tints — header cells ────────────────────────── */
+.shp-th.shp-month-0 {
+    background: var(--shp-m0-bg) !important;
+}
+
+.shp-th.shp-month-1 {
+    background: var(--shp-m1-bg) !important;
+}
+
+.shp-th.shp-month-2 {
+    background: var(--shp-m2-bg) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-0 {
+    background: var(--shp-m0-sub-bg) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-1 {
+    background: var(--shp-m1-sub-bg) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-2 {
+    background: var(--shp-m2-sub-bg) !important;
+}
+
+/* ── Month group borders — bold at group start, faint inside ─── */
+
+/* Group row-1 header spans — always the bold left border */
+.shp-th.shp-th-month-group.shp-month-0 {
+    border-left: 3.5px solid var(--shp-m0-border) !important;
+}
+
+.shp-th.shp-th-month-group.shp-month-1 {
+    border-left: 3.5px solid var(--shp-m1-border) !important;
+}
+
+.shp-th.shp-th-month-group.shp-month-2 {
+    border-left: 3.5px solid var(--shp-m2-border) !important;
+}
+
+/* Sub-header — faint inside, bold only at group start */
+.shp-th.shp-th-sub.shp-month-0 {
+    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-1 {
+    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-2 {
+    border-left: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.shp-th.shp-th-sub.shp-group-start.shp-month-0 {
+    border-left: 3.5px solid var(--shp-m0-border) !important;
+}
+
+.shp-th.shp-th-sub.shp-group-start.shp-month-1 {
+    border-left: 3.5px solid var(--shp-m1-border) !important;
+}
+
+.shp-th.shp-th-sub.shp-group-start.shp-month-2 {
+    border-left: 3.5px solid var(--shp-m2-border) !important;
+}
+
+/* ── Body Rows ────────────────────────────────────────────────── */
+.shp-td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.shp-td.shp-td-name {
+    text-align: left;
+}
+
+.shp-td.shp-td-num {
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    letter-spacing: 0.1px;
+}
+
+/* Data cells — faint inside, bold at group start */
+.shp-td.shp-month-0 {
+    border-left: 1px solid var(--shp-td-inner-m0) !important;
+}
+
+.shp-td.shp-month-1 {
+    border-left: 1px solid var(--shp-td-inner-m1) !important;
+}
+
+.shp-td.shp-month-2 {
+    border-left: 1px solid var(--shp-td-inner-m2) !important;
+}
+
+.shp-td.shp-group-start.shp-month-0 {
+    border-left: 3.5px solid var(--shp-m0-border) !important;
+}
+
+.shp-td.shp-group-start.shp-month-1 {
+    border-left: 3.5px solid var(--shp-m1-border) !important;
+}
+
+.shp-td.shp-group-start.shp-month-2 {
+    border-left: 3.5px solid var(--shp-m2-border) !important;
+}
+
+/* ── ZEBRA STRIPING ─────────────────────────────────────────── */
+.shp-row:nth-child(odd) .shp-td {
+    background: var(--shp-row-odd-bg);
+}
+
+.shp-row:nth-child(even) .shp-td {
+    background: var(--shp-row-even-bg);
+}
+
+/* Month tints over zebra */
+.shp-row:nth-child(odd) .shp-td.shp-month-0 {
+    background: var(--shp-td-m0-odd);
+}
+
+.shp-row:nth-child(even) .shp-td.shp-month-0 {
+    background: var(--shp-td-m0-even);
+}
+
+.shp-row:nth-child(odd) .shp-td.shp-month-1 {
+    background: var(--shp-td-m1-odd);
+}
+
+.shp-row:nth-child(even) .shp-td.shp-month-1 {
+    background: var(--shp-td-m1-even);
+}
+
+.shp-row:nth-child(odd) .shp-td.shp-month-2 {
+    background: var(--shp-td-m2-odd);
+}
+
+.shp-row:nth-child(even) .shp-td.shp-month-2 {
+    background: var(--shp-td-m2-even);
+}
+
+/* Hover — full row highlight */
+.shp-row:hover .shp-td {
+    background: rgba(37, 99, 235, 0.07) !important;
+    transition: background 0.1s ease;
+}
+
+/* ── Sortable header ─────────────────────────────────────────── */
+.shp-sortable {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.shp-sortable:hover {
+    color: #fff;
+}
+
+/* ── Fund Name Cell ─────────────────────────────────────────── */
+.shp-fund-name {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--shp-fund-link);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.shp-fund-sub {
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+/* ── Change Cell ─────────────────────────────────────────────── */
+.shp-change-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    line-height: 1.2;
+}
+
+.shp-change-cell>span:first-child {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.1px;
+}
+
+.shp-change-pct {
+    font-size: 10px !important;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-top: 2px;
+}
+
+/* Color classes */
+.shp-pos {
+    color: #15803d;
+}
+
+.shp-neg {
+    color: #dc2626;
+}
+
+.shp-neutral {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .shp-pos {
+    color: #4ade80;
+}
+
+[data-theme="dark"] .shp-neg {
+    color: #f87171;
+}
+
+/* Pill backgrounds */
+.shp-change-pct.shp-pos {
+    background: rgba(21, 128, 61, 0.1);
+}
+
+.shp-change-pct.shp-neg {
+    background: rgba(220, 38, 38, 0.1);
+}
+
+.shp-change-pct.shp-neutral {
+    background: rgba(100, 116, 139, 0.1);
+}
+
+[data-theme="dark"] .shp-change-pct.shp-pos {
+    background: rgba(74, 222, 128, 0.12);
+}
+
+[data-theme="dark"] .shp-change-pct.shp-neg {
+    background: rgba(248, 113, 113, 0.12);
+}
+
+/* ── Schme Badge ─────────────────────────────────────────────── */
+.shp-scheme-badge {
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+[data-theme="dark"] .shp-scheme-badge {
+    background: #1e3a5f;
+    color: #93c5fd;
+}
+
+/* ── Empty states ────────────────────────────────────────────── */
+.shp-empty {
+    text-align: center;
+    padding: 28px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.shp-empty-state {
+    text-align: center;
+    padding: 72px 40px;
+    color: var(--text-secondary);
+}
+
+.shp-empty-icon {
+    font-size: 48px;
+    margin-bottom: 14px;
+}
+
+.shp-empty-state p {
+    font-size: 14px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .shp-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .shp-controls-right {
+        flex-wrap: wrap;
+    }
+
+    .shp-search-input {
+        width: 100%;
+    }
+
+    .shp-meta-bar {
+        flex-direction: column;
+    }
+
+    .shp-meta-item {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .shp-meta-item:last-child {
+        border-bottom: none;
+    }
+}

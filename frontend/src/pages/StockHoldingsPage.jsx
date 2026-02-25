@@ -1,48 +1,114 @@
-import React, { useState } from 'react';
-import SearchBox from '../components/common/SearchBox';
-import Card from '../components/common/Card';
-import Table from '../components/common/Table';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import { searchStocks, getStockHoldings } from '../api/stocks';
 import { handleApiError } from '../api/client';
-import { formatCrores, formatPercent, formatNumber } from '../utils/helpers';
+import { formatNumber } from '../utils/helpers';
 import './StockHoldingsPage.css';
-import '../components/common/RupeevestTable.css';
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+const fmt = (n) => (n != null && n !== 0) ? Number(n).toLocaleString('en-IN') : '-';
+const fmtCr = (n) => (n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '-');
+const fmtPct = (n, digits = 2) => (n != null ? `${Number(n).toFixed(digits)}%` : '-');
+
+// ── Month label helpers ───────────────────────────────────────────────────────
+// Label format used throughout: "JAN-26", "DEC-25", etc.
+const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+function labelToDate(label) {
+    // "JAN-26" → Date(2026, 0)
+    const [mon, yr] = label.split('-');
+    const m = MONTH_NAMES.indexOf(mon.toUpperCase());
+    const y = parseInt(yr, 10) + 2000;
+    return new Date(y, m);
+}
+
+function dateToLabel(date) {
+    // Date(2026, 0) → "JAN-26"
+    return `${MONTH_NAMES[date.getMonth()]}-${String(date.getFullYear()).slice(2)}`;
+}
+
+// Returns array of N month labels ending at endLabel (newest first)
+function computeDisplayMonths(endLabel, n = 3) {
+    const end = labelToDate(endLabel);
+    const result = [];
+    for (let i = 0; i < n; i++) {
+        const d = new Date(end.getFullYear(), end.getMonth() - i);
+        result.push(dateToLabel(d));
+    }
+    return result;
+}
+
+function ChangeCell({ change, pct }) {
+    if (change == null || change === 0) return <span className="shp-neutral">-</span>;
+    const isPos = change > 0;
+    const isNeg = change < 0;
+    const cls = isPos ? 'shp-pos' : isNeg ? 'shp-neg' : 'shp-neutral';
+    const sign = isPos ? '+' : '';
+
+    return (
+        <div className="shp-change-cell">
+            <span className={cls}>{sign}{fmt(change)}</span>
+            {pct != null && (
+                <span className={`shp-change-pct ${cls}`}>
+                    {sign}{pct.toFixed(2)}%
+                </span>
+            )}
+        </div>
+    );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
-    const [suggestions, setSuggestions] = useState([]);
-    const [searchLoading, setSearchLoading] = useState(false);
-    const [selectedStock, setSelectedStock] = useState(null);
+    const [searchParams] = useSearchParams();
+    const isinParam = searchParams.get('isin');
+
     const [holdings, setHoldings] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [sortConfig, setSortConfig] = useState({ key: 'shares_latest', direction: 'desc' });
+    const [viewMode, setViewMode] = useState('scheme'); // 'scheme' | 'amc'
     const [filterText, setFilterText] = useState('');
+    const [sortConfig, setSortConfig] = useState({ key: 'shares_0', direction: 'desc' });
+    const [selectedMonth, setSelectedMonth] = useState(null); // label of selected end month
 
-    const handleSearch = async (query) => {
-        setSearchLoading(true);
-        setError(null);
+    // ── Available months for the dropdown ─────────────────────────────────────
+    // We collect all unique month labels ever seen across API responses
+    // and derive a sorted dropdown list from them.
+    const [allAvailableMonths, setAllAvailableMonths] = useState([]); // newest-first sorted list
 
-        try {
-            const result = await searchStocks(query, 1000);
-            setSuggestions(result.results || []);
-        } catch (err) {
-            console.error('Search error:', err);
-            setSuggestions([]);
-        } finally {
-            setSearchLoading(false);
-        }
-    };
+    // After new data arrives, expand the known-months list
+    useEffect(() => {
+        if (!holdings?.holdings?.[0]?.history) return;
+        const seen = new Set(holdings.holdings[0].history.map(h => h.month));
+        setAllAvailableMonths(prev => {
+            const merged = Array.from(new Set([...prev, ...seen]));
+            merged.sort((a, b) => labelToDate(b) - labelToDate(a)); // newest first
+            return merged;
+        });
+    }, [holdings]);
 
-    const handleSelectStock = async (stock) => {
-        setSelectedStock(stock);
+    // ── displayMonths: always exactly 3 months ending at the selected period ──
+    // Computed deterministically — not derived from API response.
+    const displayMonths = useMemo(() => {
+        // If user has selected a period AND we have data, use that period.
+        if (selectedMonth) return computeDisplayMonths(selectedMonth, 3);
+        // Default: use the latest month from what the API returned.
+        const latest = holdings?.holdings?.[0]?.history?.[0]?.month;
+        if (latest) return computeDisplayMonths(latest, 3);
+        return [];
+    }, [selectedMonth, holdings]);
+
+    useEffect(() => {
+        if (isinParam) fetchHoldings(isinParam, null);
+    }, [isinParam]);
+
+    const fetchHoldings = async (isin, endMonth) => {
         setLoading(true);
         setError(null);
         setHoldings(null);
-
         try {
-            const data = await getStockHoldings(stock.isin, 4);
+            const data = await getStockHoldings(isin, 3, endMonth);
             setHoldings(data);
         } catch (err) {
             setError(handleApiError(err));
@@ -51,327 +117,469 @@ export default function StockHoldingsPage() {
         }
     };
 
-    const handleSort = (key) => {
-        let direction = 'desc';
-        if (sortConfig.key === key && sortConfig.direction === 'desc') {
-            direction = 'asc';
-        }
-        setSortConfig({ key, direction });
+    const handleMonthChange = (monthLabel) => {
+        // monthLabel: "JAN-26" | "" (latest)
+        const val = monthLabel || null;
+        setSelectedMonth(val);
+        if (isinParam) fetchHoldings(isinParam, val);
     };
 
-    const getHoldingsToRender = () => {
-        if (!holdings || !holdings.holdings) return [];
+    const handleSort = (key) => {
+        setSortConfig(prev => ({
+            key,
+            direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+        }));
+    };
 
+    const sortArrow = (key) =>
+        sortConfig.key === key ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : '';
+
+    // ── AMC Aggregation ───────────────────────────────────────────────────────
+    const amcAggregated = useMemo(() => {
+        if (!holdings?.holdings) return [];
+        const map = {};
+        for (const scheme of holdings.holdings) {
+            const amc = scheme.amc_name;
+            if (!map[amc]) {
+                map[amc] = {
+                    amc_name: amc,
+                    scheme_count: 0,
+                    aum_cr: 0,
+                    history: scheme.history.map(h => ({ ...h, num_shares: null, month_change: 0 })),
+                };
+            }
+            const entry = map[amc];
+            entry.scheme_count += 1;
+            entry.aum_cr += (parseFloat(scheme.aum_cr) || 0);
+            scheme.history.forEach((h, idx) => {
+                if (entry.history[idx]) {
+                    if (h.num_shares !== null) {
+                        if (entry.history[idx].num_shares === null) {
+                            entry.history[idx].num_shares = 0;
+                        }
+                        entry.history[idx].num_shares += h.num_shares;
+                    }
+                    entry.history[idx].month_change = (entry.history[idx].month_change || 0) + (h.month_change || 0);
+                }
+            });
+        }
+        return Object.values(map);
+    }, [holdings]);
+
+    // ── Filtered + Sorted scheme list ─────────────────────────────────────────
+    const schemesToRender = useMemo(() => {
+        if (!holdings?.holdings) return [];
         let items = [...holdings.holdings];
-
-        // 1. Filter
         if (filterText) {
-            const lowFilter = filterText.toLowerCase();
+            const low = filterText.toLowerCase();
             items = items.filter(h =>
-                h.scheme_name.toLowerCase().includes(lowFilter) ||
-                h.amc_name.toLowerCase().includes(lowFilter)
+                h.scheme_name.toLowerCase().includes(low) ||
+                h.amc_name.toLowerCase().includes(low)
             );
         }
-
-        // 2. Sort
         items.sort((a, b) => {
             let aVal, bVal;
-
-            if (sortConfig.key === 'scheme_name') {
-                aVal = a.scheme_name;
-                bVal = b.scheme_name;
-            } else if (sortConfig.key === 'aum_cr') {
-                aVal = a.aum_cr || 0;
-                bVal = b.aum_cr || 0;
-            } else if (sortConfig.key === 'pnav') {
-                aVal = a.history[0]?.percent_to_aum || 0;
-                bVal = b.history[0]?.percent_to_aum || 0;
-            } else if (sortConfig.key.startsWith('shares_')) {
-                const monthIdx = parseInt(sortConfig.key.split('_')[1]);
-                aVal = a.history[monthIdx]?.num_shares || 0;
-                bVal = b.history[monthIdx]?.num_shares || 0;
+            if (sortConfig.key === 'scheme_name') { aVal = a.scheme_name; bVal = b.scheme_name; }
+            else if (sortConfig.key === 'aum_cr') { aVal = parseFloat(a.aum_cr) || 0; bVal = parseFloat(b.aum_cr) || 0; }
+            else if (sortConfig.key === 'pnav') { aVal = parseFloat(a.history[0]?.percent_to_aum) || 0; bVal = parseFloat(b.history[0]?.percent_to_aum) || 0; }
+            else if (sortConfig.key.startsWith('shares_')) {
+                const idx = parseInt(sortConfig.key.split('_')[1]);
+                aVal = a.history[idx]?.num_shares || 0; bVal = b.history[idx]?.num_shares || 0;
             }
-
             if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
             if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
             return 0;
         });
-
         return items;
-    };
+    }, [holdings, filterText, sortConfig]);
 
-    const renderSuggestion = (stock) => (
-        <div className="stock-suggestion">
-            <div className="stock-suggestion-main">
-                <span className="stock-name">{stock.company_name}</span>
-                {stock.nse_symbol && (
-                    <span className="stock-symbol">{stock.nse_symbol}</span>
+    // ── Filtered + Sorted AMC list ────────────────────────────────────────────
+    const amcToRender = useMemo(() => {
+        let items = [...amcAggregated];
+        if (filterText) {
+            const low = filterText.toLowerCase();
+            items = items.filter(h => h.amc_name.toLowerCase().includes(low));
+        }
+        items.sort((a, b) => {
+            let aVal, bVal;
+            if (sortConfig.key === 'amc_name') { aVal = a.amc_name; bVal = b.amc_name; }
+            else if (sortConfig.key === 'aum_cr') { aVal = a.aum_cr; bVal = b.aum_cr; }
+            else if (sortConfig.key.startsWith('shares_')) {
+                const idx = parseInt(sortConfig.key.split('_')[1]);
+                aVal = a.history[idx]?.num_shares || 0; bVal = b.history[idx]?.num_shares || 0;
+            }
+            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return items;
+    }, [amcAggregated, filterText, sortConfig]);
+
+    // ── Shared Table Header ───────────────────────────────────────────────────
+    // Latest month: Fund AUM | % AUM | Shares Held | Month Change | % Change  (5 sub-cols)
+    // Older months: Shares Held | Month Change (pct inline) | % AUM            (3 sub-cols)
+    const renderSchemeHeader = () => (
+        <thead>
+            {/* Row 1: Group headers */}
+            <tr>
+                <th className="shp-th shp-th-name" rowSpan={2}>
+                    <span className="shp-sortable" onClick={() => handleSort('scheme_name')}>
+                        Fund Name{sortArrow('scheme_name')}
+                    </span>
+                </th>
+                {/* Latest month: 4 sub-cols */}
+                {displayMonths[0] && (
+                    <th className="shp-th shp-th-month-group shp-month-0" colSpan={4}>
+                        {displayMonths[0]}
+                    </th>
                 )}
-            </div>
-            <div className="stock-suggestion-meta">
-                <span className="stock-isin">{stock.isin}</span>
-                {stock.sector && (
-                    <span className="stock-sector">{stock.sector}</span>
+                {/* Older months: 2 sub-cols each */}
+                {displayMonths.slice(1).map((m, i) => (
+                    <th key={m} className={`shp-th shp-th-month-group shp-month-${i + 1}`} colSpan={2}>
+                        {m}
+                    </th>
+                ))}
+            </tr>
+            {/* Row 2: Sub-column headers */}
+            <tr>
+                {/* Latest month sub-cols */}
+                {displayMonths[0] && (
+                    <>
+                        {/* First sub-col gets shp-group-start for bold group border */}
+                        <th className="shp-th shp-th-sub shp-month-0 shp-group-start">
+                            <span className="shp-sortable" onClick={() => handleSort('aum_cr')}>
+                                Fund AUM (Cr){sortArrow('aum_cr')}
+                            </span>
+                        </th>
+                        <th className="shp-th shp-th-sub shp-month-0">
+                            <span className="shp-sortable" onClick={() => handleSort('pnav')}>
+                                % of AUM{sortArrow('pnav')}
+                            </span>
+                        </th>
+                        <th className="shp-th shp-th-sub shp-month-0">
+                            <span className="shp-sortable" onClick={() => handleSort('shares_0')}>
+                                Shares Held{sortArrow('shares_0')}
+                            </span>
+                        </th>
+                        <th className="shp-th shp-th-sub shp-month-0">Month Change</th>
+                    </>
                 )}
-            </div>
-        </div>
+                {/* Older months sub-cols */}
+                {displayMonths.slice(1).map((m, i) => (
+                    <React.Fragment key={m}>
+                        {/* First sub-col of older month gets shp-group-start */}
+                        <th className={`shp-th shp-th-sub shp-month-${i + 1} shp-group-start`}>
+                            <span className="shp-sortable" onClick={() => handleSort(`shares_${i + 1}`)}>
+                                Shares Held{sortArrow(`shares_${i + 1}`)}
+                            </span>
+                        </th>
+                        <th className={`shp-th shp-th-sub shp-month-${i + 1}`}>Month Change</th>
+                    </React.Fragment>
+                ))}
+            </tr>
+        </thead>
     );
 
-    const historyMonths = holdings && holdings.holdings.length > 0
-        ? holdings.holdings[0].history.map(h => h.month)
-        : [];
+    const renderSchemeRow = (scheme, idx) => {
+        // Build a lookup map: month label → history entry
+        const histMap = {};
+        (scheme.history || []).forEach(h => { histMap[h.month] = h; });
 
-    const holdingsColumns = [
-        {
-            key: 'scheme_name',
-            label: 'Scheme Name',
-            sortable: true,
-            render: (value, row) => (
-                <div>
-                    <div className="scheme-name">{value}</div>
-                    <div className="scheme-meta">
-                        {row.amc_name} • {row.plan_type} • {row.option_type}
-                    </div>
-                </div>
-            )
-        },
-        {
-            key: 'aum_cr',
-            label: 'Eq. AUM (Cr)',
-            sortable: true,
-            className: 'text-right',
-            render: (value) => formatCrores(value * 10000000)
-        }
-    ];
+        return (
+            <tr key={idx} className="shp-row">
+                {/* Fund Name + AMC below */}
+                <td className="shp-td shp-td-name">
+                    <div className="shp-fund-name">{scheme.scheme_name}</div>
+                    <div className="shp-fund-sub">{scheme.amc_name}</div>
+                </td>
 
-    if (historyMonths.length > 0) {
-        // % to NAV Column (Latest)
-        holdingsColumns.push({
-            key: 'pnav_latest',
-            label: `% to NAV (${historyMonths[0]})`,
-            sortable: true,
-            className: 'text-right',
-            sortValue: (row) => parseFloat(row.history[0]?.percent_to_aum || 0),
-            render: (_, row) => formatPercent(row.history[0]?.percent_to_aum || 0)
-        });
-
-        // Shares Columns (Dynamic)
-        historyMonths.forEach((month, idx) => {
-            holdingsColumns.push({
-                key: `shares_${month}`,
-                label: `Shares (${month})`,
-                sortable: true,
-                className: 'text-right',
-                sortValue: (row) => row.history[idx]?.num_shares || 0,
-                render: (_, row) => {
-                    const h = row.history[idx];
-                    if (!h) return <span className="text-muted">-</span>;
-                    return (
-                        <div className="shares-cell">
-                            <div className="shares-wrapper">
-                                <span>{formatNumber(h.num_shares)}</span>
-                                {h.is_adjusted && (
-                                    <i className="info-icon" title="Quantity adjusted for corporate actions (splits/bonuses)">i</i>
-                                )}
-                            </div>
-                            {h.trend === 'up' && <span className="trend-up">▲</span>}
-                            {h.trend === 'down' && <span className="trend-down">▼</span>}
-                        </div>
+                {/* Latest month (displayMonths[0]): 4 cols */}
+                {displayMonths[0] && (() => {
+                    const h = histMap[displayMonths[0]];
+                    return h ? (
+                        <>
+                            <td className="shp-td shp-td-num shp-month-0 shp-group-start">{fmtCr(scheme.aum_cr)}</td>
+                            <td className="shp-td shp-td-num shp-month-0">{fmtPct(h.percent_to_aum)}</td>
+                            <td className="shp-td shp-td-num shp-month-0">{h.num_shares === null ? <span className="shp-not-uploaded" title="AMC Data Not Uploaded">N/A</span> : (h.num_shares > 0 ? fmt(h.num_shares) : '-')}</td>
+                            <td className="shp-td shp-td-num shp-month-0">
+                                <ChangeCell change={h.month_change} pct={h.percent_change} />
+                            </td>
+                        </>
+                    ) : (
+                        <>
+                            <td className="shp-td shp-month-0 shp-group-start">-</td>
+                            <td className="shp-td shp-month-0">-</td>
+                            <td className="shp-td shp-month-0">-</td>
+                            <td className="shp-td shp-month-0">-</td>
+                        </>
                     );
-                }
-            });
-        });
-    }
+                })()}
 
+                {/* Older months: 2 cols each, look up by label */}
+                {displayMonths.slice(1).map((monthLabel, hIdx) => {
+                    const h = histMap[monthLabel];
+                    return (
+                        <React.Fragment key={monthLabel}>
+                            <td className={`shp-td shp-td-num shp-month-${hIdx + 1} shp-group-start`}>
+                                {h && h.num_shares === null ? <span className="shp-not-uploaded" title="AMC Data Not Uploaded">N/A</span> : (h && h.num_shares > 0 ? fmt(h.num_shares) : '-')}
+                            </td>
+                            <td className={`shp-td shp-td-num shp-month-${hIdx + 1}`}>
+                                {h ? <ChangeCell change={h.month_change} pct={h.percent_change} /> : <span className="shp-neutral">-</span>}
+                            </td>
+                        </React.Fragment>
+                    );
+                })}
+            </tr>
+        );
+    };
 
+    // ══════════════════════════════════════════════════════════════════════════
     return (
-        <div className="stock-holdings-page">
-            <div className="container" style={{ padding: '20px' }}>
-                <div className="page-header" style={{ marginBottom: '20px' }}>
-                    <h2 style={{ fontSize: '24px', fontWeight: 'bold' }}>Stock Holdings Search</h2>
-                    <p className="text-muted" style={{ fontSize: '14px' }}>
-                        Search for a stock to see which mutual fund schemes hold it
-                    </p>
-                </div>
-
-                <div className="search-section" style={{ marginBottom: '30px' }}>
-                    <SearchBox
-                        placeholder="Search by company name, ISIN, or NSE symbol..."
-                        onSearch={handleSearch}
-                        suggestions={suggestions}
-                        onSelect={handleSelectStock}
-                        loading={searchLoading}
-                        renderSuggestion={renderSuggestion}
-                        minChars={2}
-                    />
-                </div>
+        <div className="shp-page">
+            <div className="shp-container">
 
                 {loading && <Loading message="Loading stock holdings..." />}
-
                 {error && (
                     <ErrorMessage
                         message={error}
-                        onRetry={() => selectedStock && handleSelectStock(selectedStock)}
+                        onRetry={() => isinParam && fetchHoldings(isinParam, selectedMonth)}
                     />
                 )}
 
                 {holdings && !loading && !error && (
-                    <div className="holdings-section">
-                        <div className="rv-meta-bar">
-                            <div className="rv-meta-item">
-                                <span className="rv-meta-label">Stock Name :</span>
-                                <span className="rv-meta-value">
-                                    {holdings.company_name}
-                                    <span style={{ fontWeight: 'normal', fontSize: '12px', color: 'var(--text-secondary)', marginLeft: '8px' }}>
-                                        (As on {holdings.as_of_date})
-                                    </span>
-                                </span>
+                    <>
+                        {/* ── Compact Identity + Controls Bar ── */}
+                        <div className="shp-identity-bar">
+
+                            {/* Row 1: company identity left | stat chips right */}
+                            <div className="shp-identity-row">
+                                <div className="shp-identity-left">
+                                    <span className="shp-company-name">{holdings.company_name}</span>
+                                    <span className="shp-isin-chip">{holdings.isin}</span>
+                                    {holdings.sector && (
+                                        <span className="shp-sector-chip">{holdings.sector}</span>
+                                    )}
+                                    {holdings.market_cap && (
+                                        <span className="shp-mcap-chip">
+                                            ₹ {fmtCr(holdings.market_cap)} Cr
+                                            {holdings.mcap_type && (
+                                                <span className={`shp-mcap-badge ${holdings.mcap_type.toLowerCase().replace(' ', '-')}`}>
+                                                    {holdings.mcap_type}
+                                                </span>
+                                            )}
+                                            {/* (i) info button */}
+                                            <span className="shp-mcap-info">
+                                                <span className="shp-mcap-info-icon">i</span>
+                                                <span className="shp-mcap-tooltip">
+                                                    Market cap as on{' '}
+                                                    {holdings.mcap_updated_at
+                                                        ? new Date(holdings.mcap_updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                                                        : 'N/A'}
+                                                </span>
+                                            </span>
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="shp-stat-chips">
+                                    <div className="shp-stat-chip">
+                                        <span className="shp-stat-label">Funds</span>
+                                        <span className="shp-stat-value">{holdings.total_funds}</span>
+                                    </div>
+                                    <div className="shp-stat-chip">
+                                        <span className="shp-stat-label">Total Shares</span>
+                                        <span className="shp-stat-value shp-accent">{fmt(holdings.total_shares)}</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="rv-meta-item">
-                                <span className="rv-meta-label">ISIN :</span>
-                                <span className="rv-meta-value" style={{ fontFamily: 'monospace' }}>{holdings.isin}</span>
+
+                        </div>
+
+                        {/* ── SUMMARY TABLE ── */}
+                        <div className="shp-summary-table-wrap" style={{ marginBottom: '24px' }}>
+                            <table className="shp-table shp-summary-table">
+                                <thead>
+                                    <tr>
+                                        <th className="shp-th shp-th-name" rowSpan={2} style={{ width: '25%' }}>Sector</th>
+                                        <th className="shp-th shp-th-num" rowSpan={2} style={{ textAlign: 'center' }}>No. of Funds</th>
+                                        <th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>No. of Shares</th>
+                                    </tr>
+                                    <tr>
+                                        {displayMonths.map((m, i) => (
+                                            <th key={m} className={`shp-th shp-th-sub shp-month-${i}`} style={{ textAlign: 'center' }}>
+                                                {m}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr className="shp-row">
+                                        <td className="shp-td">{holdings.sector || 'N/A'}</td>
+                                        <td className="shp-td shp-num" style={{ textAlign: 'center', fontWeight: 600 }}>{holdings.total_funds}</td>
+                                        {displayMonths.map((m, i) => {
+                                            const trendData = holdings.monthly_trend.find(t => t.month === m);
+                                            if (!trendData) return <td key={m} className={`shp-td shp-num shp-month-${i}`}>-</td>;
+
+                                            const hasChange = trendData.month_change != null && trendData.month_change !== 0;
+                                            const isPos = trendData.month_change > 0;
+                                            return (
+                                                <td key={m} className={`shp-td shp-num shp-month-${i}`} style={{ textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', padding: '4px 0' }}>
+                                                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                            {fmt(trendData.total_shares)}
+                                                            {hasChange && (
+                                                                <span className={isPos ? 'shp-pos' : 'shp-neg'} style={{ fontSize: '10px' }}>
+                                                                    {isPos ? '▲' : '▼'}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {hasChange && (
+                                                            <div className={`shp-change-pct ${isPos ? 'shp-pos' : 'shp-neg'}`}>
+                                                                {isPos ? '+' : ''}{fmt(trendData.month_change)} ({isPos ? '+' : ''}{trendData.percent_change.toFixed(2)}%)
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* ── DATA TABLES CONTAINER ── */}
+                        <div className="shp-table-wrap" style={{ marginTop: '24px' }}>
+                            {/* ── TABLE CONTROLS ── */}
+                            <div className="shp-controls-row shp-controls-header">
+                                <div className="shp-view-toggle">
+                                    <button
+                                        className={`shp-toggle-btn ${viewMode === 'scheme' ? 'active' : ''}`}
+                                        onClick={() => { setViewMode('scheme'); setSortConfig({ key: 'shares_0', direction: 'desc' }); }}
+                                    >
+                                        Scheme-wise
+                                    </button>
+                                    <button
+                                        className={`shp-toggle-btn ${viewMode === 'amc' ? 'active' : ''}`}
+                                        onClick={() => { setViewMode('amc'); setSortConfig({ key: 'shares_0', direction: 'desc' }); }}
+                                    >
+                                        AMC-wise
+                                    </button>
+                                </div>
+                                <div className="shp-controls-right">
+                                    <div className="shp-month-picker">
+                                        <label className="shp-picker-label">Period</label>
+                                        <select
+                                            className="shp-picker-select"
+                                            value={selectedMonth || ''}
+                                            onChange={(e) => handleMonthChange(e.target.value || null)}
+                                        >
+                                            <option value="">Latest</option>
+                                            {allAvailableMonths.map(m => (
+                                                <option key={m} value={m}>{m}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="shp-search">
+                                        <input
+                                            type="text"
+                                            className="shp-search-input"
+                                            placeholder={viewMode === 'amc' ? 'Filter AMC...' : 'Filter fund or AMC...'}
+                                            value={filterText}
+                                            onChange={(e) => setFilterText(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                            {holdings.market_cap && (
-                                <div className="rv-meta-item">
-                                    <span className="rv-meta-label">M-Cap :</span>
-                                    <span className="rv-meta-value">
-                                        ₹ {formatNumber(holdings.market_cap)} Cr
-                                        {holdings.mcap_type && <span className={`rv-mcap-type ${holdings.mcap_type.toLowerCase().replace(' ', '-')}`} style={{ marginLeft: '8px' }}>{holdings.mcap_type}</span>}
-                                    </span>
+
+                            {/* ── SCHEME TABLE ── */}
+                            {viewMode === 'scheme' && (
+                                <div className="shp-table-inner">
+                                    <table className="shp-table">
+                                        {renderSchemeHeader()}
+                                        <tbody>
+                                            {schemesToRender.map((scheme, idx) => renderSchemeRow(scheme, idx))}
+                                            {schemesToRender.length === 0 && (
+                                                <tr><td colSpan={1 + 4 + 2 * Math.max(displayMonths.length - 1, 0)} className="shp-empty">No results found.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            {/* ── AMC TABLE ── */}
+                            {viewMode === 'amc' && (
+                                <div className="shp-table-inner">
+                                    <table className="shp-table">
+                                        <thead>
+                                            <tr>
+                                                <th className="shp-th shp-th-name" rowSpan={2}>
+                                                    <span className="shp-sortable" onClick={() => handleSort('amc_name')}>
+                                                        AMC Name{sortArrow('amc_name')}
+                                                    </span>
+                                                </th>
+                                                <th className="shp-th shp-th-num" rowSpan={2}>Schemes</th>
+                                                {displayMonths[0] && (
+                                                    <th className="shp-th shp-th-month-group shp-month-0" colSpan={2}>{displayMonths[0]}</th>
+                                                )}
+                                                {displayMonths.slice(1).map((m, i) => (
+                                                    <th key={m} className={`shp-th shp-th-month-group shp-month-${i + 1}`} colSpan={2}>{m}</th>
+                                                ))}
+                                            </tr>
+                                            <tr>
+                                                {displayMonths[0] && (
+                                                    <>
+                                                        <th className="shp-th shp-th-sub shp-month-0">
+                                                            <span className="shp-sortable" onClick={() => handleSort('shares_0')}>Shares Held{sortArrow('shares_0')}</span>
+                                                        </th>
+                                                        <th className="shp-th shp-th-sub shp-month-0">Month Change</th>
+                                                    </>
+                                                )}
+                                                {displayMonths.slice(1).map((m, i) => (
+                                                    <React.Fragment key={m}>
+                                                        <th className={`shp-th shp-th-sub shp-month-${i + 1}`}>
+                                                            <span className="shp-sortable" onClick={() => handleSort(`shares_${i + 1}`)}>Shares Held{sortArrow(`shares_${i + 1}`)}</span>
+                                                        </th>
+                                                        <th className={`shp-th shp-th-sub shp-month-${i + 1}`}>Month Change</th>
+                                                    </React.Fragment>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {amcToRender.map((amc, aIdx) => (
+                                                <tr key={aIdx} className="shp-row">
+                                                    <td className="shp-td shp-td-name">
+                                                        <div className="shp-fund-name">{amc.amc_name}</div>
+                                                        <div className="shp-fund-sub">{amc.scheme_count} scheme{amc.scheme_count !== 1 ? 's' : ''}</div>
+                                                    </td>
+                                                    <td className="shp-td shp-td-num">
+                                                        <span className="shp-scheme-badge">{amc.scheme_count}</span>
+                                                    </td>
+                                                    {amc.history.map((h, hIdx) => (
+                                                        <React.Fragment key={hIdx}>
+                                                            <td className={`shp-td shp-td-num shp-month-${hIdx}`}>
+                                                                {h.num_shares === null ? <span className="shp-not-uploaded" title="AMC Data Not Uploaded">N/A</span> : (h.num_shares > 0 ? fmt(h.num_shares) : '-')}
+                                                            </td>
+                                                            <td className={`shp-td shp-td-num shp-month-${hIdx}`}>
+                                                                <ChangeCell change={h.month_change} pct={null} isLatest={false} />
+                                                            </td>
+                                                        </React.Fragment>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             )}
                         </div>
-
-                        <div className="rv-summary-box" style={{ marginBottom: '30px' }}>
-                            <div className="stock-summary-table-wrapper">
-                                <table className="rv-table">
-                                    <thead>
-                                        <tr>
-                                            <th rowSpan="2" className="text-center">Sector</th>
-                                            <th rowSpan="2" className="text-center">No. of Funds</th>
-                                            <th colSpan={holdings.monthly_trend.length} className="text-center">No. of Shares</th>
-                                        </tr>
-                                        <tr>
-                                            {holdings.monthly_trend.map(m => (
-                                                <th key={m.month} className="rv-sub-header text-center">{m.month}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td className="text-center">{holdings.sector || '-'}</td>
-                                            <td className="text-center">{holdings.total_funds}</td>
-                                            {holdings.monthly_trend.map((m, idx) => (
-                                                <td key={m.month} className="text-right">
-                                                    <div className="rv-shares-cell">
-                                                        <span>{formatNumber(m.total_shares)}</span>
-                                                        {m.trend === 'up' && <span className="rv-trend up">▲</span>}
-                                                        {m.trend === 'down' && <span className="rv-trend down">▼</span>}
-                                                        {m.trend === 'same' && <span className="rv-trend neutral">-</span>}
-                                                    </div>
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <div className="holdings-table-section">
-                            <div className="section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                                <h4 style={{ margin: 0, fontSize: '18px' }}>Mutual Fund Holdings</h4>
-                                <div className="search-holdings-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <span style={{ fontSize: '12px', color: '#666' }}>Search Here</span>
-                                    <input
-                                        type="text"
-                                        placeholder="Fund or AMC name..."
-                                        value={filterText}
-                                        onChange={(e) => setFilterText(e.target.value)}
-                                        style={{
-                                            border: '1px solid var(--border-color)',
-                                            padding: '4px 8px',
-                                            borderRadius: '4px',
-                                            fontSize: '13px',
-                                            background: 'var(--bg-primary)',
-                                            color: 'var(--text-primary)',
-                                            width: '200px'
-                                        }}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="rv-table-container">
-                                <table className="rv-table">
-                                    <thead>
-                                        <tr>
-                                            <th rowSpan="2" style={{ width: '25%' }}>
-                                                <div className="rv-sortable-header" onClick={() => handleSort('scheme_name')}>
-                                                    Fund Name {sortConfig.key === 'scheme_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                                </div>
-                                            </th>
-                                            <th rowSpan="2" className="text-center">Fund Manager</th>
-                                            <th rowSpan="2" className="text-center">
-                                                <div className="rv-sortable-header" onClick={() => handleSort('aum_cr')}>
-                                                    Fund AUM (Cr) {sortConfig.key === 'aum_cr' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                                </div>
-                                            </th>
-                                            <th rowSpan="2" className="text-center">
-                                                <div className="rv-sortable-header" onClick={() => handleSort('pnav')}>
-                                                    % of AUM {sortConfig.key === 'pnav' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                                </div>
-                                            </th>
-                                            <th colSpan={historyMonths.length} className="text-center">No. of Shares</th>
-                                        </tr>
-                                        <tr>
-                                            {historyMonths.map((m, idx) => (
-                                                <th key={idx} className="rv-sub-header text-center">
-                                                    <div className="rv-sortable-header" onClick={() => handleSort(`shares_${idx}`)}>
-                                                        {m} {sortConfig.key === `shares_${idx}` && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                                    </div>
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {getHoldingsToRender().map((scheme, sIdx) => (
-                                            <tr key={sIdx}>
-                                                <td className="text-left">
-                                                    <div className="rv-company-name">{scheme.scheme_name}</div>
-                                                    <div className="rv-company-meta">
-                                                        <span className="rv-sector">{scheme.amc_name}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="text-center">-</td>
-                                                <td className="text-right">{formatNumber(scheme.aum_cr)}</td>
-                                                <td className="text-center">{formatPercent(scheme.history[0]?.percent_to_aum || 0, 2)}</td>
-                                                {scheme.history.map((h, hIdx) => (
-                                                    <td key={hIdx} className="text-right">
-                                                        {h.num_shares > 0 ? (
-                                                            <div className="rv-shares-cell">
-                                                                <span>{formatNumber(h.num_shares)}</span>
-                                                                {h.trend === 'up' && <span className="rv-trend up">▲</span>}
-                                                                {h.trend === 'down' && <span className="rv-trend down">▼</span>}
-                                                            </div>
-                                                        ) : '-'}
-                                                    </td>
-                                                ))}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                    </>
                 )}
 
-                {!selectedStock && !loading && !error && (
-                    <div className="empty-state">
-                        <p className="text-muted">
-                            Search for a stock to view its mutual fund holdings
-                        </p>
+                {!isinParam && !loading && !error && (
+                    <div className="shp-empty-state">
+                        <div className="shp-empty-icon">📊</div>
+                        <p>Search for a stock above to view its mutual fund holdings</p>
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     );
 }

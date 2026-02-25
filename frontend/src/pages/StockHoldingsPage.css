@@ -1,246 +1,892 @@
-.stock-holdings-page {
-    padding: 32px 0;
+/* ═══════════════════════════════════════════════════════════════
+   StockHoldingsPage — Premium Theme-Aware CSS
+   Light: Slate-blue professional headers on white
+   Dark:  Navy deep headers (unchanged)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS Variables — Light Theme (default :root) ────────────── */
+:root {
+    /* Table header palette */
+    --shp-header-bg: #2d4a8a;
+    /* Dark slate-blue header */
+    --shp-header-color: #e8eef8;
+    --shp-subheader-color: #b0c4e8;
+
+    /* Month group accent bg tints (light mode keeps them subtle) */
+    --shp-m0-bg: #2a4480;
+    /* JAN — slightly lighter */
+    --shp-m0-sub-bg: #253d75;
+    --shp-m1-bg: #33527a;
+    /* DEC */
+    --shp-m1-sub-bg: #2e4a70;
+    --shp-m2-bg: #2e4a70;
+    /* NOV */
+    --shp-m2-sub-bg: #29426a;
+
+    /* Month group border colors */
+    --shp-m0-border: rgba(120, 175, 255, 0.75);
+    --shp-m1-border: rgba(160, 195, 230, 0.55);
+    --shp-m2-border: rgba(160, 195, 230, 0.4);
+
+    /* Data row zebra */
+    --shp-row-odd-bg: #ffffff;
+    --shp-row-even-bg: #f4f7fb;
+
+    /* Month tint in data rows */
+    --shp-td-m0-odd: rgba(37, 99, 235, 0.05);
+    --shp-td-m0-even: rgba(37, 99, 235, 0.09);
+    --shp-td-m1-odd: rgba(71, 104, 150, 0.04);
+    --shp-td-m1-even: rgba(71, 104, 150, 0.08);
+    --shp-td-m2-odd: rgba(71, 104, 150, 0.03);
+    --shp-td-m2-even: rgba(71, 104, 150, 0.06);
+
+    /* Data border inside a group */
+    --shp-td-inner-m0: rgba(37, 99, 235, 0.1);
+    --shp-td-inner-m1: rgba(100, 130, 170, 0.1);
+    --shp-td-inner-m2: rgba(100, 130, 170, 0.08);
+
+    /* Fund name link color */
+    --shp-fund-link: #1d4ed8;
 }
 
-.page-header {
-    margin-bottom: 32px;
+/* ── CSS Variables — Dark Theme ─────────────────────────────── */
+[data-theme="dark"] {
+    --shp-header-bg: #1e3a5f;
+    --shp-header-color: #c8d9f0;
+    --shp-subheader-color: #93b4d4;
+
+    --shp-m0-bg: #1a3558;
+    --shp-m0-sub-bg: #163050;
+    --shp-m1-bg: #1e3050;
+    --shp-m1-sub-bg: #1a2b48;
+    --shp-m2-bg: #1a2b46;
+    --shp-m2-sub-bg: #16263e;
+
+    --shp-m0-border: rgba(96, 165, 250, 0.65);
+    --shp-m1-border: rgba(148, 163, 184, 0.45);
+    --shp-m2-border: rgba(148, 163, 184, 0.32);
+
+    --shp-row-odd-bg: var(--bg-primary);
+    --shp-row-even-bg: rgba(255, 255, 255, 0.025);
+
+    --shp-td-m0-odd: rgba(37, 99, 235, 0.05);
+    --shp-td-m0-even: rgba(37, 99, 235, 0.09);
+    --shp-td-m1-odd: rgba(100, 116, 139, 0.04);
+    --shp-td-m1-even: rgba(100, 116, 139, 0.07);
+    --shp-td-m2-odd: rgba(100, 116, 139, 0.03);
+    --shp-td-m2-even: rgba(100, 116, 139, 0.05);
+
+    --shp-td-inner-m0: rgba(96, 165, 250, 0.08);
+    --shp-td-inner-m1: rgba(148, 163, 184, 0.07);
+    --shp-td-inner-m2: rgba(148, 163, 184, 0.06);
+
+    --shp-fund-link: #60a5fa;
 }
 
-.page-header h2 {
-    margin-bottom: 8px;
+/* ══════════════════════════════════════════════════════════════ */
+
+/* ── Page Shell ─────────────────────────────────────────────── */
+.shp-page {
+    min-height: 100vh;
+    background: var(--bg-primary);
+    padding: 0 0 48px;
 }
 
-.search-section {
-    margin-bottom: 32px;
-    display: flex;
-    justify-content: center;
+.shp-container {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 20px 24px 0;
 }
 
-/* Stock Suggestion Styling */
-.stock-suggestion {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+/* ══════════════════════════════════════════════════════════════
+   COMPACT IDENTITY + CONTROLS BAR
+   ══════════════════════════════════════════════════════════════ */
+.shp-identity-bar {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
 }
 
-.stock-suggestion-main {
+/* ── Row 1: Identity ─────────────────────────────────────────── */
+.shp-identity-row {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-}
-
-.stock-name {
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.stock-symbol {
-    padding: 2px 8px;
-    background-color: var(--accent-light);
-    color: var(--accent-primary);
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.stock-suggestion-meta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 13px;
-    color: var(--text-secondary);
-}
-
-.stock-isin {
-    font-family: monospace;
-}
-
-.stock-sector {
-    padding: 2px 6px;
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-}
-
-/* Holdings Section */
-.holdings-section {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
-.stock-info h3 {
-    margin: 0 0 12px 0;
-}
-
-.stock-info-meta {
-    display: flex;
-    gap: 8px;
+    padding: 12px 16px 10px;
+    border-bottom: 1px solid var(--border-color);
     flex-wrap: wrap;
 }
 
-.badge {
-    padding: 4px 12px;
-    background-color: var(--accent-light);
-    color: var(--accent-primary);
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 600;
-    font-family: monospace;
-}
-
-.badge-secondary {
-    background-color: var(--bg-tertiary);
-    color: var(--text-secondary);
-    font-family: inherit;
-}
-
-.badge-info {
-    background-color: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
-    font-family: inherit;
-}
-
-.mcap-badge {
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-family: inherit;
-}
-
-.mcap-badge.large-cap {
-    background-color: rgba(16, 185, 129, 0.1);
-    color: #10b981;
-}
-
-.mcap-badge.mid-cap {
-    background-color: rgba(245, 158, 11, 0.1);
-    color: #f59e0b;
-}
-
-.mcap-badge.small-cap {
-    background-color: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
-}
-
-.holdings-summary {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 24px;
-    margin-top: 24px;
-    padding-top: 24px;
-    border-top: 1px solid var(--border-color);
-}
-
-.summary-item {
+.shp-identity-left {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
 }
 
-.summary-label {
-    font-size: 13px;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-
-.summary-value {
-    font-size: 24px;
+/* Company name */
+.shp-company-name {
+    font-size: 16px;
     font-weight: 700;
     color: var(--text-primary);
+    letter-spacing: -0.2px;
+    white-space: nowrap;
 }
 
-.holdings-table-section h4 {
-    margin-bottom: 16px;
+/* ISIN chip */
+.shp-isin-chip {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
 }
 
-/* Scheme Name in Table */
-.scheme-name {
+/* Sector chip */
+.shp-sector-chip {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .shp-sector-chip {
+    background: rgba(96, 165, 250, 0.12);
+    color: #60a5fa;
+    border-color: rgba(96, 165, 250, 0.2);
+}
+
+/* Market cap chip */
+.shp-mcap-chip {
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.scheme-meta {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-/* Empty State */
-.empty-state {
-    padding: 64px 24px;
-    text-align: center;
-}
-
-.empty-state p {
-    font-size: 16px;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .holdings-summary {
-        grid-template-columns: 1fr;
-        gap: 16px;
-    }
-
-    .summary-value {
-        font-size: 20px;
-    }
-}
-
-/* Trend Indicators */
-.trend-up {
-    color: #10b981;
-    font-size: 14px;
-    margin-left: 4px;
-}
-
-.trend-down {
-    color: #ef4444;
-    font-size: 14px;
-    margin-left: 4px;
-}
-
-.shares-cell {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
-    font-variant-numeric: tabular-nums;
-    font-weight: 500;
+    gap: 8px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
 }
 
-.shares-wrapper {
+/* Info Icon Wrapper */
+.shp-mcap-info {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 4px;
+    cursor: help;
 }
 
-.info-icon {
-    display: inline-flex;
+.shp-mcap-info-icon {
+    display: flex;
     align-items: center;
     justify-content: center;
     width: 14px;
     height: 14px;
-    background-color: var(--accent-light);
-    color: var(--accent-primary);
     border-radius: 50%;
+    background: var(--border-color);
+    color: var(--text-secondary);
     font-size: 10px;
-    font-weight: 700;
-    cursor: help;
-    font-style: normal;
+    font-weight: 800;
     font-family: serif;
+    font-style: italic;
     line-height: 1;
+    transition: all 0.2s ease;
 }
 
-.mcap-info {
-    margin-left: 4px;
-    background-color: rgba(255, 255, 255, 0.2);
-    color: #3b82f6;
+.shp-mcap-info:hover .shp-mcap-info-icon {
+    background: var(--accent-primary, #3b82f6);
+    color: #fff;
 }
 
-.text-right {
-    text-align: right;
+/* Tooltip Styles */
+.shp-mcap-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-10px);
+    background: #1e293b;
+    color: #f8fafc;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+    z-index: 100;
 }
 
-.th-content.text-right {
-    justify-content: flex-end;
+[data-theme="dark"] .shp-mcap-tooltip {
+    background: #334155;
+    color: #f1f5f9;
+}
+
+.shp-mcap-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 5px;
+    border-style: solid;
+    border-color: #1e293b transparent transparent transparent;
+}
+
+[data-theme="dark"] .shp-mcap-tooltip::after {
+    border-color: #334155 transparent transparent transparent;
+}
+
+.shp-mcap-info:hover .shp-mcap-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-6px);
+}
+
+/* Stat chips (right side of row 1) */
+.shp-stat-chips {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    flex-shrink: 0;
+}
+
+.shp-stat-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    padding: 4px 16px;
+    border-left: 1px solid var(--border-color);
+}
+
+.shp-stat-chip:first-child {
+    border-left: none;
+}
+
+.shp-stat-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-secondary);
+    margin-bottom: 1px;
+}
+
+.shp-stat-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.shp-stat-value.shp-accent {
+    color: var(--accent-primary, #3b82f6);
+}
+
+/* Mcap badge (inside shp-mcap-chip) */
+.shp-mcap-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.shp-mcap-badge.large-cap {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.shp-mcap-badge.mid-cap {
+    background: #fef9c3;
+    color: #a16207;
+}
+
+.shp-mcap-badge.small-cap {
+    background: #fce7f3;
+    color: #9d174d;
+}
+
+[data-theme="dark"] .shp-mcap-badge.large-cap {
+    background: #1e3a5f;
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .shp-mcap-badge.mid-cap {
+    background: #3d2e00;
+    color: #fbbf24;
+}
+
+[data-theme="dark"] .shp-mcap-badge.small-cap {
+    background: #3d1030;
+    color: #f9a8d4;
+}
+
+
+/* ── Row 2: Controls ─────────────────────────────────────────── */
+.shp-controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+}
+
+.shp-controls-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.shp-view-toggle {
+    display: flex;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+
+    border-radius: 7px;
+    overflow: hidden;
+    padding: 3px;
+    gap: 2px;
+}
+
+.shp-toggle-btn {
+    background: transparent;
+    border: none;
+    padding: 5px 14px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.shp-toggle-btn:hover {
+    background: var(--bg-card, var(--bg-tertiary));
+    color: var(--text-primary);
+}
+
+.shp-toggle-btn.active {
+    background: #1e40af;
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 1px 4px rgba(30, 64, 175, 0.35);
+}
+
+.shp-month-picker {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.shp-picker-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.shp-picker-select {
+    appearance: none;
+    background: var(--bg-card, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 5px 26px 5px 9px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 7px center;
+    transition: border-color 0.15s;
+}
+
+.shp-picker-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.shp-search-input {
+    background: var(--bg-card, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 12.5px;
+    color: var(--text-primary);
+    width: 190px;
+    transition: border-color 0.15s;
+}
+
+.shp-search-input::placeholder {
+    color: var(--text-secondary);
+}
+
+.shp-search-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* ── Merged Header Controls Toolbar ── */
+.shp-controls-header {
+    padding: 12px 16px;
+    background: var(--shp-header-bg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+.shp-controls-header .shp-picker-label {
+    color: var(--shp-header-color);
+    opacity: 0.9;
+}
+
+.shp-controls-header .shp-view-toggle {
+    background: rgba(0, 0, 0, 0.2);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.shp-controls-header .shp-toggle-btn {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.shp-controls-header .shp-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.shp-controls-header .shp-toggle-btn.active {
+    background: var(--accent-primary, #3b82f6);
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.shp-controls-header .shp-picker-select,
+.shp-controls-header .shp-search-input {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: transparent;
+    color: #111827;
+}
+
+.shp-controls-header .shp-search-input::placeholder {
+    color: #6b7280;
+}
+
+[data-theme="dark"] .shp-controls-header .shp-picker-select,
+[data-theme="dark"] .shp-controls-header .shp-search-input {
+    background: rgba(0, 0, 0, 0.35);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .shp-controls-header .shp-search-input::placeholder {
+    color: #cbd5e1;
+}
+
+.shp-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TABLE
+   ══════════════════════════════════════════════════════════════ */
+.shp-table-wrap {
+    overflow: auto;
+    max-height: 75vh;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+}
+
+.shp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    table-layout: auto;
+}
+
+/* ── Headers ─────────────────────────────────────────────────── */
+.shp-th {
+    padding: 10px 12px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-align: center;
+    background: var(--shp-header-bg);
+    color: var(--shp-header-color);
+    position: sticky;
+    top: 0;
+    /* Row 1: month group headers */
+    z-index: 3;
+}
+
+.shp-th.shp-th-name {
+    text-align: left;
+    min-width: 200px;
+    max-width: 270px;
+}
+
+.shp-th.shp-th-num {
+    min-width: 80px;
+}
+
+.shp-th.shp-th-month-group {
+    font-size: 11.5px;
+    letter-spacing: 1px;
+    padding: 9px 12px;
+    border-bottom: 1.5px solid rgba(255, 255, 255, 0.18);
+}
+
+.shp-th.shp-th-sub {
+    font-size: 9.5px;
+    letter-spacing: 0.4px;
+    padding: 7px 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+    color: var(--shp-subheader-color);
+    top: 38px;
+    /* Row 2: sits below the 38px group header row */
+    z-index: 2;
+}
+
+/* ── Month group tints — header cells ────────────────────────── */
+.shp-th.shp-month-0 {
+    background: var(--shp-m0-bg) !important;
+}
+
+.shp-th.shp-month-1 {
+    background: var(--shp-m1-bg) !important;
+}
+
+.shp-th.shp-month-2 {
+    background: var(--shp-m2-bg) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-0 {
+    background: var(--shp-m0-sub-bg) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-1 {
+    background: var(--shp-m1-sub-bg) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-2 {
+    background: var(--shp-m2-sub-bg) !important;
+}
+
+/* ── Month group borders — bold at group start, faint inside ─── */
+
+/* Group row-1 header spans — always the bold left border */
+.shp-th.shp-th-month-group.shp-month-0 {
+    border-left: 3.5px solid var(--shp-m0-border) !important;
+}
+
+.shp-th.shp-th-month-group.shp-month-1 {
+    border-left: 3.5px solid var(--shp-m1-border) !important;
+}
+
+.shp-th.shp-th-month-group.shp-month-2 {
+    border-left: 3.5px solid var(--shp-m2-border) !important;
+}
+
+/* Sub-header — faint inside, bold only at group start */
+.shp-th.shp-th-sub.shp-month-0 {
+    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-1 {
+    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.shp-th.shp-th-sub.shp-month-2 {
+    border-left: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.shp-th.shp-th-sub.shp-group-start.shp-month-0 {
+    border-left: 3.5px solid var(--shp-m0-border) !important;
+}
+
+.shp-th.shp-th-sub.shp-group-start.shp-month-1 {
+    border-left: 3.5px solid var(--shp-m1-border) !important;
+}
+
+.shp-th.shp-th-sub.shp-group-start.shp-month-2 {
+    border-left: 3.5px solid var(--shp-m2-border) !important;
+}
+
+/* ── Body Rows ────────────────────────────────────────────────── */
+.shp-td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.shp-td.shp-td-name {
+    text-align: left;
+}
+
+.shp-td.shp-td-num {
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    letter-spacing: 0.1px;
+}
+
+/* Data cells — faint inside, bold at group start */
+.shp-td.shp-month-0 {
+    border-left: 1px solid var(--shp-td-inner-m0) !important;
+}
+
+.shp-td.shp-month-1 {
+    border-left: 1px solid var(--shp-td-inner-m1) !important;
+}
+
+.shp-td.shp-month-2 {
+    border-left: 1px solid var(--shp-td-inner-m2) !important;
+}
+
+.shp-td.shp-group-start.shp-month-0 {
+    border-left: 3.5px solid var(--shp-m0-border) !important;
+}
+
+.shp-td.shp-group-start.shp-month-1 {
+    border-left: 3.5px solid var(--shp-m1-border) !important;
+}
+
+.shp-td.shp-group-start.shp-month-2 {
+    border-left: 3.5px solid var(--shp-m2-border) !important;
+}
+
+/* ── ZEBRA STRIPING ─────────────────────────────────────────── */
+.shp-row:nth-child(odd) .shp-td {
+    background: var(--shp-row-odd-bg);
+}
+
+.shp-row:nth-child(even) .shp-td {
+    background: var(--shp-row-even-bg);
+}
+
+/* Month tints over zebra */
+.shp-row:nth-child(odd) .shp-td.shp-month-0 {
+    background: var(--shp-td-m0-odd);
+}
+
+.shp-row:nth-child(even) .shp-td.shp-month-0 {
+    background: var(--shp-td-m0-even);
+}
+
+.shp-row:nth-child(odd) .shp-td.shp-month-1 {
+    background: var(--shp-td-m1-odd);
+}
+
+.shp-row:nth-child(even) .shp-td.shp-month-1 {
+    background: var(--shp-td-m1-even);
+}
+
+.shp-row:nth-child(odd) .shp-td.shp-month-2 {
+    background: var(--shp-td-m2-odd);
+}
+
+.shp-row:nth-child(even) .shp-td.shp-month-2 {
+    background: var(--shp-td-m2-even);
+}
+
+/* Hover — full row highlight */
+.shp-row:hover .shp-td {
+    background: rgba(37, 99, 235, 0.07) !important;
+    transition: background 0.1s ease;
+}
+
+/* ── Sortable header ─────────────────────────────────────────── */
+.shp-sortable {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.shp-sortable:hover {
+    color: #fff;
+}
+
+/* ── Fund Name Cell ─────────────────────────────────────────── */
+.shp-fund-name {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--shp-fund-link);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.shp-fund-sub {
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+/* ── Change Cell ─────────────────────────────────────────────── */
+.shp-change-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    line-height: 1.2;
+}
+
+.shp-change-cell>span:first-child {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.1px;
+}
+
+.shp-change-pct {
+    font-size: 10px !important;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-top: 2px;
+}
+
+/* Color classes */
+.shp-pos {
+    color: #15803d;
+}
+
+.shp-neg {
+    color: #dc2626;
+}
+
+.shp-neutral {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .shp-pos {
+    color: #4ade80;
+}
+
+[data-theme="dark"] .shp-neg {
+    color: #f87171;
+}
+
+/* Pill backgrounds */
+.shp-change-pct.shp-pos {
+    background: rgba(21, 128, 61, 0.1);
+}
+
+.shp-change-pct.shp-neg {
+    background: rgba(220, 38, 38, 0.1);
+}
+
+.shp-change-pct.shp-neutral {
+    background: rgba(100, 116, 139, 0.1);
+}
+
+[data-theme="dark"] .shp-change-pct.shp-pos {
+    background: rgba(74, 222, 128, 0.12);
+}
+
+[data-theme="dark"] .shp-change-pct.shp-neg {
+    background: rgba(248, 113, 113, 0.12);
+}
+
+/* ── Schme Badge ─────────────────────────────────────────────── */
+.shp-scheme-badge {
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+[data-theme="dark"] .shp-scheme-badge {
+    background: #1e3a5f;
+    color: #93c5fd;
+}
+
+/* ── Empty states ────────────────────────────────────────────── */
+.shp-empty {
+    text-align: center;
+    padding: 28px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.shp-empty-state {
+    text-align: center;
+    padding: 72px 40px;
+    color: var(--text-secondary);
+}
+
+.shp-empty-icon {
+    font-size: 48px;
+    margin-bottom: 14px;
+}
+
+.shp-empty-state p {
+    font-size: 14px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .shp-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .shp-controls-right {
+        flex-wrap: wrap;
+    }
+
+    .shp-search-input {
+        width: 100%;
+    }
+
+    .shp-meta-bar {
+        flex-direction: column;
+    }
+
+    .shp-meta-item {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .shp-meta-item:last-child {
+        border-bottom: none;
+    }
 }
