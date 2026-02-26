@@ -32,3 +32,14 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "Babyaditya#007")
 # Telegram Configuration (optional at import time)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Admin Console Configuration
+ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "admin123")
+
+# ============================================================
+# ANGEL ONE SMARTAPI CONFIGURATION
+# ============================================================
+ANGEL_API_KEY = os.getenv("ANGEL_API_KEY", "")
+ANGEL_CLIENT_CODE = os.getenv("ANGEL_CLIENT_CODE", "")
+ANGEL_PASSWORD = os.getenv("ANGEL_PASSWORD", "")
+ANGEL_TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET", "")

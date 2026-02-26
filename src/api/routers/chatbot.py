@@ -207,6 +207,10 @@ def _get_company_info(company_name: str, cur: cursor) -> dict:
         if not row:
             return {"found": False, "message": f"No company found matching '{company_name}'."}
         name, isin, sector, nse, bse, mcap, mcap_type, mcap_updated_at, shares, shares_updated_at = row
+        
+        from src.services.pricing_service import pricing_service
+        live_mcap = pricing_service.get_live_market_cap(isin, float(mcap) if mcap else None, shares)
+        
         return {
             "found": True,
             "company_name": name,
@@ -214,7 +218,7 @@ def _get_company_info(company_name: str, cur: cursor) -> dict:
             "sector": sector or "Unknown",
             "nse_symbol": nse or "N/A",
             "bse_code": bse or "N/A",
-            "market_cap_crore": round(mcap / 10_000_000, 2) if mcap else None,
+            "market_cap_crore": round(live_mcap / 10_000_000, 2) if live_mcap else None,
             "market_cap_type": mcap_type or "N/A",
             "market_cap_updated_at": mcap_updated_at.strftime("%d-%b-%Y") if mcap_updated_at else "N/A",
             "shares_outstanding": shares if shares else None,

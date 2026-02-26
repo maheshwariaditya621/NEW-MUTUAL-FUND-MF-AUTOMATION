@@ -227,8 +227,8 @@ async def get_holdings_by_identifier(
         # 1. Resolve identifier to ISIN and metadata
         isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated = _resolve_company_isin(q, cur)
         
-        # 2. Check if this ISIN belongs to an Entity
-        cur.execute("SELECT entity_id FROM isin_master WHERE isin = %s", (isin,))
+        # 2. Check if this ISIN belongs to an Entity (fetch directly from companies table to avoid desyncs)
+        cur.execute("SELECT entity_id FROM companies WHERE isin = %s LIMIT 1", (isin,))
         entity_row = cur.fetchone()
         entity_id = entity_row[0] if entity_row else None
         
@@ -268,8 +268,8 @@ async def get_stock_holdings(
         # Resolve company metadata using the helper function
         res_isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated = _resolve_company_isin(isin, cur)
         
-        # Check if this ISIN belongs to an Entity
-        cur.execute("SELECT entity_id FROM isin_master WHERE isin = %s", (res_isin,))
+        # Check if this ISIN belongs to an Entity (use companies table to prevent desyncs)
+        cur.execute("SELECT entity_id FROM companies WHERE isin = %s LIMIT 1", (res_isin,))
         entity_row = cur.fetchone()
         entity_id = entity_row[0] if entity_row else None
         
@@ -298,7 +298,7 @@ async def _get_cumulative_multiplier(entity_id: int, year: int, month: int, cur:
         """
         SELECT ratio_factor 
         FROM corporate_actions 
-        WHERE entity_id = %s AND effective_date > %s
+        WHERE entity_id = %s AND effective_date > %s AND status = 'CONFIRMED'
         """,
         (entity_id, period_end_date)
     )
@@ -602,12 +602,26 @@ async def _get_stock_holdings_aggregated(
     # Sort holdings by latest percent_to_nav desc
     holdings.sort(key=lambda x: x[0], reverse=True)
     final_holdings = [h[1] for h in holdings]
+
+    # Dynamic Market Cap Calculation
+    from src.services.pricing_service import pricing_service
+    from datetime import datetime
     
+    live_mcap = pricing_service.get_live_market_cap(
+        isin=isin, 
+        db_mcap=float(market_cap) if market_cap else None, 
+        shares_outstanding=shares_outstanding
+    )
+    
+    # If we got a live price, market_updated_at is now, else the db value
+    if live_mcap and market_cap and float(live_mcap) != float(market_cap):
+        mcap_updated_at = datetime.now()
+        
     return StockHoldingsSummary(
         isin=isin,
         company_name=company_name.upper(),
         sector=sector,
-        market_cap=Decimal(str(market_cap / 10000000)).quantize(Decimal('0.01')) if market_cap else None,
+        market_cap=Decimal(str(live_mcap / 10000000)).quantize(Decimal('0.01')) if live_mcap else None,
         mcap_type=mcap_type,
         mcap_updated_at=mcap_updated_at,
         as_of_date=current_month_label,

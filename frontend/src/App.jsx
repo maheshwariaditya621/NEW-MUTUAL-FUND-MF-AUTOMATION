@@ -1,9 +1,12 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ThemeToggle from './components/common/ThemeToggle';
+import ScrollToTop from './components/common/ScrollToTop';
 import Home from './pages/Home';
 import StockHoldingsPage from './pages/StockHoldingsPage';
 import SchemePortfolioPage from './pages/SchemePortfolioPage';
+import InsightsPage from './pages/InsightsPage';
+import AdminVault from './pages/AdminVault';
 import HeaderSearch from './components/common/HeaderSearch';
 import Chatbot from './components/Chatbot';
 import './App.css';
@@ -12,6 +15,7 @@ function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <div className="app">
           <header className="app-header">
             <div className="container">
@@ -24,6 +28,7 @@ function App() {
                   <nav className="nav">
                     <Link to="/stocks" className="nav-link">Stock Holdings</Link>
                     <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
+                    <Link to="/insights" className="nav-link">Insights</Link>
                   </nav>
                 </div>
 
@@ -40,6 +45,8 @@ function App() {
               <Route path="/" element={<Home />} />
               <Route path="/stocks" element={<StockHoldingsPage />} />
               <Route path="/schemes" element={<SchemePortfolioPage />} />
+              <Route path="/insights" element={<InsightsPage />} />
+              <Route path="/admin-vault" element={<AdminVault />} />
             </Routes>
           </main>
 

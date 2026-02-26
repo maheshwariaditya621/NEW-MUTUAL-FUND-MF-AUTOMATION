@@ -61,8 +61,9 @@ function ChangeCell({ change, pct }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const isinParam = searchParams.get('isin');
+    const filterParam = searchParams.get('filter'); // 'entrants' | 'exits'
 
     const [holdings, setHoldings] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -174,6 +175,21 @@ export default function StockHoldingsPage() {
     const schemesToRender = useMemo(() => {
         if (!holdings?.holdings) return [];
         let items = [...holdings.holdings];
+
+        if (filterParam === 'entrants') {
+            items = items.filter(h => {
+                const curr = h.history[0]?.num_shares;
+                const prev = h.history[1]?.num_shares;
+                return curr > 0 && prev === 0;
+            });
+        } else if (filterParam === 'exits') {
+            items = items.filter(h => {
+                const curr = h.history[0]?.num_shares;
+                const prev = h.history[1]?.num_shares;
+                return prev > 0 && curr === 0;
+            });
+        }
+
         if (filterText) {
             const low = filterText.toLowerCase();
             items = items.filter(h =>
@@ -195,11 +211,26 @@ export default function StockHoldingsPage() {
             return 0;
         });
         return items;
-    }, [holdings, filterText, sortConfig]);
+    }, [holdings, filterText, sortConfig, filterParam]);
 
     // ── Filtered + Sorted AMC list ────────────────────────────────────────────
     const amcToRender = useMemo(() => {
         let items = [...amcAggregated];
+
+        if (filterParam === 'entrants') {
+            items = items.filter(h => {
+                const curr = h.history[0]?.num_shares;
+                const prev = h.history[1]?.num_shares;
+                return curr > 0 && prev === 0;
+            });
+        } else if (filterParam === 'exits') {
+            items = items.filter(h => {
+                const curr = h.history[0]?.num_shares;
+                const prev = h.history[1]?.num_shares;
+                return prev > 0 && curr === 0;
+            });
+        }
+
         if (filterText) {
             const low = filterText.toLowerCase();
             items = items.filter(h => h.amc_name.toLowerCase().includes(low));
@@ -217,7 +248,7 @@ export default function StockHoldingsPage() {
             return 0;
         });
         return items;
-    }, [amcAggregated, filterText, sortConfig]);
+    }, [amcAggregated, filterText, sortConfig, filterParam]);
 
     // ── Shared Table Header ───────────────────────────────────────────────────
     // Latest month: Fund AUM | % AUM | Shares Held | Month Change | % Change  (5 sub-cols)
@@ -492,6 +523,29 @@ export default function StockHoldingsPage() {
                                         AMC-wise
                                     </button>
                                 </div>
+
+                                {/* ── NEW ENTRANT/EXIT FILTER ── */}
+                                <div className="shp-filter-toggle" style={{ display: 'flex', backgroundColor: 'var(--surface-color)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)', gap: '4px' }}>
+                                    <button
+                                        style={{ padding: '6px 12px', fontSize: '13px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: !filterParam ? 'var(--primary-color)' : 'transparent', color: !filterParam ? '#fff' : 'var(--text-secondary)', fontWeight: !filterParam ? 600 : 500 }}
+                                        onClick={() => { searchParams.delete('filter'); setSearchParams(searchParams); }}
+                                    >
+                                        All Funds
+                                    </button>
+                                    <button
+                                        style={{ padding: '6px 12px', fontSize: '13px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: filterParam === 'entrants' ? 'rgba(16, 185, 129, 0.2)' : 'transparent', color: filterParam === 'entrants' ? '#10b981' : 'var(--text-secondary)', fontWeight: filterParam === 'entrants' ? 600 : 500 }}
+                                        onClick={() => { searchParams.set('filter', 'entrants'); setSearchParams(searchParams); }}
+                                    >
+                                        New Entrants
+                                    </button>
+                                    <button
+                                        style={{ padding: '6px 12px', fontSize: '13px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: filterParam === 'exits' ? 'rgba(239, 68, 68, 0.2)' : 'transparent', color: filterParam === 'exits' ? '#ef4444' : 'var(--text-secondary)', fontWeight: filterParam === 'exits' ? 600 : 500 }}
+                                        onClick={() => { searchParams.set('filter', 'exits'); setSearchParams(searchParams); }}
+                                    >
+                                        Complete Exits
+                                    </button>
+                                </div>
+
                                 <div className="shp-controls-right">
                                     <div className="shp-month-picker">
                                         <label className="shp-picker-label">Period</label>

@@ -7,8 +7,9 @@ Provides idempotent insert functions for master data and transactional inserts f
 from typing import Optional, Dict, Any, List
 from datetime import date
 
-from src.db.connection import get_cursor
+from src.db.connection import get_cursor, get_connection
 from src.config import logger
+from rapidfuzz import fuzz
 
 
 def upsert_isin_master(
@@ -260,9 +261,66 @@ def upsert_scheme(
 ) -> int:
     """
     Insert or get existing scheme with granular plan/option split.
+    Integrates 3-tier string resolution:
+    1. Explicit Mapping -> 2. Exact Match -> 3. Fuzzy Auto-Map (>95%)
     """
     cursor = get_cursor()
+    original_name = scheme_name.upper().strip()
+    final_name = original_name
     
+    # Tier 0: Scheme Aliases (New Resolution Engine - Fast Path)
+    cursor.execute(
+        """
+        SELECT canonical_scheme_id 
+        FROM scheme_aliases 
+        WHERE amc_id = %s AND alias_name = %s AND plan_type = %s AND option_type = %s AND is_reinvest = %s
+        """,
+        (amc_id, original_name, plan_type, option_type, is_reinvest)
+    )
+    alias = cursor.fetchone()
+    if alias:
+        logger.info(f"Resolved '{original_name}' via ALIAS to scheme_id {alias[0]}")
+        return alias[0]
+
+    # Tier 1: Legacy Mapping Validation (scheme_name_mappings)
+    cursor.execute(
+        "SELECT canonical_name FROM scheme_name_mappings WHERE amc_id = %s AND source_name = %s LIMIT 1",
+        (amc_id, original_name)
+    )
+    mapping = cursor.fetchone()
+    
+    if mapping:
+        final_name = mapping[0]
+    else:
+        # Tier 2: Exact Match check
+        cursor.execute("SELECT 1 FROM schemes WHERE amc_id = %s AND scheme_name = %s LIMIT 1", (amc_id, original_name))
+        is_exact = cursor.fetchone()
+        
+        if not is_exact:
+            # Tier 3: Fuzzy Auto-mapping (for minor typos > 95%)
+            cursor.execute("SELECT DISTINCT scheme_name FROM schemes WHERE amc_id = %s", (amc_id,))
+            existing_schemes = [row[0] for row in cursor.fetchall()]
+            
+            if existing_schemes:
+                from rapidfuzz import fuzz
+                best_match = None
+                best_score = 0
+                for es in existing_schemes:
+                    score = fuzz.token_set_ratio(original_name, es)
+                    if score > 95 and score > best_score:
+                        best_score = score
+                        best_match = es
+                        
+                if best_match:
+                    logger.info(f"Auto-mapping typo scheme '{original_name}' to '{best_match}' (Similarity: {best_score}%)")
+                    final_name = best_match
+                    # Persist the mapping so it doesn't need to fuzzy match again
+                    cursor.execute(
+                        "INSERT INTO scheme_name_mappings (amc_id, source_name, canonical_name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                        (amc_id, original_name, best_match)
+                    )
+
+    # Proceed with canonical UPSERT
     cursor.execute(
         """
         INSERT INTO schemes (amc_id, scheme_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
@@ -275,11 +333,11 @@ def upsert_scheme(
             updated_at = CURRENT_TIMESTAMP
         RETURNING scheme_id
         """,
-        (amc_id, scheme_name.upper(), plan_type, option_type, is_reinvest, scheme_category, scheme_code)
+        (amc_id, final_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
     )
     
     scheme_id = cursor.fetchone()[0]
-    logger.debug(f"Scheme upserted: {scheme_name} ({plan_type}/{option_type})")
+    logger.debug(f"Scheme upserted: {final_name} ({plan_type}/{option_type})")
     
     return scheme_id
 
@@ -695,5 +753,102 @@ def upsert_nav_entries(nav_data: List[Dict[str, Any]]):
         execute_values(cur, query, filtered_values)
         conn.commit()
         
-    logger.info(f"Ingested {len(filtered_values)} NAV entries. "
-                f"Skipped: {skipped_inception} (pre-inception), {skipped_lock} (year locked).")
+def get_product_type(name: str) -> str:
+    """Detects if a scheme is an ETF, Index Fund, or Standard Mutual Fund."""
+    name_upper = name.upper()
+    if " ETF" in name_upper or "ETF " in name_upper or name_upper.endswith("ETF"):
+        return "ETF"
+    if any(x in name_upper for x in ["INDEX FUND", "INDX FUND", "INDX"]):
+        return "INDEX"
+    return "STANDARD"
+
+def find_potential_scheme_renames(amc_id: int, new_name: str, plan: str, opt: str, re: bool, period_id: int):
+    """
+    Runs the 4-Layer Filter to find if a new scheme name is a rename of an existing one.
+    This is triggered during PortfolioLoader.load if a name is not found.
+    """
+    cursor = get_cursor()
+    
+    # 1. Get previous period
+    cursor.execute("SELECT period_id FROM periods WHERE period_end_date < (SELECT period_end_date FROM periods WHERE period_id = %s) ORDER BY period_end_date DESC LIMIT 1", (period_id,))
+    res = cursor.fetchone()
+    if not res: return None
+    prev_period_id = res[0]
+
+    # 2. Find "Missing" schemes (at same AMC/Plan/Opt/Re) that had data last month but NOT this month
+    cursor.execute("""
+        SELECT s.scheme_id, s.scheme_name
+        FROM schemes s
+        JOIN scheme_snapshots ss ON s.scheme_id = ss.scheme_id
+        WHERE s.amc_id = %s AND s.plan_type = %s AND s.option_type = %s AND s.is_reinvest = %s
+          AND ss.period_id = %s
+          AND NOT EXISTS (
+              SELECT 1 FROM scheme_snapshots ss2 
+              WHERE ss2.scheme_id = s.scheme_id AND ss2.period_id = %s
+          )
+    """, (amc_id, plan, opt, re, prev_period_id, period_id))
+    candidates = cursor.fetchall()
+    
+    if not candidates:
+        return None
+
+    # 3. Apply 4-Layer Filter
+    new_type = get_product_type(new_name)
+    amc_clean = "" # We could fetch it but for speed let's just do direct comparison
+    best_match = None
+    
+    for old_id, old_name in candidates:
+        # Layer 0: Product Type
+        if new_type != get_product_type(old_name):
+            continue
+            
+        # Layer 1: Fuzzy Text
+        text_score = max(fuzz.token_sort_ratio(new_name, old_name), fuzz.token_set_ratio(new_name, old_name))
+        if text_score < 50:
+            continue
+            
+        # Layer 2 & 3: Portfolio Overlap
+        # (Since we are in the middle of loading, the NEW scheme doesn't have a snapshot yet)
+        # We need to compare the CURRENT holdings list with the PREVIOUS snapshot of the candidate
+        # This will be handled in the PortfolioLoader which has the 'holdings' data
+        return {
+            "old_id": old_id,
+            "old_name": old_name,
+            "text_score": text_score,
+            "product_type": new_type
+        }
+    
+    return None
+
+def record_pending_merge(amc_id: int, new_name: str, old_id: int, plan: str, opt: str, re: bool, score: float, method: str, metadata: dict):
+    """Stores a potential scheme merge for user approval in Admin Vault."""
+    import json
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        INSERT INTO pending_scheme_merges (
+            amc_id, new_scheme_name, old_scheme_id, plan_type, option_type, 
+            is_reinvest, confidence_score, detection_method, metadata, status
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDING')
+        ON CONFLICT (amc_id, new_scheme_name, plan_type, option_type, is_reinvest) 
+        DO UPDATE SET 
+            confidence_score = EXCLUDED.confidence_score,
+            metadata = EXCLUDED.metadata,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (amc_id, new_name, old_id, plan, opt, re, score, method, json.dumps(metadata))
+    )
+    logger.warning(f"[QUARANTINE] Detected potential rename: '{new_name}' matches ID {old_id} ({score*100:.1f}%)")
+
+def record_notification(level: str, category: str, content: str, error_details: str = None):
+    """Records a system notification for the Admin Vault and potential Telegram sync."""
+    cursor = get_cursor()
+    cursor.execute(
+        """
+        INSERT INTO notification_logs (level, category, content, error_details)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (level, category, content, error_details)
+    )
+    logger.info(f"[NOTIF] {level} | {category} | {content[:50]}...")

@@ -1,0 +1,324 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   InsightsPage.css — Premium Analytical Dashboard
+   Theme: Matches StockHoldingsPage.css
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.ins-page {
+    min-height: 100vh;
+    background: var(--bg-primary);
+    padding-bottom: 64px;
+}
+
+.ins-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px 24px 0;
+}
+
+/* ── Header / Controls ── */
+.ins-header {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    margin-bottom: 24px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+
+.ins-title-row {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.ins-title-group h1 {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin: 0 0 4px;
+    letter-spacing: -0.5px;
+}
+
+.ins-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* ── Tabs ── */
+.ins-tabs {
+    display: flex;
+    background: var(--bg-tertiary);
+    padding: 4px;
+    gap: 4px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+}
+
+.ins-tab-btn {
+    padding: 8px 20px;
+    border: none;
+    background: transparent;
+    border-radius: 7px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.ins-tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.ins-tab-btn.active {
+    background: #1d4ed8;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(29, 78, 216, 0.3);
+}
+
+[data-theme="dark"] .ins-tab-btn.active {
+    background: #2563eb;
+    box-shadow: 0 2px 10px rgba(37, 99, 235, 0.4);
+}
+
+/* ── Filter Bar ── */
+.ins-filters {
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: var(--bg-secondary);
+    flex-wrap: wrap;
+}
+
+.ins-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ins-filter-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+}
+
+.ins-select,
+.ins-input {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.ins-select:focus,
+.ins-input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.ins-input {
+    width: 220px;
+}
+
+/* ── Table Styling ── */
+.ins-table-wrap {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+}
+
+.ins-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.ins-th {
+    background: #2d4a8a;
+    color: #e8eef8;
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background-color 0.2s ease;
+}
+
+.ins-th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.ins-th.sortable:hover {
+    background: #3a5c9f;
+}
+
+.ins-sort-icon {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.2s ease;
+}
+
+.ins-sort-icon.active {
+    color: #ffffff;
+    font-weight: 900;
+}
+
+.ins-td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.ins-row {
+    transition: background 0.15s ease;
+}
+
+.ins-row:hover {
+    background: rgba(59, 130, 246, 0.04);
+}
+
+.ins-row:last-child .ins-td {
+    border-bottom: none;
+}
+
+/* ── Specific Cell Styling ── */
+.ins-stock-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ins-stock-name {
+    font-weight: 700;
+    color: #1d4ed8;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.ins-stock-name:hover {
+    text-decoration: underline;
+}
+
+[data-theme="dark"] .ins-stock-name {
+    color: #60a5fa;
+}
+
+.ins-isin {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.ins-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    /* Forces badges like "LARGE CAP" to single line */
+}
+
+.ins-badge.mcap {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.ins-badge.mcap.large-cap {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.ins-badge.mcap.mid-cap {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.ins-badge.mcap.small-cap {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.ins-mcap-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.ins-mcap-val {
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    white-space: nowrap;
+    /* Prevent value wrap */
+}
+
+.ins-qty {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.ins-value-cr {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+
+.ins-buying {
+    color: #10b981;
+}
+
+.ins-selling {
+    color: #ef4444;
+}
+
+.ins-funds-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ins-fund-change {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
+.ins-fund-change.pos {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.ins-fund-change.neg {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+/* ── Empty/Loading ── */
+.ins-empty {
+    padding: 64px;
+    text-align: center;
+    color: var(--text-secondary);
+}

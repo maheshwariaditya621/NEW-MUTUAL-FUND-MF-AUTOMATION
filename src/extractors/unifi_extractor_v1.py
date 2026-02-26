@@ -14,17 +14,38 @@ class UnifiExtractorV1(BaseExtractor):
 
     def extract_scheme_info(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Extracts scheme name from Row 2.
+        Robustly extracts scheme name by searching for the portfolio statement header.
         """
         try:
-            # Based on inspection, Row 2 (index 2) contains the scheme name
-            row_2_values = [str(val).strip() for val in df.iloc[2].values if not pd.isna(val)]
-            row_text = " ".join(row_2_values)
-            if row_text:
-                # Split by newline if present to avoid extra description
-                return self.parse_verbose_scheme_name(row_text.split('\n')[0].strip())
+            # Search first 10 rows for "Portfolio Statement"
+            for i in range(min(10, len(df))):
+                row_values = [str(val).strip() for val in df.iloc[i].values if not pd.isna(val)]
+                row_text = " ".join(row_values).upper()
+                
+                if "PORTFOLIO STATEMENT" in row_text:
+                    # The scheme name is usually in the row IMMEDIATELY above
+                    if i > 0:
+                        prev_row_values = [str(val).strip() for val in df.iloc[i-1].values if not pd.isna(val)]
+                        scheme_name_raw = " ".join(prev_row_values)
+                        if scheme_name_raw and "UNIFI MUTUAL FUND" not in scheme_name_raw.upper():
+                            return self.parse_verbose_scheme_name(scheme_name_raw.split('\n')[0].strip())
+                        
+                        # If row above is just AMC name, check two rows above
+                        if i > 1:
+                            prev_2_row_values = [str(val).strip() for val in df.iloc[i-2].values if not pd.isna(val)]
+                            scheme_name_raw = " ".join(prev_2_row_values)
+                            if scheme_name_raw:
+                                return self.parse_verbose_scheme_name(scheme_name_raw.split('\n')[0].strip())
+
+            # Fallback to Row 2 or 3 if search fails
+            for idx in [1, 2]:
+                row_values = [str(val).strip() for val in df.iloc[idx].values if not pd.isna(val)]
+                row_text = " ".join(row_values)
+                if row_text and "PORTFOLIO" not in row_text.upper():
+                    return self.parse_verbose_scheme_name(row_text.split('\n')[0].strip())
+                    
         except Exception as e:
-            logger.warning(f"Error extracting scheme info from Row 2: {e}")
+            logger.warning(f"Error extracting Unifi scheme info: {e}")
             
         return self.parse_verbose_scheme_name("Unknown Unifi Scheme")
 

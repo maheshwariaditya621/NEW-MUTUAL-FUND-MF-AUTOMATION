@@ -452,7 +452,8 @@ async def _get_scheme_portfolio_by_id(
             eh.percent_of_nav,
             eh.quantity,
             c.market_cap,
-            c.mcap_type
+            c.mcap_type,
+            c.shares_outstanding
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
         JOIN companies c ON eh.company_id = c.company_id
@@ -464,7 +465,15 @@ async def _get_scheme_portfolio_by_id(
         """,
         (scheme_id, period_ids_list)
     )
+    rows = cur.fetchall()
     
+    # PREFETCH LIVE PRICES CONCURRENTLY to avoid 30sec+ loads
+    # row[4] is the isin
+    unique_isins = list(set([row[4] for row in rows if row[4]]))
+    if unique_isins:
+        from src.services.pricing_service import pricing_service
+        pricing_service.prefetch_ltps(unique_isins)
+        
     # Group holdings by entity and month
     # Structure: logical_id -> { metadata, monthly_data: { month_str -> { aggregated_metrics } } }
     holdings_by_entity = defaultdict(lambda: {
@@ -477,8 +486,8 @@ async def _get_scheme_portfolio_by_id(
         "monthly_data": defaultdict(lambda: {"percent": 0.0, "quantity": 0, "aum_cr": 0.0})
     })
     
-    for row in cur.fetchall():
-        logical_id, resolved_name, raw_name, sector, isin, year, month, aum_cr, percent_nav, quantity, m_cap, m_type = row
+    for row in rows:
+        logical_id, resolved_name, raw_name, sector, isin, year, month, aum_cr, percent_nav, quantity, m_cap, m_type, shares_out = row
         month_str = date(year, month, 1).strftime("%b-%y").upper()
         
         entry = holdings_by_entity[logical_id]
@@ -487,7 +496,11 @@ async def _get_scheme_portfolio_by_id(
              entry["company_name"] = (resolved_name or raw_name).upper()
              entry["isin"] = isin
              entry["sector"] = sector
-             entry["market_cap"] = m_cap
+             
+             from src.services.pricing_service import pricing_service
+             live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out)
+             
+             entry["market_cap"] = Decimal(str(live_mcap / 10000000)).quantize(Decimal('0.01')) if live_mcap else None
              entry["mcap_type"] = m_type
             
         # Aggregate (sum) if multiple rows for same entity in same month

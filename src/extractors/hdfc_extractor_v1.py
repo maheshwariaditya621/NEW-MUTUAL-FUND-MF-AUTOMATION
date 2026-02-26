@@ -153,6 +153,11 @@ class HDFCExtractorV1(BaseExtractor):
             col_upper = str(col).upper()
             for pattern, canonical in self.column_mapping.items():
                 if pattern in col_upper:
+                    # Exclusion logic for NAV percentage in Arbitrage/Hybrid funds
+                    # Prevent mapping 'Derivative % to NAV' or 'Unhedged % to NAV' 
+                    # as both would cause duplicate 'percent_of_nav' columns.
+                    if canonical == "percent_of_nav" and any(x in col_upper for x in ["DERIVATIVE", "UNHEDGED"]):
+                        continue
                     new_cols[col] = canonical
                     break
         return df.rename(columns=new_cols)

@@ -6,7 +6,8 @@ from src.db import (
     insert_holdings, check_snapshot_exists, get_isin_details,
     get_canonical_sector, upsert_isin_master, upsert_company,
     find_entity_by_name, find_entity_by_symbol, fuzzy_search_entity,
-    create_corporate_entity, log_resolution_audit
+    create_corporate_entity, log_resolution_audit,
+    find_potential_scheme_renames, record_pending_merge, record_notification, get_cursor
 )
 
 class PortfolioLoader:
@@ -53,6 +54,52 @@ class PortfolioLoader:
         return entity_id
 
     @staticmethod
+    def _calculate_overlap_with_holdings(old_scheme_id: int, incoming_holdings: List[Dict[str, Any]]) -> Dict[str, float]:
+        """
+        Calculates ISIN and weight overlap between an existing scheme's latest snapshot
+        and the incoming raw holdings data.
+        """
+        cursor = get_cursor()
+        # 1. Get latest snapshot for old scheme
+        cursor.execute("SELECT snapshot_id FROM scheme_snapshots WHERE scheme_id = %s ORDER BY period_id DESC LIMIT 1", (old_scheme_id,))
+        res = cursor.fetchone()
+        if not res: return {"isin_pc": 0, "weight_pc": 0}
+        
+        old_snap_id = res[0]
+        
+        # 2. Fetch old holdings
+        cursor.execute("""
+            SELECT c.isin, eh.percent_of_nav 
+            FROM equity_holdings eh
+            JOIN companies c ON eh.company_id = c.company_id
+            WHERE eh.snapshot_id = %s
+        """, (old_snap_id,))
+        old_h = {row[0]: float(row[1]) for row in cursor.fetchall() if row[0]}
+        
+        # 3. Process incoming holdings
+        new_h = {h['isin']: float(h['percent_of_nav']) for h in incoming_holdings if h.get('isin')}
+        
+        if not old_h or not new_h:
+            return {"isin_pc": 0, "weight_pc": 0}
+            
+        isins_old = set(old_h.keys())
+        isins_new = set(new_h.keys())
+        common = isins_old.intersection(isins_new)
+        
+        isin_match_pc = (len(common) / max(len(isins_old), len(isins_new))) * 100
+        
+        # Weight match (within 10% relative tolerance)
+        weight_matches = 0
+        for isin in common:
+            w1, w2 = old_h[isin], new_h[isin]
+            if w1 > 0 and 0.9 * w1 <= w2 <= 1.1 * w1:
+                weight_matches += 1
+        
+        weight_match_pc = (weight_matches / len(common)) * 100 if common else 0
+        
+        return {"isin_pc": isin_match_pc, "weight_pc": weight_match_pc, "common_count": len(common)}
+
+    @staticmethod
     def load_holdings(amc_id: int, period_id: int, holdings: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Loads a list of holdings into the database.
@@ -76,7 +123,12 @@ class PortfolioLoader:
         
         for s_key, data in schemes_data.items():
             try:
-                # 1. Upsert Scheme (Granular)
+                # 1. Resolve/Upsert Scheme (Granular)
+                # Before upsert, check if name is brand new for this AMC
+                cursor = get_cursor()
+                cursor.execute("SELECT scheme_id FROM schemes WHERE amc_id = %s AND scheme_name = %s", (amc_id, data["info"]["scheme_name"].upper().strip()))
+                exists = cursor.fetchone()
+                
                 scheme_id = upsert_scheme(
                     amc_id=amc_id,
                     scheme_name=data["info"]["scheme_name"],
@@ -84,6 +136,46 @@ class PortfolioLoader:
                     option_type=data["info"]["option_type"],
                     is_reinvest=data["info"].get("is_reinvest", False)
                 )
+
+                if not exists:
+                    # Brand new scheme name detected! Run 4-Layer Resolution Quarantine
+                    match = find_potential_scheme_renames(
+                        amc_id=amc_id,
+                        new_name=data["info"]["scheme_name"],
+                        plan=data["info"]["plan_type"],
+                        opt=data["info"]["option_type"],
+                        re=data["info"].get("is_reinvest", False),
+                        period_id=period_id
+                    )
+                    
+                    if match:
+                        # Perform deep portfolio check
+                        overlap = PortfolioLoader._calculate_overlap_with_holdings(match['old_id'], data["items"])
+                        
+                        # If ISIN match > 80%, quarantine and flag
+                        if overlap['isin_pc'] >= 80:
+                            record_pending_merge(
+                                amc_id=amc_id,
+                                new_name=data["info"]["scheme_name"],
+                                old_id=match['old_id'],
+                                plan=data["info"]["plan_type"],
+                                opt=data["info"]["option_type"],
+                                re=data["info"].get("is_reinvest", False),
+                                score=overlap['isin_pc']/100.0,
+                                method='4_LAYER_DETECTION',
+                                metadata={
+                                    "text_score": match['text_score'],
+                                    "isin_score": overlap['isin_pc'],
+                                    "weight_score": overlap['weight_pc'],
+                                    "common_isins": overlap['common_count'],
+                                    "old_name": match['old_name']
+                                }
+                            )
+                            record_notification(
+                                level='WARNING',
+                                category='MERGE',
+                                content=f"Potential rename detected: '{data['info']['scheme_name']}' matches '{match['old_name']}' ({overlap['isin_pc']:.1f}%). Quarantined for Admin approval."
+                            )
 
                 # 2. Idempotency Check
                 if check_snapshot_exists(scheme_id, period_id):
