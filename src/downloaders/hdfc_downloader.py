@@ -508,6 +508,9 @@ if __name__ == "__main__":
     downloader = HDFCDownloader()
     result = downloader.download(year=args.year, month=args.month)
     
+    # CRITICAL: Print JSON result for orchestrator to capture
+    print(json.dumps(result))
+    
     status = result["status"]
     if status == "success":
         logger.success(f"✅ Success: Downloaded {result['files_downloaded']} file(s)")

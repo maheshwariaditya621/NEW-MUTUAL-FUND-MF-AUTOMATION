@@ -78,31 +78,43 @@ class PipelineOrchestrator:
 
                 process = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                 
+                # Parse JSON result from stdout (even on failure)
+                download_res = {}
+                try:
+                    # Look for the last JSON block in stdout
+                    lines = process.stdout.strip().split("\n")
+                    json_str = next((l for l in reversed(lines) if l.strip().startswith("{") and l.strip().endswith("}")), None)
+                    if json_str:
+                        download_res = json.loads(json_str)
+                except Exception as e:
+                    logger.debug(f"Could not parse JSON from downloader: {e}")
+
                 if process.returncode != 0:
                     error_out = process.stderr or process.stdout
                     logger.error(f"Downloader subprocess failed: {error_out}")
-                    results["steps"]["download"] = {"status": "failed", "reason": f"Subprocess error: {error_out[:200]}"}
+                    
+                    # If we got a structured reason from JSON, use it. Otherwise fallback to generic.
+                    reason = download_res.get("reason") or f"Subprocess exit {process.returncode}"
+                    results["steps"]["download"] = {"status": "failed", "reason": reason}
                     results["status"] = "failed"
-                    self.notifier.notify_error(amc_slug.upper(), year, month, "Download Error", f"Subprocess exit {process.returncode}")
+                    
+                    # ONLY send generic error if we don't have a structured result (to avoid duplicates)
+                    if not download_res:
+                        self.notifier.notify_error(amc_slug.upper(), year, month, "Download Error", f"Subprocess error: {error_out[:100]}")
+                    
                     return results
                 else:
-                    # Parse the last line of output which should be the JSON result
-                    try:
-                        lines = process.stdout.strip().split("\n")
-                        json_str = next((l for l in reversed(lines) if l.strip().startswith("{") and l.strip().endswith("}")), "{}")
-                        download_res = json.loads(json_str)
-                    except Exception:
-                        download_res = {"status": "success", "files_downloaded": 0, "reason": "Output processing error"}
+                    # Fallback if success but no JSON found
+                    if not download_res:
+                        download_res = {"status": "success", "files_downloaded": 0, "reason": "No JSON output captured"}
                     
                     results["steps"]["download"] = download_res
                     
                     if download_res.get("status") == "failed":
                         logger.error(f"Download failed for {amc_slug}: {download_res.get('reason')}")
                         results["status"] = "failed"
-                        # Status notification is handled by downloader internally usually, 
-                        # but we can add a summary if it looks like "Not published"
-                        if "not found" in str(download_res.get("reason")).lower():
-                            self.notifier.alert(f"⏳ <b>[{amc_slug.upper()}]</b> Data not yet published for {month:02d}/{year}")
+                        # Orchestrator doesn't need to send another alert here as the downloader 
+                        # usually sends its own specific notify_not_published or notify_error
                         return results
                     else:
                         num_files = download_res.get("files_downloaded", 0)
