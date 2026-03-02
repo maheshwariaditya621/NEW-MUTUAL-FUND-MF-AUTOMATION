@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './AdminVault.css';
+import FileManagement from './admin/FileManagement';
 
 const AdminVault = () => {
     const [password, setPassword] = useState('');
@@ -256,6 +257,7 @@ const AdminVault = () => {
                 <button className={`tab-btn ${activeTab === 'merges' ? 'active' : ''}`} onClick={() => setActiveTab('merges')}>Scheme Merges</button>
                 <button className={`tab-btn ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>System Alerts</button>
                 <button className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>Data Management</button>
+                <button className={`tab-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>📁 File Manager</button>
                 <button className={`tab-btn ${activeTab === 'extraction' ? 'active' : ''}`} onClick={() => setActiveTab('extraction')}>⚡ Extraction Control</button>
             </div>
 
@@ -454,6 +456,10 @@ const AdminVault = () => {
                         </div>
                     </div>
                 )}
+                {activeTab === 'files' && (
+                    <FileManagement adminPassword={password} />
+                )}
+
                 {activeTab === 'extraction' && (
                     <div className="data-management">
                         <div className="uploader-card">

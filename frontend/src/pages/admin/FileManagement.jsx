@@ -5,7 +5,7 @@ import {
     ChevronDown, ChevronUp, CheckCircle, XCircle
 } from 'lucide-react';
 
-const FileManagement = () => {
+const FileManagement = ({ adminPassword }) => {
     const [inventory, setInventory] = useState([]);
     const [stats, setStats] = useState({ raw_size_mb: 0, merged_size_mb: 0, total_size_mb: 0 });
     const [loading, setLoading] = useState(true);
@@ -22,7 +22,9 @@ const FileManagement = () => {
     const fetchInventory = async () => {
         setLoading(true);
         try {
-            const response = await fetch('/api/admin/files/inventory');
+            const response = await fetch('/api/v1/admin/files/inventory', {
+                headers: { 'X-Admin-Secret': adminPassword }
+            });
             const data = await response.json();
             if (data.status === 'success') {
                 setInventory(data.inventory);
@@ -46,9 +48,10 @@ const FileManagement = () => {
         setActionLoading(actionKey);
 
         try {
-            const response = await fetch(`/api/admin/files?amc_slug=${slug}&year=${year}&month=${month}&category=${category}`, {
-                method: 'DELETE'
-            });
+            const response = await fetch(
+                `/api/v1/admin/files?amc_slug=${slug}&year=${year}&month=${month}&category=${category}`,
+                { method: 'DELETE', headers: { 'X-Admin-Secret': adminPassword } }
+            );
             const data = await response.json();
 
             if (data.status === 'success') {
@@ -71,9 +74,10 @@ const FileManagement = () => {
         setActionLoading(`bulk-${year}-${month}-${category}`);
 
         try {
-            const response = await fetch(`/api/admin/files/bulk?year=${year}&month=${month}&category=${category}`, {
-                method: 'DELETE'
-            });
+            const response = await fetch(
+                `/api/v1/admin/files/bulk?year=${year}&month=${month}&category=${category}`,
+                { method: 'DELETE', headers: { 'X-Admin-Secret': adminPassword } }
+            );
             const data = await response.json();
 
             if (data.status === 'success') {
