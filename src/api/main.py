@@ -44,6 +44,14 @@ async def startup_event():
     """Initialize resources on startup."""
     logger.info("🚀 Mutual Fund Analytics API starting up...")
     logger.info("📊 API Documentation available at: http://localhost:8000/docs")
+    
+    # Send Telegram notification on startup
+    try:
+        from src.alerts.telegram_notifier import get_notifier
+        notifier = get_notifier()
+        notifier.alert("🟢 <b>MF Analytics API is UP and Running</b>\nSite: avfincorp.com\nStatus: Healthy")
+    except Exception as e:
+        logger.error(f"Failed to send startup notification: {e}")
 
 
 @app.on_event("shutdown")
