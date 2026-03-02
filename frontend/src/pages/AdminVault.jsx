@@ -598,21 +598,49 @@ const AdminVault = () => {
                                             {job.done}/{job.total} AMCs processed
                                         </div>
 
-                                        {/* Results grid */}
+                                        {/* Results table */}
                                         {Object.keys(job.results).length > 0 && (
-                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
-                                                {Object.entries(job.results).map(([slug, res]) => (
-                                                    <span key={slug} title={JSON.stringify(res)} style={{
-                                                        padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem',
-                                                        background: res.status === 'error' ? '#7f1d1d55' :
-                                                            (res.rows_inserted > 0 || res.rows_read > 0) ? '#14532d55' : '#1e293b',
-                                                        color: res.status === 'error' ? '#f87171' :
-                                                            (res.rows_inserted > 0 || res.rows_read > 0) ? '#4ade80' : '#94a3b8',
-                                                        border: '1px solid currentColor'
-                                                    }}>
-                                                        {slug} {res.status === 'error' ? '✗' : res.rows_inserted > 0 ? `✓ ${res.rows_inserted}r` : res.rows_read > 0 ? `~ ${res.rows_read}r` : '–'}
-                                                    </span>
-                                                ))}
+                                            <div style={{ marginTop: '10px', overflowX: 'auto' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '1px solid #333', color: '#888' }}>
+                                                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>AMC</th>
+                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Status</th>
+                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Rows Read</th>
+                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Rows Inserted</th>
+                                                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>Notes</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {Object.entries(job.results).map(([slug, res]) => {
+                                                            const isErr = res.status === 'error';
+                                                            const isOk = res.rows_inserted > 0 || res.rows_read > 0;
+                                                            const statusColor = isErr ? '#f87171' : isOk ? '#4ade80' : res.status === 'skipped' ? '#fbbf24' : '#94a3b8';
+                                                            return (
+                                                                <tr key={slug} style={{ borderBottom: '1px solid #1e293b' }}>
+                                                                    <td style={{ padding: '5px 8px', fontWeight: 600 }}>{slug}</td>
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                                                                        <span style={{
+                                                                            padding: '2px 8px', borderRadius: '20px', fontSize: '0.72rem', fontWeight: 700,
+                                                                            background: statusColor + '22', color: statusColor, border: `1px solid ${statusColor}44`
+                                                                        }}>
+                                                                            {res.status || '—'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: res.rows_read > 0 ? '#4ade80' : '#555' }}>
+                                                                        {res.rows_read ?? '—'}
+                                                                    </td>
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: res.rows_inserted > 0 ? '#4ade80' : '#555' }}>
+                                                                        {res.rows_inserted ?? '—'}
+                                                                    </td>
+                                                                    <td style={{ padding: '5px 8px', color: isErr ? '#f87171' : '#666', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                        {isErr ? (res.error || 'Unknown error') : res.message || res.reason || ''}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
                                             </div>
                                         )}
                                     </div>
