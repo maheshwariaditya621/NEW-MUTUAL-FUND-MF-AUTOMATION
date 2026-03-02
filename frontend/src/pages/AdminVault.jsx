@@ -129,6 +129,22 @@ const AdminVault = () => {
         return () => clearInterval(interval);
     }, [activeJobId, password]);
 
+    const handleCancelJob = async (jobId) => {
+        if (!window.confirm(`Are you sure you want to stop Job #${jobId}?`)) return;
+        try {
+            const resp = await fetch(`${API_BASE}/cancel-job/${jobId}`, {
+                method: 'POST',
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) {
+                setExtJobs(prev => prev.map(j => j.job_id === jobId ? { ...j, status: 'cancelled' } : j));
+                setActiveJobId(null);
+            }
+        } catch (err) {
+            alert('Cancel failed');
+        }
+    };
+
     const handleApprove = async (mergeId) => {
         const pass = password;
         try {
@@ -626,17 +642,35 @@ const AdminVault = () => {
                                                     {job.year}-{String(job.month).padStart(2, '0')} • {job.dry_run ? 'Dry Run' : 'Load Mode'} {job.redo ? '• Redo' : ''}
                                                 </span>
                                             </div>
-                                            <span style={{
-                                                padding: '3px 10px', borderRadius: '20px', fontSize: '0.8rem',
-                                                background: job.status === 'completed' ? '#16a34a33' : job.status === 'running' ? '#b45309' + '33' : '#6366f133',
-                                                color: job.status === 'completed' ? '#4ade80' : job.status === 'running' ? '#fbbf24' : '#a5b4fc'
-                                            }}>{job.status.toUpperCase()}</span>
+                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                {job.status === 'running' && (
+                                                    <button
+                                                        onClick={() => handleCancelJob(job.job_id)}
+                                                        style={{
+                                                            padding: '3px 8px', borderRadius: '4px', fontSize: '0.75rem',
+                                                            background: '#ef444433', color: '#fca5a5', border: '1px solid #ef444433',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        Stop Pipeline
+                                                    </button>
+                                                )}
+                                                <span style={{
+                                                    padding: '3px 10px', borderRadius: '20px', fontSize: '0.8rem',
+                                                    background: job.status === 'completed' ? '#16a34a33' :
+                                                        job.status === 'running' ? '#b4530933' :
+                                                            job.status === 'cancelled' ? '#ef444433' : '#6366f133',
+                                                    color: job.status === 'completed' ? '#4ade80' :
+                                                        job.status === 'running' ? '#fbbf24' :
+                                                            job.status === 'cancelled' ? '#fca5a5' : '#a5b4fc'
+                                                }}>{job.status.toUpperCase()}</span>
+                                            </div>
                                         </div>
 
                                         {/* Progress bar */}
                                         <div style={{ background: '#1e1e2e', borderRadius: '4px', height: '6px', marginBottom: '8px' }}>
                                             <div style={{
-                                                background: 'linear-gradient(90deg, #6366f1, #8b5cf6)',
+                                                background: job.status === 'cancelled' ? '#ef4444' : 'linear-gradient(90deg, #6366f1, #8b5cf6)',
                                                 width: `${job.total > 0 ? (job.done / job.total) * 100 : 0}%`,
                                                 height: '100%', borderRadius: '4px', transition: 'width 0.3s'
                                             }} />

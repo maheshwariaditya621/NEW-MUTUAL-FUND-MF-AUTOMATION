@@ -20,6 +20,7 @@ router = APIRouter()
 # In-memory job store for extraction runs
 # ─────────────────────────────────────────────
 _extraction_jobs: Dict[str, Any] = {}
+_cancelled_jobs: set = set()
 
 ALL_AMC_SLUGS = [
     "abakkus", "absl", "angelone", "axis", "bajaj", "bandhan", "baroda",
@@ -427,9 +428,14 @@ async def trigger_pipeline(
 
     def run_pipeline():
         try:
-            orchestrator = PipelineOrchestrator()
+            orchestrator = PipelineOrchestrator(cancelled_jobs=_cancelled_jobs)
             _extraction_jobs[job_id]["status"] = "running"
             for slug in slugs:
+                # CHECK FOR CANCELLATION
+                if job_id in _cancelled_jobs:
+                    logger.warning(f"Job {job_id} cancelled by user. Halting pipeline.")
+                    break
+
                 try:
                     result = orchestrator.run_pipeline(
                         amc_slug=slug,
@@ -438,6 +444,7 @@ async def trigger_pipeline(
                         steps=request.steps,
                         dry_run=request.dry_run,
                         redo=request.redo,
+                        job_id=job_id
                     )
                     _extraction_jobs[job_id]["results"][slug] = result
                 except Exception as e:
@@ -465,10 +472,20 @@ async def get_extraction_jobs():
     return jobs
 
 
+@router.post("/cancel-job/{job_id}", dependencies=[Depends(verify_admin)])
+async def cancel_job(job_id: str):
+    """Mark a job as cancelled so the orchestrator stops processing further AMCs."""
+    if job_id not in _extraction_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    _cancelled_jobs.add(job_id)
+    _extraction_jobs[job_id]["status"] = "cancelled"
+    return {"message": f"Job {job_id} cancellation requested"}
+
+
 @router.get("/extraction-jobs/{job_id}", dependencies=[Depends(verify_admin)])
 async def get_extraction_job(job_id: str):
-    """Get status of a specific extraction job."""
-    job = _extraction_jobs.get(job_id.upper())
-    if not job:
+    """Return status and results for a specific job."""
+    if job_id not in _extraction_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return _extraction_jobs[job_id]
