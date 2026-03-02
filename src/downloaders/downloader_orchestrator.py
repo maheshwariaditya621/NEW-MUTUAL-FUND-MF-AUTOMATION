@@ -111,10 +111,8 @@ class PipelineOrchestrator:
                     results["steps"]["download"] = {"status": "failed", "reason": reason}
                     results["status"] = "failed"
                     
-                    # ONLY send generic error if we don't have a structured result (to avoid duplicates)
-                    if not download_res:
-                        self.notifier.notify_error(amc_slug.upper(), year, month, "Download Error", f"Subprocess error: {error_out[:100]}")
-                    
+                    # Downloader subprocess already sent its own Telegram notification.
+                    # Orchestrator stays silent on Telegram for download step.
                     return results
                 else:
                     # Fallback if success but no JSON found
@@ -130,8 +128,8 @@ class PipelineOrchestrator:
                         # usually sends its own specific notify_not_published or notify_error
                         return results
                     else:
-                        num_files = download_res.get("files_downloaded", 0)
-                        self.notifier.alert(f"✅ <b>[{amc_slug.upper()}]</b> Downloaded {num_files} files.")
+                        # Downloader subprocess already sent its own Telegram notification.
+                        pass
 
             except Exception as e:
                 logger.error(f"Error during download for {amc_slug}: {e}")
@@ -155,17 +153,12 @@ class PipelineOrchestrator:
                         logger.warning(f"Redo requested: Deleting existing merged file {output_file}")
                         os.remove(output_file)
 
-                # Telegram Notification (Start)
-                self.notifier.alert(f"🔄 <b>[{amc_slug.upper()}]</b> Consolidation started...")
-
                 merge_res = consolidate_amc_downloads(amc_slug, year, month)
                 if merge_res:
                     results["steps"]["merge"] = {"status": "success", "file_path": str(merge_res)}
-                    self.notifier.alert(f"📁 <b>[{amc_slug.upper()}]</b> Merged successfully.")
                 else:
                     results["steps"]["merge"] = {"status": "failed", "reason": "Consolidation failed (likely no valid sheets)"}
                     results["status"] = "failed"
-                    self.notifier.alert(f"❌ <b>[{amc_slug.upper()}]</b> Consolidation failed.")
                     return results
             except Exception as e:
                 logger.error(f"Error during merge for {amc_slug}: {e}")
