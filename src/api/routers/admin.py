@@ -32,10 +32,11 @@ ALL_AMC_SLUGS = [
     "whiteoak", "zerodha"
 ]
 
-class ExtractionRequest(BaseModel):
+class PipelineRequest(BaseModel):
     amc_slugs: List[str]
     year: int
     month: int
+    steps: List[str] = ["download", "merge", "extract"]
     dry_run: bool = True
     redo: bool = False
 
@@ -387,13 +388,13 @@ async def get_amc_slugs():
     return {"slugs": ALL_AMC_SLUGS}
 
 
-@router.post("/trigger-extraction", dependencies=[Depends(verify_admin)])
-async def trigger_extraction(
-    request: ExtractionRequest,
+@router.post("/trigger-pipeline", dependencies=[Depends(verify_admin)])
+async def trigger_pipeline(
+    request: PipelineRequest,
     background_tasks: BackgroundTasks,
 ):
-    """Trigger extract+load for one or more AMCs in the background."""
-    from src.extractors.orchestrator import ExtractionOrchestrator
+    """Trigger the data pipeline (download, merge, extract) for one or more AMCs."""
+    from src.downloaders.downloader_orchestrator import PipelineOrchestrator
 
     job_id = str(uuid.uuid4())[:8].upper()
     slugs = ALL_AMC_SLUGS if "all" in request.amc_slugs else request.amc_slugs
@@ -404,6 +405,7 @@ async def trigger_extraction(
         "amc_slugs": slugs,
         "year": request.year,
         "month": request.month,
+        "steps": request.steps,
         "dry_run": request.dry_run,
         "redo": request.redo,
         "results": {},
@@ -413,21 +415,23 @@ async def trigger_extraction(
         "done": 0,
     }
 
-    def run_extraction():
+    def run_pipeline():
         try:
-            orchestrator = ExtractionOrchestrator()
+            orchestrator = PipelineOrchestrator()
             _extraction_jobs[job_id]["status"] = "running"
             for slug in slugs:
                 try:
-                    result = orchestrator.process_amc_month(
+                    result = orchestrator.run_pipeline(
                         amc_slug=slug,
                         year=request.year,
                         month=request.month,
+                        steps=request.steps,
                         dry_run=request.dry_run,
                         redo=request.redo,
                     )
                     _extraction_jobs[job_id]["results"][slug] = result
                 except Exception as e:
+                    logger.error(f"Pipeline error for {slug}: {e}")
                     _extraction_jobs[job_id]["results"][slug] = {
                         "status": "error", "error": str(e)[:300]
                     }
@@ -436,7 +440,7 @@ async def trigger_extraction(
             _extraction_jobs[job_id]["status"] = "completed"
             _extraction_jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
 
-    background_tasks.add_task(run_extraction)
+    background_tasks.add_task(run_pipeline)
     return {"job_id": job_id, "status": "queued", "amc_count": len(slugs)}
 
 

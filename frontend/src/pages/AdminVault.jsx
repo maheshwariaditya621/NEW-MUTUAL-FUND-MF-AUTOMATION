@@ -30,6 +30,7 @@ const AdminVault = () => {
     ];
     const now = new Date();
     const [selectedSlugs, setSelectedSlugs] = useState([]);
+    const [selectedSteps, setSelectedSteps] = useState(['download', 'merge', 'extract']);
     const [extYear, setExtYear] = useState(now.getFullYear());
     const [extMonth, setExtMonth] = useState(now.getMonth() + 1);
     const [isDryRun, setIsDryRun] = useState(true);
@@ -256,9 +257,8 @@ const AdminVault = () => {
             <div className="admin-tabs">
                 <button className={`tab-btn ${activeTab === 'merges' ? 'active' : ''}`} onClick={() => setActiveTab('merges')}>Scheme Merges</button>
                 <button className={`tab-btn ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>System Alerts</button>
-                <button className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>Data Management</button>
                 <button className={`tab-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>📁 File Manager</button>
-                <button className={`tab-btn ${activeTab === 'extraction' ? 'active' : ''}`} onClick={() => setActiveTab('extraction')}>⚡ Extraction Control</button>
+                <button className={`tab-btn ${activeTab === 'extraction' ? 'active' : ''}`} onClick={() => setActiveTab('extraction')}>🚀 Pipeline Control</button>
             </div>
 
             <div className="tab-content">
@@ -463,8 +463,32 @@ const AdminVault = () => {
                 {activeTab === 'extraction' && (
                     <div className="data-management">
                         <div className="uploader-card">
-                            <h3>⚡ Extraction Control Panel</h3>
-                            <p>Select AMCs, configure period and options, then trigger extract + DB load.</p>
+                            <h3>🚀 Pipeline Control Panel</h3>
+                            <p>Configure and trigger the full data lifecycle: Download → Merge → Extract → Load.</p>
+
+                            {/* Steps Selection */}
+                            <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(99,102,241,0.05)', borderRadius: '8px', border: '1px solid rgba(99,102,241,0.2)' }}>
+                                <strong style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem' }}>Pipeline Stages to Run</strong>
+                                <div style={{ display: 'flex', gap: '20px' }}>
+                                    {[
+                                        { id: 'download', label: '📥 Download Raw Files' },
+                                        { id: 'merge', label: '🔀 Merge Excels' },
+                                        { id: 'extract', label: '⚡ Extract & Load DB' }
+                                    ].map(step => (
+                                        <label key={step.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedSteps.includes(step.id)}
+                                                onChange={e => {
+                                                    if (e.target.checked) setSelectedSteps(p => [...p, step.id]);
+                                                    else setSelectedSteps(p => p.filter(s => s !== step.id));
+                                                }}
+                                            />
+                                            {step.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
 
                             {/* AMC Selection */}
                             <div style={{ marginTop: '16px' }}>
@@ -477,7 +501,7 @@ const AdminVault = () => {
                                 </div>
                                 <div style={{
                                     display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-                                    gap: '6px', maxHeight: '220px', overflowY: 'auto',
+                                    gap: '6px', maxHeight: '200px', overflowY: 'auto',
                                     border: '1px solid #333', borderRadius: '8px', padding: '10px'
                                 }}>
                                     {ALL_SLUGS.map(slug => (
@@ -523,24 +547,25 @@ const AdminVault = () => {
                                 </label>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                                     <input type="checkbox" checked={isRedo} onChange={e => setIsRedo(e.target.checked)} />
-                                    <span style={{ fontSize: '0.9rem' }}>Redo (purge existing)</span>
+                                    <span style={{ fontSize: '0.9rem' }}>Redo (overwrites)</span>
                                 </label>
                             </div>
 
                             {/* Trigger Button */}
                             <button
                                 className="btn-approve"
-                                disabled={triggering || selectedSlugs.length === 0}
-                                style={{ marginTop: '16px', padding: '12px 28px', fontSize: '1rem' }}
+                                disabled={triggering || selectedSlugs.length === 0 || selectedSteps.length === 0}
+                                style={{ marginTop: '16px', padding: '12px 28px', fontSize: '1rem', background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}
                                 onClick={async () => {
                                     setTriggering(true);
                                     try {
-                                        const resp = await fetch(`${API_BASE}/trigger-extraction`, {
+                                        const resp = await fetch(`${API_BASE}/trigger-pipeline`, {
                                             method: 'POST',
                                             headers: { 'X-Admin-Secret': password, 'Content-Type': 'application/json' },
                                             body: JSON.stringify({
                                                 amc_slugs: selectedSlugs,
                                                 year: extYear, month: extMonth,
+                                                steps: selectedSteps,
                                                 dry_run: isDryRun, redo: isRedo
                                             })
                                         });
@@ -549,7 +574,8 @@ const AdminVault = () => {
                                             const newJob = {
                                                 ...data, status: 'queued', results: {}, done: 0,
                                                 total: selectedSlugs.length, amc_slugs: selectedSlugs,
-                                                year: extYear, month: extMonth, dry_run: isDryRun, redo: isRedo,
+                                                year: extYear, month: extMonth, steps: selectedSteps,
+                                                dry_run: isDryRun, redo: isRedo,
                                                 started_at: new Date().toISOString()
                                             };
                                             setExtJobs(prev => [newJob, ...prev]);
@@ -559,7 +585,7 @@ const AdminVault = () => {
                                     finally { setTriggering(false); }
                                 }}
                             >
-                                {triggering ? '🔄 Triggering...' : `⚡ Run Extraction (${selectedSlugs.length} AMCs)`}
+                                {triggering ? '🔄 Starting...' : `🚀 Run Pipeline (${selectedSlugs.length} AMCs)`}
                             </button>
                         </div>
 
@@ -605,36 +631,44 @@ const AdminVault = () => {
                                                     <thead>
                                                         <tr style={{ borderBottom: '1px solid #333', color: '#888' }}>
                                                             <th style={{ textAlign: 'left', padding: '4px 8px' }}>AMC</th>
-                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Status</th>
-                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Rows Read</th>
-                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Rows Inserted</th>
+                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Steps</th>
+                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Read</th>
+                                                            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Loaded</th>
                                                             <th style={{ textAlign: 'left', padding: '4px 8px' }}>Notes</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
                                                         {Object.entries(job.results).map(([slug, res]) => {
-                                                            const isErr = res.status === 'error';
-                                                            const isOk = res.rows_inserted > 0 || res.rows_read > 0;
-                                                            const statusColor = isErr ? '#f87171' : isOk ? '#4ade80' : res.status === 'skipped' ? '#fbbf24' : '#94a3b8';
+                                                            const steps = res.steps || {};
+                                                            const extractRes = steps.extract || {};
+                                                            const isErr = res.status === 'error' || extractRes.status === 'error';
+
+                                                            const getStepColor = (stepKey) => {
+                                                                const s = steps[stepKey];
+                                                                if (!s) return '#334155'; // Not requested
+                                                                if (s.status === 'success' || s.status === 'completed' || s.status === 'skipped') return '#4ade80';
+                                                                if (s.status === 'failed' || s.status === 'error') return '#f87171';
+                                                                return '#fbbf24'; // pending/other
+                                                            };
+
                                                             return (
                                                                 <tr key={slug} style={{ borderBottom: '1px solid #1e293b' }}>
                                                                     <td style={{ padding: '5px 8px', fontWeight: 600 }}>{slug}</td>
                                                                     <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                                                                        <span style={{
-                                                                            padding: '2px 8px', borderRadius: '20px', fontSize: '0.72rem', fontWeight: 700,
-                                                                            background: statusColor + '22', color: statusColor, border: `1px solid ${statusColor}44`
-                                                                        }}>
-                                                                            {res.status || '—'}
-                                                                        </span>
+                                                                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                                                            <span title="Download" style={{ width: '8px', height: '8px', borderRadius: '50%', background: getStepColor('download') }} />
+                                                                            <span title="Merge" style={{ width: '8px', height: '8px', borderRadius: '50%', background: getStepColor('merge') }} />
+                                                                            <span title="Extract" style={{ width: '8px', height: '8px', borderRadius: '50%', background: getStepColor('extract') }} />
+                                                                        </div>
                                                                     </td>
-                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: res.rows_read > 0 ? '#4ade80' : '#555' }}>
-                                                                        {res.rows_read ?? '—'}
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: extractRes.rows_read > 0 ? '#4ade80' : '#555' }}>
+                                                                        {extractRes.rows_read ?? '—'}
                                                                     </td>
-                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: res.rows_inserted > 0 ? '#4ade80' : '#555' }}>
-                                                                        {res.rows_inserted ?? '—'}
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: extractRes.rows_inserted > 0 ? '#4ade80' : '#555' }}>
+                                                                        {extractRes.rows_inserted ?? '—'}
                                                                     </td>
-                                                                    <td style={{ padding: '5px 8px', color: isErr ? '#f87171' : '#666', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                                        {isErr ? (res.error || 'Unknown error') : res.message || res.reason || ''}
+                                                                    <td style={{ padding: '5px 8px', color: isErr ? '#f87171' : '#666', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                        {isErr ? (res.error || extractRes.error || 'Err') : (steps.download?.reason || steps.merge?.error || extractRes.message || '')}
                                                                     </td>
                                                                 </tr>
                                                             );
