@@ -6,6 +6,7 @@ import Home from './pages/Home';
 import StockHoldingsPage from './pages/StockHoldingsPage';
 import SchemePortfolioPage from './pages/SchemePortfolioPage';
 import InsightsPage from './pages/InsightsPage';
+import AMCExplorerPage from './pages/AMCExplorerPage';
 import AdminVault from './pages/AdminVault';
 import HeaderSearch from './components/common/HeaderSearch';
 import Chatbot from './components/Chatbot';
@@ -28,6 +29,7 @@ function App() {
                   <nav className="nav">
                     <Link to="/stocks" className="nav-link">Stock Holdings</Link>
                     <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
+                    <Link to="/amcs" className="nav-link">Funds Explorer</Link>
                     <Link to="/insights" className="nav-link">Insights</Link>
                   </nav>
                 </div>
@@ -45,6 +47,7 @@ function App() {
               <Route path="/" element={<Home />} />
               <Route path="/stocks" element={<StockHoldingsPage />} />
               <Route path="/schemes" element={<SchemePortfolioPage />} />
+              <Route path="/amcs" element={<AMCExplorerPage />} />
               <Route path="/insights" element={<InsightsPage />} />
               <Route path="/admin-vault" element={<AdminVault />} />
             </Routes>
@@ -52,9 +55,12 @@ function App() {
 
           <footer className="app-footer">
             <div className="container">
-              <p className="text-muted text-center">
-                Mutual Fund Analytics Platform © 2026
-              </p>
+              <div className="footer-content">
+                <p className="footer-copyright">
+                  Mutual Fund Analytics Platform © 2026
+                </p>
+                <Link to="/admin-vault" className="admin-link-btn">🔐 Admin Vault</Link>
+              </div>
             </div>
           </footer>
 

@@ -1,4 +1,4 @@
-import { apiGet } from './client';
+import { apiGet, apiPost } from './client';
 
 /**
  * Search for stocks by company name, ISIN, or NSE symbol
@@ -18,3 +18,10 @@ export async function getStockHoldings(identifier, months = 3, endMonth = null) 
     if (endMonth) params.end_month = endMonth;
     return apiGet('/stocks/holdings', params);
 }
+
+/**
+ * Get the latest live price (LTP) for a specific stock by ISIN
+ */
+export const getStockPrice = (isin) => apiGet(`/stocks/${isin}/price`);
+
+export const getBulkPrices = (isins) => apiPost('/stocks/prices', { isins });

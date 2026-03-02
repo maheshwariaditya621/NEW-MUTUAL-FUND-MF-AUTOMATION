@@ -160,42 +160,90 @@ class KotakExtractorV1(BaseExtractor):
                         schemes_processed += 1
                         continue
                         
-                    block_holdings = []
-                    for _, row in df_equity.iterrows():
-                        sec_name = str(self._resolve_merged_column(row, 'security_name') or '').lower()
-                        
-                        # Guard: Skip Total/Sub Total rows if they pass ISIN filter, but DO NOT BREAK.
-                        if 'total' in sec_name or 'sub total' in sec_name or 'net current' in sec_name:
-                            continue
+                    # D. Extract Total Net Assets (AUM) from the block's footer
+                    raw_net_assets = None
+                    for idx, row in df_clean.iterrows():
+                        row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                        row_text = " ".join(row_vals)
+                        if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                            candidates = []
+                            for val in row.values:
+                                f_val = self.safe_float(val)
+                                if f_val is not None and f_val > 105: # Avoid 100.00%
+                                    candidates.append(f_val)
                             
-                        isin = self._resolve_merged_column(row, 'isin')
-                        qty = self.safe_float(self._resolve_merged_column(row, 'quantity'))
-                        
-                        try:
-                            mv_val = self._resolve_merged_column(row, 'market_value')
-                            mv_inr = self.safe_float(mv_val) * 100000
-                        except: mv_inr = 0.0
-                        
-                        try:
-                            nav_val = self._resolve_merged_column(row, 'percent_of_nav')
-                            nav_pct = self.safe_float(nav_val)
-                        except: nav_pct = 0.0
-                        
-                        if qty < 0 or mv_inr < 0: continue
-                        
+                            if candidates:
+                                if len(candidates) > 1:
+                                     if abs(candidates[-1] - 100.0) < 0.05:
+                                         raw_net_assets = candidates[-2]
+                                     else:
+                                         raw_net_assets = candidates[-1]
+                                else:
+                                    raw_net_assets = candidates[0]
+                                
+                            if raw_net_assets:
+                                break
+                                
+                    normalized_net_assets = None
+                    if raw_net_assets:
+                        normalized_net_assets = self.normalize_currency(raw_net_assets, "LAKHS")
+
+                    block_holdings = []
+                    if not df_equity.empty:
+                        for _, row in df_equity.iterrows():
+                            sec_name = str(self._resolve_merged_column(row, 'security_name') or '').lower()
+                            
+                            # Guard: Skip Total/Sub Total rows if they pass ISIN filter, but DO NOT BREAK (as multiple schemes might follow)
+                            if 'total' in sec_name or 'sub total' in sec_name or 'net current' in sec_name:
+                                continue
+                                
+                            isin = self._resolve_merged_column(row, 'isin')
+                            qty = self.safe_float(self._resolve_merged_column(row, 'quantity'))
+                            
+                            try:
+                                mv_val = self._resolve_merged_column(row, 'market_value')
+                                mv_inr = self.safe_float(mv_val) * 100000
+                            except: mv_inr = 0.0
+                            
+                            try:
+                                nav_val = self._resolve_merged_column(row, 'percent_of_nav')
+                                nav_pct = self.safe_float(nav_val)
+                            except: nav_pct = 0.0
+                            
+                            if qty < 0 or mv_inr < 0: continue
+                            
+                            holding = {
+                                "amc_name": self.amc_name,
+                                "scheme_name": scheme_info['scheme_name'],
+                                "scheme_description": scheme_info['description'],
+                                "plan_type": scheme_info['plan_type'],
+                                "option_type": scheme_info['option_type'],
+                                "is_reinvest": scheme_info['is_reinvest'],
+                                "isin": isin,
+                                "company_name": self.clean_company_name(sec_name),
+                                "quantity": int(qty),
+                                "market_value_inr": mv_inr,
+                                "percent_of_nav": nav_pct,
+                                "sector": str(self._resolve_merged_column(row, 'sector') or '').strip() or None,
+                                "total_net_assets": normalized_net_assets
+                            }
+                            block_holdings.append(holding)
+                    elif normalized_net_assets:
+                        # Ghost Holding for Non-Equity funds
                         holding = {
                             "amc_name": self.amc_name,
                             "scheme_name": scheme_info['scheme_name'],
+                            "scheme_description": scheme_info['description'],
                             "plan_type": scheme_info['plan_type'],
                             "option_type": scheme_info['option_type'],
                             "is_reinvest": scheme_info['is_reinvest'],
-                            "isin": isin,
-                            "company_name": self.clean_company_name(sec_name),
-                            "quantity": int(qty),
-                            "market_value_inr": mv_inr,
-                            "percent_of_nav": nav_pct,
-                            "sector": str(self._resolve_merged_column(row, 'sector') or '').strip() or None,
-                            "timestamp": datetime.now()
+                            "isin": None,
+                            "company_name": "N/A",
+                            "quantity": 0,
+                            "market_value_inr": 0,
+                            "percent_of_nav": 0,
+                            "sector": "N/A",
+                            "total_net_assets": normalized_net_assets
                         }
                         block_holdings.append(holding)
                         

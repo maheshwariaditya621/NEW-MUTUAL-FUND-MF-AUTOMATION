@@ -29,6 +29,10 @@ class CommonExtractorV1(BaseExtractor):
             "VALUE": "market_value_inr",
             "% TO NAV": "percent_of_nav",
             "NAV": "percent_of_nav",
+            "% TO NET ASSET": "percent_of_nav",
+            "% OF NET ASSET": "percent_of_nav",
+            "% OF NAV": "percent_of_nav",
+            "WEIGHTAGE": "percent_of_nav",
             "INDUSTRY": "sector",
             "SECTOR": "sector",
         }
@@ -54,64 +58,88 @@ class CommonExtractorV1(BaseExtractor):
 
             df = self._map_columns(df)
 
-            if "isin" not in df.columns:
-                continue
-
             value_unit = self._resolve_value_unit(raw_columns, global_unit)
+
+            # Extract Total Net Assets (AUM) from the sheet's footer
+            raw_net_assets = None
+            for idx, row in df_raw.iterrows():
+                row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                row_text = " ".join(row_vals)
+                if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text:
+                    # Filter for numbers and pick the best candidate
+                    candidates = []
+                    for val in row.values:
+                        f_val = self.safe_float(val)
+                        if f_val is not None and f_val > 0:
+                            candidates.append(f_val)
+                    
+                    if candidates:
+                        # Logic: usually [Value, 100]. We want the one that isn't exactly 100.
+                        if len(candidates) > 1:
+                            # If the last one is ~100.0, take the previous one
+                            if abs(candidates[-1] - 100.0) < 0.01:
+                                raw_net_assets = candidates[-2]
+                            else:
+                                raw_net_assets = candidates[-1]
+                        else:
+                            raw_net_assets = candidates[0]
+                        
+                    if raw_net_assets:
+                        break
+                        
+            normalized_net_assets = None
+            if raw_net_assets:
+                normalized_net_assets = self.normalize_currency(raw_net_assets, value_unit)
+
             equity_df = self.filter_equity_isins(df, "isin")
-            if equity_df.empty:
-                continue
+            # ALL FUNDS RULE: Do not continue if empty, we still want to record the scheme + total AUM
 
             scheme_info = self.parse_verbose_scheme_name(str(sheet_name).strip())
             sheet_holdings: List[Dict[str, Any]] = []
 
-            for _, row in equity_df.iterrows():
-                sheet_holdings.append(
-                    {
-                        "amc_name": self.amc_name,
-                        "scheme_name": scheme_info["scheme_name"],
-                        "scheme_description": scheme_info["description"],
-                        "plan_type": scheme_info["plan_type"],
-                        "option_type": scheme_info["option_type"],
-                        "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": row.get("isin"),
-                        "company_name": self.clean_company_name(row.get("company_name")),
-                        "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
-                        "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
-                        "sector": self.clean_company_name(row.get("sector", "N/A")),
-                    }
-                )
+            if not equity_df.empty:
+                for _, row in equity_df.iterrows():
+                    sheet_holdings.append(
+                        {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": scheme_info["description"],
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": row.get("isin"),
+                            "company_name": self.clean_company_name(row.get("company_name")),
+                            "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
+                            "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
+                            "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
+                            "sector": self.clean_company_name(row.get("sector", "N/A")),
+                            "total_net_assets": normalized_net_assets,
+                        }
+                    )
+            else:
+                # Ghost Holding to carry Scheme metadata + Total AUM for non-equity funds
+                # The Loader will handle cases where isin is None (just creates snapshot)
+                sheet_holdings.append({
+                    "amc_name": self.amc_name,
+                    "scheme_name": scheme_info["scheme_name"],
+                    "scheme_description": scheme_info["description"],
+                    "plan_type": scheme_info["plan_type"],
+                    "option_type": scheme_info["option_type"],
+                    "is_reinvest": scheme_info["is_reinvest"],
+                    "isin": None,
+                    "total_net_assets": normalized_net_assets,
+                    "market_value_inr": 0, # No equity value
+                    "percent_of_nav": 0
+                })
 
-            self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+            if not equity_df.empty:
+                self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+            
             all_holdings.extend(sheet_holdings)
 
         logger.info(f"Successfully extracted {len(all_holdings)} equity holdings from {file_path}")
         return all_holdings
 
-    def _map_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        new_cols = {}
-        for col in df.columns:
-            col_upper = str(col).upper()
-            for pattern, canonical in self.column_mapping.items():
-                if pattern.upper() in col_upper:
-                    new_cols[col] = canonical
-                    break
-        return df.rename(columns=new_cols)
-
     def _resolve_value_unit(self, raw_columns: List[Any], default_unit: str) -> str:
-        value_unit = default_unit
-        for col in raw_columns:
-            col_upper = str(col).upper()
-            is_mv_col = False
-            for pattern, canonical in self.column_mapping.items():
-                if pattern.upper() in col_upper and canonical == "market_value_inr":
-                    is_mv_col = True
-                    break
-
-            if is_mv_col:
-                header_unit = self.detect_units(col)
-                if header_unit != "RUPEES":
-                    return header_unit
-
-        return value_unit
+        # Use the inherited method from BaseExtractor
+        return super()._resolve_value_unit(raw_columns, default_unit)

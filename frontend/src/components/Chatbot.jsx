@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './Chatbot.css';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = '/api/v1';
 
 // Suggested starter questions shown in the chat panel
 const SUGGESTIONS = [

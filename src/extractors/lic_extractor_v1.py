@@ -70,6 +70,31 @@ class LICExtractorV1(CommonExtractorV1):
         
         return df.rename(columns=new_cols)
 
+    def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
+        """Find GRAND TOTAL or NET ASSETS row and extract value."""
+        # Scan from bottom up
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            
+            is_valid_marker = False
+            if "GRAND TOTAL" in row_text:
+                is_valid_marker = True
+            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENTAGE TO" not in row_text:
+                is_valid_marker = True
+                
+            if is_valid_marker:
+                candidates = []
+                for val in row:
+                    f_val = self.safe_float(val)
+                    # Filter out percentages (like 1.0 or 100.0) usually found in the last column
+                    if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
+                        candidates.append(f_val)
+                
+                if candidates:
+                    return self.normalize_currency(max(candidates), unit)
+        return 0.0
+
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
         logger.info(f"Extracting data from LIC file: {file_path}")
 
@@ -97,13 +122,38 @@ class LICExtractorV1(CommonExtractorV1):
                 continue
 
             equity_df = self.filter_equity_isins(df, "isin")
-            if equity_df.empty:
-                continue
+            
+            # Fetch Total AUM from the full dataframe (scanning bottom-up)
+            df_full = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            normalized_net_assets = self._extract_total_aum(df_full)
+            if normalized_net_assets == 0:
+                normalized_net_assets = None
 
             scheme_info = self.parse_verbose_scheme_name(full_scheme_name)
-            
+
             sheet_holdings: List[Dict[str, Any]] = []
-            for _, row in equity_df.iterrows():
+            if not equity_df.empty:
+                for _, row in equity_df.iterrows():
+                    sheet_holdings.append(
+                        {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": scheme_info["description"],
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": row.get("isin"),
+                            "company_name": self.clean_company_name(row.get("company_name")),
+                            "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
+                            "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), "LAKHS"),
+                            "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
+                            "sector": row.get("sector", None),
+                            "total_net_assets": normalized_net_assets
+                        }
+                    )
+
+            if not sheet_holdings and normalized_net_assets:
+                # Ghost Holding for Non-Equity funds
                 sheet_holdings.append(
                     {
                         "amc_name": self.amc_name,
@@ -112,12 +162,13 @@ class LICExtractorV1(CommonExtractorV1):
                         "plan_type": scheme_info["plan_type"],
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": row.get("isin"),
-                        "company_name": self.clean_company_name(row.get("company_name")),
-                        "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
-                        "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), "LAKHS"),
-                        "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
-                        "sector": row.get("sector", None),
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
                     }
                 )
 

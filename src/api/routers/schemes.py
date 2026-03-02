@@ -5,7 +5,7 @@ Provides APIs for searching schemes and viewing their equity portfolios.
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends, Path
+from fastapi import APIRouter, HTTPException, Query, Depends, Path, BackgroundTasks
 from psycopg2.extensions import cursor
 from datetime import date, datetime
 import calendar
@@ -42,6 +42,7 @@ async def search_schemes(
     try:
         # Clean query
         q = q.strip()
+        logger.info(f"🔍 Searching for Scheme: '{q}' (limit={limit})")
         words = [w.strip() for w in q.split() if w.strip()]
         if not words:
             return SchemeSearchResponse(query=q, results=[], total_results=0)
@@ -206,6 +207,7 @@ async def get_portfolio_by_identifier(
     q: str = Query(..., min_length=2, description="Scheme identifier (scheme ID or scheme name)"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
+    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -233,7 +235,7 @@ async def get_portfolio_by_identifier(
         
         # Get portfolio using the resolved scheme_id
         return await _get_scheme_portfolio_by_id(
-            scheme_id, scheme_name, amc_name, plan_type, option_type, months, end_month, cur
+            scheme_id, scheme_name, amc_name, plan_type, option_type, months, end_month, background_tasks, cur
         )
         
     except HTTPException:
@@ -248,6 +250,7 @@ async def get_scheme_portfolio(
     scheme_id: int = Path(..., description="Scheme ID"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
+    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -286,7 +289,7 @@ async def get_scheme_portfolio(
         scheme_id, scheme_name, amc_name, plan_type, option_type = scheme_row
         
         return await _get_scheme_portfolio_by_id(
-            scheme_id, scheme_name, amc_name, plan_type, option_type, months, end_month, cur
+            scheme_id, scheme_name, amc_name, plan_type, option_type, months, end_month, background_tasks, cur
         )
         
     except HTTPException:
@@ -330,6 +333,7 @@ async def _get_scheme_portfolio_by_id(
     option_type: str,
     months: int,
     end_month: Optional[str],
+    background_tasks: Optional[BackgroundTasks],
     cur: cursor
 ) -> SchemePortfolioSummary:
     """
@@ -394,7 +398,8 @@ async def _get_scheme_portfolio_by_id(
         """
         SELECT 
             period_id,
-            total_value_inr / 10000000.0 as aum_cr,
+            total_value_inr / 10000000.0 as equity_aum_cr,
+            total_net_assets_inr / 10000000.0 as total_aum_cr,
             total_holdings
         FROM scheme_snapshots
         WHERE scheme_id = %s AND period_id = ANY(%s)
@@ -414,16 +419,25 @@ async def _get_scheme_portfolio_by_id(
         pid = period_ids_map.get((yr, mo))
         
         if pid and pid in snapshots_map:
-            sn = snapshots_map[pid]
+            sn = snapshots_map[pid] # (period_id, eq_aum, tot_aum, holdings)
+            eq_aum_val = float(Decimal(str(sn[1] or 0)).quantize(Decimal('0.01')))
+            tot_aum_val = float(Decimal(str(sn[2] or 0)).quantize(Decimal('0.01')))
+            
+            # Fallback if total aum is missing
+            if tot_aum_val == 0.0 and eq_aum_val > 0.0:
+                tot_aum_val = eq_aum_val
+
             monthly_aum.append({
                 "month": month_label,
-                "aum_cr": float(Decimal(str(sn[1])).quantize(Decimal('0.01'))),
-                "total_holdings": sn[2]
+                "equity_aum_cr": eq_aum_val,
+                "total_aum_cr": tot_aum_val,
+                "total_holdings": sn[3]
             })
         else:
              monthly_aum.append({
                 "month": month_label,
-                "aum_cr": 0.0,
+                "equity_aum_cr": 0.0,
+                "total_aum_cr": 0.0,
                 "total_holdings": 0
             })
     
@@ -448,7 +462,8 @@ async def _get_scheme_portfolio_by_id(
             c.isin,
             p.year,
             p.month,
-            ss.total_value_inr / 10000000.0 as aum_cr_val,
+            ss.total_value_inr / 10000000.0 as equity_aum_cr_val,
+            ss.total_net_assets_inr / 10000000.0 as total_aum_cr_val,
             eh.percent_of_nav,
             eh.quantity,
             c.market_cap,
@@ -467,12 +482,12 @@ async def _get_scheme_portfolio_by_id(
     )
     rows = cur.fetchall()
     
-    # PREFETCH LIVE PRICES CONCURRENTLY to avoid 30sec+ loads
+    # PREFETCH LIVE PRICES IN BACKGROUND to avoid 30sec+ loads
     # row[4] is the isin
     unique_isins = list(set([row[4] for row in rows if row[4]]))
-    if unique_isins:
+    if unique_isins and background_tasks:
         from src.services.pricing_service import pricing_service
-        pricing_service.prefetch_ltps(unique_isins)
+        background_tasks.add_task(pricing_service.prefetch_ltps, unique_isins)
         
     # Group holdings by entity and month
     # Structure: logical_id -> { metadata, monthly_data: { month_str -> { aggregated_metrics } } }
@@ -483,11 +498,14 @@ async def _get_scheme_portfolio_by_id(
         "sector": None,
         "market_cap": None,
         "mcap_type": None,
-        "monthly_data": defaultdict(lambda: {"percent": 0.0, "quantity": 0, "aum_cr": 0.0})
+        "live_price": None,
+        "monthly_data": defaultdict(lambda: {"percent": 0.0, "quantity": 0, "equity_aum_cr": 0.0, "total_aum_cr": 0.0})
     })
     
+    from src.services.pricing_service import pricing_service
+
     for row in rows:
-        logical_id, resolved_name, raw_name, sector, isin, year, month, aum_cr, percent_nav, quantity, m_cap, m_type, shares_out = row
+        logical_id, resolved_name, raw_name, sector, isin, year, month, eq_aum_cr, tot_aum_cr, percent_nav, quantity, m_cap, m_type, shares_out = row
         month_str = date(year, month, 1).strftime("%b-%y").upper()
         
         entry = holdings_by_entity[logical_id]
@@ -497,16 +515,28 @@ async def _get_scheme_portfolio_by_id(
              entry["isin"] = isin
              entry["sector"] = sector
              
-             from src.services.pricing_service import pricing_service
-             live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out)
-             
+             live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out, sync=False)
              entry["market_cap"] = Decimal(str(live_mcap / 10000000)).quantize(Decimal('0.01')) if live_mcap else None
              entry["mcap_type"] = m_type
+             
+             # Fetch live price
+             from src.services.symbol_mapper import symbol_mapper
+             info = symbol_mapper.get_symbol_info(isin) if isin else None
+             if info:
+                 symbol, token, exchange = info
+                 entry["live_price"] = pricing_service.get_ltp(exchange, symbol, token, sync=False)
             
         # Aggregate (sum) if multiple rows for same entity in same month
         entry["monthly_data"][month_str]["percent"] += float(percent_nav)
         entry["monthly_data"][month_str]["quantity"] += int(quantity)
-        entry["monthly_data"][month_str]["aum_cr"] = float(aum_cr)
+        
+        eq_val = float(eq_aum_cr or 0)
+        tot_val = float(tot_aum_cr or 0)
+        if tot_val == 0.0 and eq_val > 0.0:
+            tot_val = eq_val
+            
+        entry["monthly_data"][month_str]["equity_aum_cr"] = eq_val
+        entry["monthly_data"][month_str]["total_aum_cr"] = tot_val
     
     # Build portfolio holdings list
     holdings = []
@@ -532,7 +562,8 @@ async def _get_scheme_portfolio_by_id(
                 
                 monthly_snapshots.append(MonthlyHoldingSnapshot(
                     month=month_str,
-                    aum_cr=Decimal(str(data["aum_cr"])).quantize(Decimal('0.01')),
+                    equity_aum_cr=Decimal(str(data["equity_aum_cr"])).quantize(Decimal('0.01')),
+                    total_aum_cr=Decimal(str(data["total_aum_cr"])).quantize(Decimal('0.01')),
                     percent_to_aum=Decimal(str(data["percent"])).quantize(Decimal('0.0001')),
                     num_shares=adjusted_qty,
                     is_adjusted=multiplier > 1.001 or multiplier < 0.999
@@ -540,9 +571,16 @@ async def _get_scheme_portfolio_by_id(
             # Scenario B: Snapshot exists, but holding NOT present (0 shares now)
             elif pid in valid_snapshots:
                 sn = snapshots_map[pid]
+                
+                eq_val = float(sn[1] or 0)
+                tot_val = float(sn[2] or 0)
+                if tot_val == 0.0 and eq_val > 0.0:
+                    tot_val = eq_val
+                    
                 monthly_snapshots.append(MonthlyHoldingSnapshot(
                     month=month_str,
-                    aum_cr=Decimal(str(sn[1])).quantize(Decimal('0.01')),
+                    equity_aum_cr=Decimal(str(eq_val)).quantize(Decimal('0.01')),
+                    total_aum_cr=Decimal(str(tot_val)).quantize(Decimal('0.01')),
                     percent_to_aum=Decimal('0.0'),
                     num_shares=0,
                     is_adjusted=False
@@ -551,8 +589,9 @@ async def _get_scheme_portfolio_by_id(
             else:
                 monthly_snapshots.append(MonthlyHoldingSnapshot(
                     month=month_str,
-                    aum_cr=Decimal('0.0'),
-                    percent_to_aum=Decimal('0.0'),
+                    equity_aum_cr=Decimal('0.0'),
+                    total_aum_cr=Decimal('0.0'),
+                    percent_to_aum=None,
                     num_shares=None,
                     is_adjusted=False
                 ))
@@ -566,11 +605,16 @@ async def _get_scheme_portfolio_by_id(
                 sector=entity_data["sector"],
                 market_cap=entity_data["market_cap"],
                 mcap_type=entity_data["mcap_type"],
+                live_price=entity_data["live_price"],
                 monthly_data=monthly_snapshots
             ))
     
+    # Filter out ghost holdings (IN9999999999) from the final holdings list
+    # These are only used to carry Total AUM metadata for non-equity schemes.
+    final_holdings = [h for h in holdings if h.isin != "IN9999999999"]
+    
     # Sort by latest month's % to AUM (descending)
-    holdings.sort(
+    final_holdings.sort(
         key=lambda h: h.monthly_data[-1].percent_to_aum if h.monthly_data else 0,
         reverse=True
     )
@@ -583,7 +627,7 @@ async def _get_scheme_portfolio_by_id(
         option_type=option_type.upper(),
         category=category_str, # Use the dynamic category string
         monthly_aum=monthly_aum,
-        holdings=holdings,
-        total_holdings=len(holdings)
+        holdings=final_holdings,
+        total_holdings=len(final_holdings)
     )
 

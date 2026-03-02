@@ -1,0 +1,88 @@
+.missing-data {
+    color: var(--text-secondary);
+    font-size: 12px;
+    opacity: 0.6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.missing-data.inline {
+    display: inline-flex;
+    vertical-align: baseline;
+}
+
+.missing-data-info {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
+}
+
+.missing-data .info-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(var(--text-secondary-rgb, 107, 114, 128), 0.1);
+    color: var(--text-secondary);
+    border: 1px solid rgba(var(--text-secondary-rgb, 107, 114, 128), 0.2);
+    font-size: 9px;
+    font-weight: 700;
+    font-family: serif;
+    font-style: italic;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.missing-data-info:hover .info-icon {
+    background: var(--text-secondary);
+    color: #fff;
+}
+
+.missing-data-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    background: #1e293b;
+    color: #f8fafc;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+}
+
+[data-theme="dark"] .missing-data-tooltip {
+    background: #334155;
+}
+
+.missing-data-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 5px;
+    border-style: solid;
+    border-color: #1e293b transparent transparent transparent;
+}
+
+[data-theme="dark"] .missing-data-tooltip::after {
+    border-color: #334155 transparent transparent transparent;
+}
+
+.missing-data-info:hover .missing-data-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-4px);
+}

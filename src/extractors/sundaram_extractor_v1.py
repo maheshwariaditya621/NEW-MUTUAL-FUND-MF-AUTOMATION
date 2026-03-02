@@ -29,20 +29,42 @@ class SundaramExtractorV1(BaseExtractor):
             "% OF NET ASSET": "percent_of_nav"
         }
 
+    def _extract_total_aum(self, df: pd.DataFrame, unit: str = "INR LACS") -> float:
+        """Find Grand Total or Net Assets row and extract value."""
+        # Scan from bottom up
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+            row_text = " ".join(row_vals)
+            
+            is_valid_marker = False
+            if "GRAND TOTAL" in row_text:
+                is_valid_marker = True
+            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENT" not in row_text:
+                is_valid_marker = True
+                
+            if is_valid_marker:
+                candidates = []
+                for val in row:
+                    f_val = self.safe_float(val)
+                    # Filter out percentages (like 1.0 or 100.0)
+                    if f_val is not None and f_val > 105: # Value for Lacs usually > 100
+                        candidates.append(f_val)
+                
+                if candidates:
+                    # Usually the largest value in the row is the AUM (if multiple numbers exist)
+                    return self.normalize_currency(max(candidates), unit)
+        return 0.0
+
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
         logger.info(f"Extracting from Sundaram Mutual Fund: {file_path}")
         
         xls = pd.ExcelFile(file_path, engine="openpyxl")
         all_holdings: List[Dict[str, Any]] = []
 
-        # Sheet patterns to skip
-        # Only skip if the sheet name IS "INDEX" or "SUMMARY" etc.
-        # But wait, Sundaram has "monthlyportfolio Index" which is a list.
-        # So we skip if it's exactly the index list.
-        
         for sheet_name in xls.sheet_names:
             u_sheet = sheet_name.upper()
-            if "SUMMARY" in u_sheet or "CONTROL" in u_sheet or "DATA" in u_sheet or "NAV" in u_sheet:
+            if any(k in u_sheet for k in ["SUMMARY", "CONTROL", "DATA", "NAV"]):
                 continue
             if u_sheet.endswith(" INDEX") or u_sheet == "INDEX":
                 continue
@@ -104,6 +126,12 @@ class SundaramExtractorV1(BaseExtractor):
                     logger.warning(f"[{sheet_name}] 'isin' column not found after mapping. Skipping.")
                     continue
 
+                # Fetch Total AUM from the FULL dataframe (scanning bottom-up)
+                df_full = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+                normalized_net_assets = self._extract_total_aum(df_full)
+                if normalized_net_assets == 0:
+                    normalized_net_assets = None
+
                 sheet_holdings = []
                 records = df_data.to_dict('records')
 
@@ -131,16 +159,36 @@ class SundaramExtractorV1(BaseExtractor):
                             "scheme_description": raw_scheme_name,
                             "plan_type": scheme_info["plan_type"],
                             "option_type": scheme_info["option_type"],
-                            "is_reinvest": scheme_info["is_reinvest"]
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "total_net_assets": normalized_net_assets
                         }
                         sheet_holdings.append(holding)
                     except Exception as row_err:
                         logger.error(f"[{sheet_name}] Error processing row {idx}: {row_err}")
                         continue
                 
+                if not sheet_holdings and normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
+                    holding = {
+                        "amc_name": self.amc_name,
+                        "scheme_name": scheme_info["scheme_name"],
+                        "scheme_description": raw_scheme_name,
+                        "plan_type": scheme_info["plan_type"],
+                        "option_type": scheme_info["option_type"],
+                        "is_reinvest": scheme_info["is_reinvest"],
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
+                    }
+                    sheet_holdings.append(holding)
+
                 # Validation
-                if self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):
-                    all_holdings.extend(sheet_holdings)
+                self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+                all_holdings.extend(sheet_holdings)
 
             except Exception as sheet_err:
                 logger.error(f"Error processing sheet {sheet_name}: {sheet_err}")

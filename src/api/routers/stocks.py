@@ -5,7 +5,7 @@ Provides APIs for searching stocks and viewing mutual fund holdings.
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends, Path
+from fastapi import APIRouter, HTTPException, Query, Depends, Path, BackgroundTasks
 from psycopg2.extensions import cursor
 from decimal import Decimal
 
@@ -15,12 +15,15 @@ from src.api.models.stocks import (
     StockSearchResponse,
     SchemeHolding,
     MonthlyHoldingData,
-    HistoricalHolding
+    HistoricalHolding,
+    BulkPriceRequest
 )
 from datetime import date, datetime
 import calendar
 from src.api.dependencies import get_db_cursor
 from src.config import logger
+from src.services.pricing_service import pricing_service
+from src.services.symbol_mapper import symbol_mapper
 
 router = APIRouter()
 
@@ -39,6 +42,7 @@ async def search_stocks(
     try:
         # Clean query
         q = q.strip()
+        logger.info(f"🔍 Searching for: '{q}' (limit={limit})")
         words = [w.strip() for w in q.split() if w.strip()]
         if not words:
             return StockSearchResponse(query=q, results=[], total_results=0)
@@ -197,11 +201,79 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
     return results[0]
 
 
+@router.get("/{isin}/price")
+async def get_stock_price(
+    isin: str = Path(..., description="12-character ISIN code"),
+    cur: cursor = Depends(get_db_cursor)
+):
+    """
+    Get the latest live price (LTP) for a specific stock by ISIN.
+    Designed for fast polling in the UI.
+    """
+    from src.services.symbol_mapper import symbol_mapper
+    from src.services.pricing_service import pricing_service
+    
+    info = symbol_mapper.get_symbol_info(isin)
+    if not info:
+        # Fallback to DB if symbol mapper doesn't have it (likely not an equity or missing mapping)
+        cur.execute("SELECT nse_symbol, bse_code FROM companies WHERE isin = %s", (isin,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Stock not found")
+        return {"isin": isin, "price": None, "timestamp": datetime.now()}
+
+    symbol, token, exchange = info
+    ltp = pricing_service.get_ltp(exchange, symbol, token)
+    
+    return {
+        "isin": isin,
+        "price": ltp,
+        "timestamp": datetime.now()
+    }
+
+
+@router.post("/prices")
+async def get_bulk_prices(
+    request: BulkPriceRequest,
+    background_tasks: BackgroundTasks = None,
+    cur: cursor = Depends(get_db_cursor)
+):
+    """
+    Fetch live prices for a list of ISINs in bulk.
+    Returns prices from cache immediately and triggers background fetch for missing ones.
+    """
+    from src.services.symbol_mapper import symbol_mapper
+    from src.services.pricing_service import pricing_service
+    
+    results = {}
+    missing_isins = []
+    
+    for isin in request.isins:
+        info = symbol_mapper.get_symbol_info(isin)
+        if info:
+            symbol, token, exchange = info
+            # Check cache directly to avoid blocking if not found
+            cached = pricing_service._ltp_cache.get(symbol)
+            if cached and (datetime.now().timestamp() - cached['timestamp'] < pricing_service.CACHE_TTL_SECONDS):
+                results[isin] = cached['ltp']
+            else:
+                results[isin] = None
+                missing_isins.append(isin)
+        else:
+            results[isin] = None
+
+    if missing_isins and background_tasks:
+        background_tasks.add_task(pricing_service.prefetch_ltps, missing_isins)
+        
+    return results
+
+
 @router.get("/holdings", response_model=StockHoldingsSummary)
 async def get_holdings_by_identifier(
     q: str = Query(..., min_length=2, description="Company identifier (ISIN, company name, or NSE symbol)"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
+    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -235,7 +307,7 @@ async def get_holdings_by_identifier(
         # 3. Get holdings (aggregated by entity if available)
         return await _get_stock_holdings_aggregated(
             isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated, 
-            shares, shares_updated, months, end_month, cur
+            shares, shares_updated, months, end_month, background_tasks, cur
         )
         
     except HTTPException:
@@ -250,6 +322,7 @@ async def get_stock_holdings(
     isin: str = Path(..., description="12-character ISIN code"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
+    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor)
 ):
     """
@@ -275,7 +348,7 @@ async def get_stock_holdings(
         
         return await _get_stock_holdings_aggregated(
             res_isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated,
-            shares, shares_updated, months, end_month, cur
+            shares, shares_updated, months, end_month, background_tasks, cur
         )
         
     except HTTPException:
@@ -323,6 +396,7 @@ async def _get_stock_holdings_aggregated(
     shares_last_updated_at: Optional[datetime],
     months: int,
     end_month: Optional[str],
+    background_tasks: Optional[BackgroundTasks],
     cur: cursor
 ) -> StockHoldingsSummary:
     """
@@ -456,12 +530,17 @@ async def _get_stock_holdings_aggregated(
         if entity_id:
             mult = await _get_cumulative_multiplier(entity_id, yr, mo, cur)
 
+        ownership_pct = None
+        if shares_outstanding and adj_shares:
+            ownership_pct = round((adj_shares / shares_outstanding) * 100, 4)
+
         monthly_trend.append(MonthlyHoldingData(
             month=month_str,
             total_shares=adj_shares,
             num_funds=int(funds),
             trend=trend,
             is_adjusted=mult > 1.001 or mult < 0.999,
+            ownership_percent=ownership_pct,
             month_change=month_change,
             percent_change=percent_change
         ))
@@ -475,7 +554,8 @@ async def _get_stock_holdings_aggregated(
             a.amc_name,
             s.plan_type,
             s.option_type,
-            ss.total_value_inr / 10000000.0 as aum_cr,
+            ss.total_value_inr / 10000000.0 as equity_aum_cr,
+            ss.total_net_assets_inr / 10000000.0 as total_aum_cr,
             SUM(eh.percent_of_nav) as percent_of_nav,
             SUM(eh.quantity) as quantity,
             p.period_id,
@@ -488,7 +568,7 @@ async def _get_stock_holdings_aggregated(
         JOIN periods p ON ss.period_id = p.period_id
         JOIN companies c ON eh.company_id = c.company_id
         WHERE {filter_clause} AND p.period_id IN ({','.join(['%s']*len(all_period_ids))})
-        GROUP BY s.scheme_id, s.scheme_name, a.amc_name, s.plan_type, s.option_type, ss.total_value_inr, p.period_id, p.year, p.month
+        GROUP BY s.scheme_id, s.scheme_name, a.amc_name, s.plan_type, s.option_type, ss.total_value_inr, ss.total_net_assets_inr, p.period_id, p.year, p.month
         ORDER BY s.scheme_id, p.year DESC, p.month DESC
         """,
         (filter_val, *all_period_ids)
@@ -515,14 +595,20 @@ async def _get_stock_holdings_aggregated(
 
     schemes_data = {}
     for row in raw_holdings:
-        sid, sname, amc, plan, opt, aum, pnav, qty, pid, yr, mo = row
+        sid, sname, amc, plan, opt, eq_aum, tot_aum, pnav, qty, pid, yr, mo = row
         mult = period_multipliers.get((yr, mo), 1.0)
         adj_qty = int(qty * mult)
+
+        eq_val = Decimal(str(eq_aum or 0)).quantize(Decimal('0.01'))
+        tot_val = Decimal(str(tot_aum or 0)).quantize(Decimal('0.01'))
+        if tot_val == 0 and eq_val > 0:
+            tot_val = eq_val
 
         if sid not in schemes_data:
             schemes_data[sid] = {
                 "name": sname, "amc": amc, "plan": plan, "opt": opt,
-                "aum": Decimal(str(aum)).quantize(Decimal('0.01')),
+                "equity_aum_cr": eq_val,
+                "total_aum_cr": tot_val,
                 "monthly_data": {} # (yr, mo) -> {qty, pnav}
             }
         schemes_data[sid]["monthly_data"][(yr, mo)] = {
@@ -581,6 +667,7 @@ async def _get_stock_holdings_aggregated(
                 month=month_str,
                 num_shares=curr_qty,
                 percent_to_aum=pnav,
+                ownership_percent=round((curr_qty / shares_outstanding) * 100, 6) if shares_outstanding and curr_qty is not None else None,
                 trend=trend,
                 is_adjusted=is_adj,
                 month_change=month_change,
@@ -595,7 +682,8 @@ async def _get_stock_holdings_aggregated(
                 amc_name=data["amc"],
                 plan_type=data["plan"],
                 option_type=data["opt"],
-                aum_cr=data["aum"],
+                equity_aum_cr=data["equity_aum_cr"],
+                total_aum_cr=data["total_aum_cr"],
                 history=history
             )))
 
@@ -604,29 +692,44 @@ async def _get_stock_holdings_aggregated(
     final_holdings = [h[1] for h in holdings]
 
     # Dynamic Market Cap Calculation
-    from src.services.pricing_service import pricing_service
-    from datetime import datetime
-    
-    live_mcap = pricing_service.get_live_market_cap(
-        isin=isin, 
-        db_mcap=float(market_cap) if market_cap else None, 
-        shares_outstanding=shares_outstanding
-    )
+    live_mcap = None
+    if shares_outstanding:
+        # Trigger prefetch for this ISIN in background
+        if background_tasks:
+            background_tasks.add_task(pricing_service.prefetch_ltps, [isin])
+            
+        live_mcap = pricing_service.get_live_market_cap(
+            isin=isin, 
+            db_mcap=float(market_cap) if market_cap else None, 
+            shares_outstanding=shares_outstanding,
+            sync=False
+        )
+    else:
+        live_mcap = float(market_cap) if market_cap else None
     
     # If we got a live price, market_updated_at is now, else the db value
     if live_mcap and market_cap and float(live_mcap) != float(market_cap):
         mcap_updated_at = datetime.now()
         
+    # Calculate live price data
+    info = symbol_mapper.get_symbol_info(isin)
+    live_price = None
+    if info:
+        symbol, token, exchange = info
+        live_price = pricing_service.get_ltp(exchange, symbol, token, sync=False)
+
     return StockHoldingsSummary(
         isin=isin,
         company_name=company_name.upper(),
         sector=sector,
         market_cap=Decimal(str(live_mcap / 10000000)).quantize(Decimal('0.01')) if live_mcap else None,
+        live_price=live_price,
         mcap_type=mcap_type,
         mcap_updated_at=mcap_updated_at,
         as_of_date=current_month_label,
         total_shares=total_shares_current,
         total_funds=num_funds_current,
+        ownership_percent=round((total_shares_current / shares_outstanding) * 100, 4) if shares_outstanding and total_shares_current else None,
         monthly_trend=monthly_trend,
         holdings=final_holdings,
         shares_outstanding=shares_outstanding,

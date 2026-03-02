@@ -45,8 +45,33 @@ class HeliosExtractorV1(BaseExtractor):
         df = df.rename(columns=new_cols)
         return df
 
+    def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
+        """Find GRAND TOTAL or NET ASSETS row and extract value."""
+        # Scan from bottom up
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            
+            is_valid_marker = False
+            if "GRAND TOTAL (AUM)" in row_text or "GRAND TOTAL" in row_text:
+                is_valid_marker = True
+            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENTAGE TO" not in row_text:
+                is_valid_marker = True
+                
+            if is_valid_marker:
+                candidates = []
+                for val in row:
+                    f_val = self.safe_float(val)
+                    # Filter out 1.0 or 100.0 (which represent 100% NAV) and 0s
+                    if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
+                        candidates.append(f_val)
+                
+                if candidates:
+                    return self.normalize_currency(max(candidates), unit)
+        return 0.0
+
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
-        holdings = []
+        all_holdings = []
         try:
             xls = pd.ExcelFile(file_path)
             # Skip hidden/metadata sheets if any
@@ -89,7 +114,6 @@ class HeliosExtractorV1(BaseExtractor):
                     scheme_name = re.sub(r'\(.*?\)', '', scheme_name, flags=re.DOTALL).strip()
                     
                     # Identify Plan/Option
-                    # Helios usually consolidated. Defaulting.
                     plan_type = "Regular" 
                     option_type = "Growth"
                     
@@ -109,12 +133,18 @@ class HeliosExtractorV1(BaseExtractor):
                         logger.warning(f"[{sheet_name}] Missing columns: {set(required_cols) - set(df_data.columns)}")
                         continue
 
+                    # Extract Total AUM before iterating rows
+                    total_aum = self._extract_total_aum(df)
+
                     # 3. Iterate rows
                     sheet_holdings = []
                     records = df_data.to_dict('records')
                     
                     for idx, row in enumerate(records):
                         try:
+                            if not isinstance(row, dict):
+                                continue
+
                             isin = str(row.get('isin', '')).strip()
                             
                             # Stop conditions
@@ -141,24 +171,45 @@ class HeliosExtractorV1(BaseExtractor):
                                 "scheme_description": raw_scheme_name,
                                 "plan_type": plan_type,
                                 "option_type": option_type,
-                                "is_reinvest": False
+                                "is_reinvest": False,
+                                "total_net_assets": total_aum
                             }
                             sheet_holdings.append(holding)
                         except Exception as row_err:
                             logger.error(f"[{sheet_name}] Error processing row {idx}: {row_err}")
                             continue
+                            
+                    # Ghost Handling for non-equity funds
+                    if not sheet_holdings:
+                        sheet_holdings.append({
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_name,
+                            "scheme_description": raw_scheme_name,
+                            "plan_type": plan_type,
+                            "option_type": option_type,
+                            "is_reinvest": False,
+                            "isin": "IN9999999999",
+                            "company_name": "NON-EQUITY ASSETS",
+                            "quantity": 0,
+                            "market_value_inr": 0,
+                            "percent_of_nav": 0.0,
+                            "sector": "Other",
+                            "total_net_assets": total_aum
+                        })
                     
                     # 4. Sheet specific validation
-                    # Note: Helios likely small enough to use standard guard
-                    self.validate_nav_completeness(sheet_holdings, sheet_name)
-                    holdings.extend(sheet_holdings)
+                    is_ghost = len(sheet_holdings) == 1 and sheet_holdings[0]["isin"] == "IN9999999999"
+                    if is_ghost or self.validate_nav_completeness(sheet_holdings, sheet_name):
+                        all_holdings.extend(sheet_holdings)
                     
                 except Exception as e:
+                    import traceback
                     logger.error(f"Error processing sheet {sheet_name}: {e}")
+                    logger.error(traceback.format_exc())
                     continue
                     
-            return holdings
-            
+            return all_holdings
+
         except Exception as e:
             logger.error(f"Failed to extract Helios file: {e}")
             return []

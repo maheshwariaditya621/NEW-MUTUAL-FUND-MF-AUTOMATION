@@ -87,7 +87,35 @@ class MahindraManulifeExtractorV1(BaseExtractor):
                     if header_idx == -1:
                         logger.warning(f"[{sheet_name}] Header not found. Skipping.")
                         continue
-                        
+                    
+                    # Extract Total Net Assets (AUM) from the sheet's footer using df (raw read)
+                    raw_net_assets = None
+                    for idx, row in df.iterrows():
+                        row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                        row_text = " ".join(row_vals)
+                        if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                            candidates = []
+                            for val in row.values:
+                                f_val = self.safe_float(val)
+                                if f_val is not None and f_val > 105: # Avoid 100.00%
+                                    candidates.append(f_val)
+                            
+                            if candidates:
+                                if len(candidates) > 1:
+                                     if abs(candidates[-1] - 100.0) < 0.05:
+                                         raw_net_assets = candidates[-2]
+                                     else:
+                                         raw_net_assets = candidates[-1]
+                                else:
+                                    raw_net_assets = candidates[0]
+                                
+                            if raw_net_assets:
+                                break
+                                
+                    normalized_net_assets = None
+                    if raw_net_assets:
+                        normalized_net_assets = self.normalize_currency(raw_net_assets, "LAKHS")
+
                     df_data = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx)
                     df_data = self._map_columns(df_data)
                     
@@ -127,13 +155,33 @@ class MahindraManulifeExtractorV1(BaseExtractor):
                                 "scheme_description": raw_scheme_name,
                                 "plan_type": plan_type,
                                 "option_type": option_type,
-                                "is_reinvest": False
+                                "is_reinvest": False,
+                                "total_net_assets": normalized_net_assets
                             }
                             sheet_holdings.append(holding)
                         except Exception as row_err:
                             logger.error(f"[{sheet_name}] Error processing row {idx}: {row_err}")
                             continue
                     
+                    if not sheet_holdings and normalized_net_assets:
+                        # Ghost Holding for Non-Equity funds
+                        holding = {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_name,
+                            "scheme_description": raw_scheme_name,
+                            "plan_type": plan_type,
+                            "option_type": option_type,
+                            "is_reinvest": False,
+                            "isin": None,
+                            "company_name": "N/A",
+                            "quantity": 0,
+                            "market_value_inr": 0,
+                            "percent_of_nav": 0,
+                            "sector": "N/A",
+                            "total_net_assets": normalized_net_assets
+                        }
+                        sheet_holdings.append(holding)
+
                     # 4. Sheet specific validation
                     self.validate_nav_completeness(sheet_holdings, sheet_name)
                     holdings.extend(sheet_holdings)

@@ -29,7 +29,7 @@ class AngelOneExtractorV1(BaseExtractor):
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
         """
         Extract data from all sheets in the Angel One merged Excel file.
-        Uses section-based detection for "Equity" sections.
+        Uses section-based detection for "Equity" sections and footer AUM scanning.
         """
         logger.info(f"Extracting data from Angel One file: {file_path}")
         
@@ -41,9 +41,8 @@ class AngelOneExtractorV1(BaseExtractor):
                 logger.debug(f"Skipping metadata sheet: {sheet_name}")
                 continue
             
-            # Read first 100 rows for header/scheme detection
-            df_full = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=100)
-            
+            # Read full raw sheet for footer detection and scheme name
+            df_full = pd.read_excel(xls, sheet_name=sheet_name, header=None)
             if df_full.empty:
                 continue
 
@@ -53,60 +52,51 @@ class AngelOneExtractorV1(BaseExtractor):
                 logger.debug(f"[{sheet_name}] Header not found. Skipping.")
                 continue
 
-            # 2. Scheme Name Detection (More robust search)
-            scheme_name = self._extract_scheme_name(df_full, header_idx, sheet_name)
-            scheme_info = self.parse_verbose_scheme_name(scheme_name)
+            # 2. Scheme Name Detection & Normalization
+            raw_scheme_name = self._extract_scheme_name(df_full, header_idx, sheet_name)
+            scheme_info = self.parse_verbose_scheme_name(raw_scheme_name)
             
-            # 3. Read data
+            # Read data using discovered header
             df = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx)
             df = self._map_columns(df)
             
-            if "isin" not in df.columns:
-                logger.debug(f"[{sheet_name}] ISIN column not found. Skipping.")
-                continue
-
-            # 4. Section-Based Extraction (Equity & Equity Related)
-            # We track the current section and only extract if it's "Equity" or if ISIN matches
-            equity_holdings = []
-            is_equity_section = False
+            # 3. Total AUM Scanning from Footer
+            raw_net_assets = None
+            value_unit = "LAKHS" # Angel One is usually in LAKHS
             
-            for _, row in df.iterrows():
-                # Detect Section Header
-                # Section headers usually have value in Col 0 and NaNs in others
-                row_vals = [v for v in row if pd.notna(v)]
-                if len(row_vals) == 1 and isinstance(row_vals[0], str):
-                    section_text = row_vals[0].upper()
-                    if "EQUITY" in section_text:
-                        is_equity_section = True
-                        logger.debug(f"[{sheet_name}] Entered Equity Section: {section_text}")
-                    elif any(kw in section_text for kw in ["TOTAL", "NET ASSETS", "DEBT", "CASH", "MUTUAL FUND"]):
-                        # Stop equity section if we hit totals or other major categories
-                        is_equity_section = False
-                    continue
+            for idx, row in df_full.iterrows():
+                row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                row_text = " ".join(row_vals)
+                if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text:
+                    candidates = []
+                    for val in row.values:
+                        f_val = self.safe_float(val)
+                        if f_val is not None and f_val > 105: # Avoid 100.00%
+                            candidates.append(f_val)
+                    if candidates:
+                         # Favor the one before 1.0 or 100.0 if present
+                        if len(candidates) > 1:
+                            if abs(candidates[-1] - 100.0) < 0.1 or abs(candidates[-1] - 1.0) < 0.01:
+                                raw_net_assets = candidates[-2]
+                            else:
+                                raw_net_assets = candidates[-1]
+                        else:
+                            raw_net_assets = candidates[0]
+                    if raw_net_assets:
+                        break
+            
+            normalized_net_assets = None
+            if raw_net_assets:
+                normalized_net_assets = self.normalize_currency(raw_net_assets, value_unit)
 
-                # Stop if TOTAL found (Be careful with "Adani Total Gas")
-                security_name = str(row.get("company_name", "")).strip()
-                security_name_upper = security_name.upper()
-                
-                if not security_name or security_name_upper in ["TOTAL", "SUBTOTAL", "GRAND TOTAL"]:
-                    if is_equity_section and security_name_upper in ["TOTAL", "SUBTOTAL", "GRAND TOTAL"]:
-                        is_equity_section = False # End of section
-                    continue
-
-                if security_name_upper.startswith("TOTAL ") or security_name_upper.startswith("SUBTOTAL "):
-                     is_equity_section = False
-                     continue
-
-                # Fallback ISIN check (Equity or Preference Shares)
-                isin = str(row.get("isin", "")).strip()
-                is_valid_isin = self.is_valid_equity_isin(isin)
-                
-                # Minimum Data Check
-                market_val = self.safe_float(row.get("market_value_inr", 0))
-                qty = self.safe_float(row.get("quantity", 0))
-                
-                if is_valid_isin and security_name and security_name.lower() != 'nan' and (market_val > 0 or qty > 0):
-                    # Capture holding
+            # 4. Filter Equity Holdings
+            equity_df = pd.DataFrame()
+            if "isin" in df.columns:
+                equity_df = self.filter_equity_isins(df, "isin")
+            
+            sheet_holdings = []
+            if not equity_df.empty:
+                for _, row in equity_df.iterrows():
                     holding = {
                         "amc_name": self.amc_name,
                         "scheme_name": scheme_info["scheme_name"],
@@ -114,53 +104,84 @@ class AngelOneExtractorV1(BaseExtractor):
                         "plan_type": scheme_info["plan_type"],
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": isin,
-                        "company_name": security_name,
-                        "quantity": int(self.safe_float(row.get("quantity", 0))),
-                        "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), "LAKHS"),
+                        "isin": row.get("isin"),
+                        "company_name": self.clean_company_name(row.get("company_name")),
+                        "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
+                        "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
                         "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
-                        "sector": str(row.get("sector", None)) if pd.notna(row.get("sector")) else None
+                        "sector": str(row.get("sector", None)) if pd.notna(row.get("sector")) else None,
+                        "total_net_assets": normalized_net_assets
                     }
-                    equity_holdings.append(holding)
+                    sheet_holdings.append(holding)
 
-            if equity_holdings:
-                logger.info(f"[{sheet_name}] Extracted {len(equity_holdings)} holdings for {scheme_info['scheme_name']}")
-                all_holdings.extend(equity_holdings)
-            else:
-                logger.debug(f"[{sheet_name}] No equity holdings found.")
+            # 5. Ghost Holding for Non-Equity
+            if not sheet_holdings and normalized_net_assets:
+                sheet_holdings.append({
+                    "amc_name": self.amc_name,
+                    "scheme_name": scheme_info["scheme_name"],
+                    "scheme_description": scheme_info["description"],
+                    "plan_type": scheme_info["plan_type"],
+                    "option_type": scheme_info["option_type"],
+                    "is_reinvest": scheme_info["is_reinvest"],
+                    "isin": None,
+                    "company_name": "N/A",
+                    "quantity": 0,
+                    "market_value_inr": 0,
+                    "percent_of_nav": 0,
+                    "sector": "N/A",
+                    "total_net_assets": normalized_net_assets
+                })
+
+            if sheet_holdings:
+                self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+                all_holdings.extend(sheet_holdings)
 
         return all_holdings
 
     def _should_skip_sheet(self, sheet_name: str) -> bool:
-        """Check if sheet should be skipped. Be very careful with 'index'."""
+        """Check if sheet should be skipped."""
         skip_keywords = ["summary", "disclaimer", "glossary", "contents"]
         sheet_lower = sheet_name.lower()
         if any(kw in sheet_lower for kw in skip_keywords):
             return True
-        # Only skip 'index' if it looks like a TOC sheet (e.g., 'SEBI Index' or just 'Index')
         if sheet_lower == "sebi index" or sheet_lower == "index":
             return True
         return False
 
     def _extract_scheme_name(self, df_full: pd.DataFrame, header_idx: int, sheet_name: str) -> str:
-        """More aggressive scheme name extraction."""
-        # 1. Scan rows above header
-        for idx in range(header_idx):
+        """Robust scheme name extraction with AO expansion."""
+        for idx in range(min(header_idx, 20)):
             row = df_full.iloc[idx]
             for val in row:
                 if pd.notna(val):
                     v_str = str(val).strip()
-                    # Look for "Angel One" or "AO " or starting with "Angel One"
                     v_upper = v_str.upper()
                     if ("ANGEL ONE" in v_upper or v_upper.startswith("AO ")) and "PORTFOLIO" not in v_upper:
-                        # Expand "AO " to "Angel One "
+                        import re
+                        # Clean fragments like "(R" at the end
+                        v_str = re.sub(r'\s*\(R$', '', v_str)
+                        # Expand AO to Angel One
                         if v_upper.startswith("AO "):
-                            import re
                             v_str = re.sub(r'^AO\s+', 'Angel One ', v_str, flags=re.IGNORECASE)
+                        
+                        # Robust Momentum Normalization
+                        if "MOMENTUM" in v_upper:
+                             v_str = v_str.replace("MKT", "Market").replace("Mkt", "Market")
+                             v_str = v_str.replace("QLTY", "Quality").replace("Qlty", "Quality")
+                             v_str = v_str.replace("INDX", "Index Fund").replace("Indx", "Index Fund")
+                             # Ensure "Index Fund Index Fund" doesn't happen if it was already "Index" or "Index Fund"
+                             v_str = v_str.replace("Index Fund Fund", "Index Fund").replace("Index Fund Index Fund", "Index Fund")
+                        
                         return v_str
         
-        # 2. Fallback to sheet name
-        return sheet_name
+        # Fallback to normalized sheet name
+        import re
+        s_name = sheet_name.strip()
+        if s_name.upper().startswith("AO "):
+            s_name = re.sub(r'^AO\s+', 'Angel One ', s_name, flags=re.IGNORECASE)
+        # Remove trailing fragment
+        s_name = re.sub(r'\s*AO\d+$', '', s_name)
+        return s_name
 
     def _map_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Maps raw columns to canonical names."""

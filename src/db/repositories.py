@@ -447,7 +447,8 @@ def create_snapshot(
     period_id: int,
     total_holdings: int,
     total_value_inr: float,
-    holdings_count: int
+    holdings_count: int,
+    total_net_assets_inr: Optional[float] = None
 ) -> int:
     """
     Create a new scheme snapshot.
@@ -461,6 +462,7 @@ def create_snapshot(
         total_holdings: Total number of holdings rows
         total_value_inr: Total portfolio value in INR
         holdings_count: Count of distinct companies
+        total_net_assets_inr: Total AUM (Grand Total) extracted from the AMC Excel footer
         
     Returns:
         snapshot_id
@@ -473,11 +475,11 @@ def create_snapshot(
     
     cursor.execute(
         """
-        INSERT INTO scheme_snapshots (scheme_id, period_id, total_holdings, total_value_inr, holdings_count)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO scheme_snapshots (scheme_id, period_id, total_holdings, total_value_inr, holdings_count, total_net_assets_inr)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING snapshot_id
         """,
-        (scheme_id, period_id, total_holdings, total_value_inr, holdings_count)
+        (scheme_id, period_id, total_holdings, total_value_inr, holdings_count, total_net_assets_inr)
     )
     
     snapshot_id = cursor.fetchone()[0]

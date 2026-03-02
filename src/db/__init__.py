@@ -26,6 +26,9 @@ from .repositories import (
     get_previous_period_id,
     check_period_locked,
     upsert_nav_entries,
+    find_potential_scheme_renames,
+    record_pending_merge,
+    record_notification,
 )
 
 __all__ = [
@@ -50,4 +53,7 @@ __all__ = [
     "upsert_isin_master",
     "check_period_locked",
     "upsert_nav_entries",
+    "find_potential_scheme_renames",
+    "record_pending_merge",
+    "record_notification",
 ]

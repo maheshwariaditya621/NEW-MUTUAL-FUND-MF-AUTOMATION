@@ -79,36 +79,71 @@ class FranklinExtractorV1(BaseExtractor):
                     logger.warning(f"ISIN column missing in sheet: {sheet_name}")
                     continue
 
+                # Extract Total Net Assets (AUM) from the sheet's footer using df (raw read)
+                raw_net_assets = None
+                for idx, row in df.iterrows():
+                    row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                    row_text = " ".join(row_vals)
+                    if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                        candidates = []
+                        for val in row.values:
+                            f_val = self.safe_float(val)
+                            if f_val is not None and f_val > 105: # Avoid 100.00%
+                                candidates.append(f_val)
+                        
+                        if candidates:
+                            if len(candidates) > 1:
+                                 if abs(candidates[-1] - 100.0) < 0.05:
+                                     raw_net_assets = candidates[-2]
+                                 else:
+                                     raw_net_assets = candidates[-1]
+                            else:
+                                raw_net_assets = candidates[0]
+                            
+                        if raw_net_assets:
+                            break
+                            
+                normalized_net_assets = None
+                if raw_net_assets:
+                    normalized_net_assets = self.normalize_currency(raw_net_assets, "LAKHS")
+
                 # Extraction loop
                 sheet_holdings = []
+                equity_rows = []
                 for _, row in df.iterrows():
-                    # Stop logic
                     isin = str(row.get('isin', '')).strip()
-                    
-                    # Stop on markers
                     if any(marker in isin.upper() for marker in ["TOTAL", "NET ASSETS", "GRAND TOTAL"]):
                         break
-                    
-                    # Check if it's a valid holding row
-                    if not self.is_valid_equity_isin(isin):
-                        continue
-                        
-                    # Basic holding data
-                    holding = {
+                    if self.is_valid_equity_isin(isin):
+                        equity_rows.append(row)
+                
+                if equity_rows:
+                    for row in equity_rows:
+                        sheet_holdings.append({
+                            "amc_name": self.amc_name,
+                            "isin": str(row.get('isin', '')).strip(),
+                            "company_name": str(row.get('company_name', row.get('instrument_name', ''))).strip(),
+                            "quantity": self.safe_float(row.get('quantity', 0)),
+                            "market_value_inr": self.safe_float(row.get('market_value_inr', 0)) * 100000.0,
+                            "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)),
+                            "sector": str(row.get('sector', row.get('industry', ''))).strip(),
+                            "total_net_assets": normalized_net_assets,
+                            **scheme_info
+                        })
+                elif normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
+                    sheet_holdings.append({
                         "amc_name": self.amc_name,
-                        "isin": isin,
-                        "company_name": str(row.get('company_name', row.get('instrument_name', ''))).strip(),
-                        "quantity": self.safe_float(row.get('quantity', 0)),
-                        "market_value_inr": self.safe_float(row.get('market_value_inr', 0)) * 100000.0, # Lakhs to INR
-                        "percent_of_nav": self.safe_float(row.get('percent_of_nav', 0)),
-                        "sector": str(row.get('sector', row.get('industry', ''))).strip(),
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets,
                         **scheme_info
-                    }
-                    
-                    # Handle equity specific logic if needed
-                    # Franklin often has ISINs for Money Market, Debt, etc. 
-                    # BaseExtractor filter_equity_isins can be used later or here.
-                    sheet_holdings.append(holding)
+                    })
+
 
                 # Post-extraction validation
                 if self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):

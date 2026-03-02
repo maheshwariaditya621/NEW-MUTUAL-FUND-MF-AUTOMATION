@@ -74,14 +74,33 @@ class AbakkusExtractorV1(BaseExtractor):
             # Map columns
             df = self._map_columns(df)
 
-            if "isin" not in df.columns:
-                continue
-
-            # Filtering logic for Equity
-            equity_df = self.filter_equity_isins(df, "isin")
-            if equity_df.empty:
-                logger.debug(f"No equity holdings found in sheet {sheet_name}")
-                continue
+            # Extract Total Net Assets (AUM) from the sheet's footer using df_raw
+            raw_net_assets = None
+            for idx, row in df_raw.iterrows():
+                row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                row_text = " ".join(row_vals)
+                if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                    candidates = []
+                    for val in row.values:
+                        f_val = self.safe_float(val)
+                        if f_val is not None and f_val > 105: # Avoid 100.00%
+                            candidates.append(f_val)
+                    
+                    if candidates:
+                        if len(candidates) > 1:
+                             if abs(candidates[-1] - 100.0) < 0.05:
+                                 raw_net_assets = candidates[-2]
+                             else:
+                                 raw_net_assets = candidates[-1]
+                        else:
+                            raw_net_assets = candidates[0]
+                        
+                    if raw_net_assets:
+                        break
+                        
+            normalized_net_assets = None
+            if raw_net_assets:
+                normalized_net_assets = self.normalize_currency(raw_net_assets, global_unit)
 
             # Determine Scheme Name
             # Priority 1: Index mapping
@@ -100,18 +119,41 @@ class AbakkusExtractorV1(BaseExtractor):
                 scheme_name_raw = sheet_name
 
             scheme_info = self.parse_verbose_scheme_name(scheme_name_raw)
-            
-            sheet_holdings: List[Dict[str, Any]] = []
 
-            for _, row in equity_df.iterrows():
-                # Value Normalization
-                mkt_val = self.normalize_currency(row.get("market_value_inr", 0), global_unit)
-                
-                # Percentage Parsing - Abakkus percentages are decimals (e.g. 0.0486 for 4.86%)
-                # We multiply by 100 to store as 4.86 in the DB.
-                raw_pct = self.safe_float(row.get("percent_of_nav", 0)) * 100.0
-                
-                sheet_holdings.append(
+            # Filtering logic for Equity
+            equity_df = pd.DataFrame()
+            if "isin" in df.columns:
+                equity_df = self.filter_equity_isins(df, "isin")
+            
+            if not equity_df.empty:
+                for _, row in equity_df.iterrows():
+                    # Value Normalization
+                    mkt_val = self.normalize_currency(row.get("market_value_inr", 0), global_unit)
+                    
+                    # Percentage Parsing - Abakkus percentages are decimals (e.g. 0.0486 for 4.86%)
+                    # We multiply by 100 to store as 4.86 in the DB.
+                    raw_pct = self.safe_float(row.get("percent_of_nav", 0)) * 100.0
+                    
+                    all_holdings.append(
+                        {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": scheme_info["description"],
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": row.get("isin"),
+                            "company_name": self.clean_company_name(row.get("company_name")),
+                            "quantity": int(self.safe_float(row.get("quantity", 0))),
+                            "market_value_inr": mkt_val,
+                            "percent_of_nav": raw_pct, # Use raw float
+                            "sector": self.clean_company_name(row.get("sector", "N/A")),
+                            "total_net_assets": normalized_net_assets
+                        }
+                    )
+            elif normalized_net_assets:
+                # Ghost Holding for Non-Equity funds
+                all_holdings.append(
                     {
                         "amc_name": self.amc_name,
                         "scheme_name": scheme_info["scheme_name"],
@@ -119,20 +161,15 @@ class AbakkusExtractorV1(BaseExtractor):
                         "plan_type": scheme_info["plan_type"],
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": row.get("isin"),
-                        "company_name": self.clean_company_name(row.get("company_name")),
-                        "quantity": int(self.safe_float(row.get("quantity", 0))),
-                        "market_value_inr": mkt_val,
-                        "percent_of_nav": raw_pct, # Use raw float
-                        "sector": self.clean_company_name(row.get("sector", "N/A")),
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
                     }
                 )
-
-            if sheet_holdings:
-                # Validate and log
-                aum_cr = sum(h["market_value_inr"] for h in sheet_holdings) / 10_000_000.0
-                logger.info(f"Scheme: {scheme_info['scheme_name']} - Holdings: {len(sheet_holdings)} - Equity AUM: {aum_cr:.2f} Cr")
-                all_holdings.extend(sheet_holdings)
 
         logger.info(f"Successfully extracted {len(all_holdings)} equity holdings from {file_path}")
         return all_holdings

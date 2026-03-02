@@ -98,9 +98,6 @@ class PPFASExtractorV1(BaseExtractor):
                      continue
 
                 # 4. Iterate Rows (Custom Logic for PPFAS to handle Sub-Totals)
-                # We do NOT use filter_equity_isins because it stops at "Sub Total", 
-                # but PPFAS has "Equity -> Sub Total -> Arbitrage -> Sub Total".
-                
                 scheme_holdings_map = {} # ISIN -> Holding Dict (for aggregation)
 
                 for idx, row in df_std.iterrows():
@@ -111,9 +108,6 @@ class PPFASExtractorV1(BaseExtractor):
                         break
                         
                     isin = str(row.get('isin', '')).strip()
-                    
-                    # Basic ISIN Validation (INE + 12 chars + '10' code)
-                    # We manually apply the specific checks from BaseExtractor here
                     cleaned_isin = self.clean_isin(isin)
                     if not cleaned_isin: 
                         continue
@@ -125,7 +119,7 @@ class PPFASExtractorV1(BaseExtractor):
                     sec_name = str(row.get('security_name', '')).strip()
                     
                     try:
-                        qty = self.safe_float(row.get('quantity'))
+                        qty = self.safe_float(row.get('quantity')) or 0.0
                         
                         # Market Value (Lakhs -> INR)
                         mv_lakhs = self.safe_float(row.get('market_value'))
@@ -165,8 +159,62 @@ class PPFASExtractorV1(BaseExtractor):
                         
                     except Exception as e:
                         continue
+
+                # Extract Total Net Assets (AUM) from the sheet's footer using df_raw
+                raw_net_assets = None
+                for idx, row in df_raw.iterrows():
+                    row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                    row_text = " ".join(row_vals)
+                    if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                        candidates = []
+                        for val in row.values:
+                            f_val = self.safe_float(val)
+                            if f_val is not None and f_val > 105: # Avoid 100.00%
+                                candidates.append(f_val)
+                        
+                        if candidates:
+                            if len(candidates) > 1:
+                                 if abs(candidates[-1] - 100.0) < 0.05:
+                                     raw_net_assets = candidates[-2]
+                                 else:
+                                     raw_net_assets = candidates[-1]
+                            else:
+                                raw_net_assets = candidates[0]
+                            
+                        if raw_net_assets:
+                            break
+                            
+                normalized_net_assets = None
+                if raw_net_assets:
+                    normalized_net_assets = raw_net_assets * 100000.0 # PPFAS is in Lakhs
+
+                scheme_holdings_list = list(scheme_holdings_map.values())
                 
-                all_holdings.extend(list(scheme_holdings_map.values()))
+                # Update total_net_assets for all holdings
+                for h in scheme_holdings_list:
+                    h["total_net_assets"] = normalized_net_assets
+
+                if not scheme_holdings_list and normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
+                    scheme_info = self.parse_verbose_scheme_name(clean_scheme_name)
+                    holding = {
+                        "amc_name": self.amc_name,
+                        "scheme_name": clean_scheme_name,
+                        "plan_type": scheme_info['plan_type'],
+                        "option_type": scheme_info['option_type'],
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
+                    }
+                    scheme_holdings_list.append(holding)
+
+                # Validation
+                self.validate_nav_completeness(scheme_holdings_list, clean_scheme_name)
+                all_holdings.extend(scheme_holdings_list)
                 
             except Exception as e:
                 self.logger.error(f"[{self.amc_name}] Error processing sheet '{sheet_name}': {e}")

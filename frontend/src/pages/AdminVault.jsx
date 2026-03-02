@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './AdminVault.css';
 
 const AdminVault = () => {
@@ -14,8 +14,9 @@ const AdminVault = () => {
     const [syncing, setSyncing] = useState(false);
     const [uploadResult, setUploadResult] = useState(null);
     const [syncResult, setSyncResult] = useState(null);
+    const [sortConfig, setSortConfig] = useState({ key: 'confidence', direction: 'desc' });
 
-    const API_BASE = 'http://localhost:8000/api/v1/admin';
+    const API_BASE = '/api/v1/admin';
 
     const handleLogin = (e) => {
         e.preventDefault();
@@ -111,6 +112,46 @@ const AdminVault = () => {
         }
     };
 
+    const handleSort = (key) => {
+        setSortConfig(prev => {
+            if (prev.key !== key) return { key, direction: 'desc' };
+            if (prev.direction === 'desc') return { key, direction: 'asc' };
+            return { key: null, direction: 'desc' };
+        });
+    };
+
+    const sortedMerges = useMemo(() => {
+        let items = [...merges];
+        if (!sortConfig.key) return items;
+
+        items.sort((a, b) => {
+            let aVal, bVal;
+            if (sortConfig.key === 'confidence') {
+                aVal = a.confidence_score;
+                bVal = b.confidence_score;
+            } else if (sortConfig.key === 'amc') {
+                aVal = a.amc_name;
+                bVal = b.amc_name;
+            } else if (sortConfig.key === 'old_name') {
+                aVal = a.old_scheme_name;
+                bVal = b.old_scheme_name;
+            } else if (sortConfig.key === 'new_name') {
+                aVal = a.new_scheme_name;
+                bVal = b.new_scheme_name;
+            }
+
+            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return items;
+    }, [merges, sortConfig]);
+
+    const renderSortArrow = (key) => {
+        if (sortConfig.key !== key) return null;
+        return <span style={{ marginLeft: '4px' }}>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
+    };
+
     if (!isAuthenticated) {
         return (
             <div className="admin-login-overlay">
@@ -201,15 +242,15 @@ const AdminVault = () => {
                             <table className="admin-table">
                                 <thead>
                                     <tr>
-                                        <th>AMC & Type</th>
-                                        <th>Old Scheme</th>
-                                        <th>New Name detected</th>
-                                        <th>Confidence</th>
+                                        <th className="sortable" onClick={() => handleSort('amc')}>AMC & Type {renderSortArrow('amc')}</th>
+                                        <th className="sortable" onClick={() => handleSort('old_name')}>Old Scheme {renderSortArrow('old_name')}</th>
+                                        <th className="sortable" onClick={() => handleSort('new_name')}>New Name detected {renderSortArrow('new_name')}</th>
+                                        <th className="sortable" onClick={() => handleSort('confidence')}>Confidence {renderSortArrow('confidence')}</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {merges.map(m => (
+                                    {sortedMerges.map(m => (
                                         <tr key={m.merge_id}>
                                             <td>
                                                 <div className="amc-label">{m.amc_name}</div>

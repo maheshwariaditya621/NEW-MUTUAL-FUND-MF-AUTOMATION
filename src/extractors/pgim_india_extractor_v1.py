@@ -25,7 +25,8 @@ class PGIMIndiaExtractorV1(BaseExtractor):
             "MARKET/FAIR VALUE": "market_value_inr",
             "MARKET/ FAIR VALUE": "market_value_inr",
             "INR LACS": "market_value_inr",
-            "% TO NET ASSETS": "percent_of_nav"
+            "% TO NET ASSETS": "percent_of_nav",
+            "%  TO NET ASSETS": "percent_of_nav"
         }
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -43,7 +44,8 @@ class PGIMIndiaExtractorV1(BaseExtractor):
             
             try:
                 # Read enough rows to detect header and scheme name
-                df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=100)
+                # Increased nrows to 500 to catch bottom totals
+                df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=500)
                 if df_raw.empty:
                     continue
 
@@ -72,20 +74,40 @@ class PGIMIndiaExtractorV1(BaseExtractor):
                 scheme_info = self.parse_verbose_scheme_name(raw_scheme_name)
                 logger.info(f"Processing scheme: {scheme_info['scheme_name']} (from '{raw_scheme_name}')")
                 
-                # 3. Process Data
-                headers = [str(h).strip().upper() for h in df_raw.iloc[header_idx]]
-                df_data = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx + 1, header=None)
-                df_data.columns = headers
-
-                # Map columns to canonical names
-                mapped_cols = {}
-                for col in df_data.columns:
-                    for pattern, canonical in self.column_mapping.items():
-                        if pattern.upper() in str(col).upper():
-                            mapped_cols[col] = canonical
+                # Extract Total Net Assets (AUM) from the sheet's footer using df_raw
+                raw_net_assets = None
+                for idx, row in df_raw.iterrows():
+                    row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                    row_text = " ".join(row_vals)
+                    if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                        candidates = []
+                        for val in row.values:
+                            f_val = self.safe_float(val)
+                            if f_val is not None and f_val > 105: # Avoid 100.00%
+                                candidates.append(f_val)
+                        
+                        if candidates:
+                            # Usually the one near 100% or the largest one
+                            if len(candidates) > 1:
+                                 if abs(candidates[-1] - 100.0) < 0.05:
+                                     raw_net_assets = candidates[-2]
+                                 else:
+                                     raw_net_assets = candidates[-1]
+                            else:
+                                raw_net_assets = candidates[0]
+                            
+                        if raw_net_assets:
                             break
+                            
+                normalized_net_assets = None
+                if raw_net_assets:
+                    normalized_net_assets = self.normalize_currency(raw_net_assets, "INR LACS")
+
+                # 3. Process Data
+                df_data = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx)
                 
-                df_data = df_data.rename(columns=mapped_cols)
+                # Use inherited _map_columns for robustness
+                df_data = self._map_columns(df_data)
                 
                 if "isin" not in df_data.columns:
                     logger.warning(f"[{sheet_name}] 'isin' column not found after mapping. Skipping.")
@@ -118,16 +140,36 @@ class PGIMIndiaExtractorV1(BaseExtractor):
                             "scheme_description": raw_scheme_name,
                             "plan_type": scheme_info["plan_type"],
                             "option_type": scheme_info["option_type"],
-                            "is_reinvest": scheme_info["is_reinvest"]
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "total_net_assets": normalized_net_assets
                         }
                         sheet_holdings.append(holding)
                     except Exception as row_err:
                         logger.error(f"[{sheet_name}] Error processing row {idx}: {row_err}")
                         continue
                 
+                if not sheet_holdings and normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
+                    holding = {
+                        "amc_name": self.amc_name,
+                        "scheme_name": scheme_info["scheme_name"],
+                        "scheme_description": raw_scheme_name,
+                        "plan_type": scheme_info["plan_type"],
+                        "option_type": scheme_info["option_type"],
+                        "is_reinvest": scheme_info["is_reinvest"],
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
+                    }
+                    sheet_holdings.append(holding)
+
                 # Validation
-                if self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):
-                    all_holdings.extend(sheet_holdings)
+                self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+                all_holdings.extend(sheet_holdings)
 
             except Exception as sheet_err:
                 logger.error(f"Error processing sheet {sheet_name}: {sheet_err}")

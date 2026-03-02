@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import logger
 
 # Import routers
-from src.api.routers import health, stocks, schemes, chatbot, insights, admin
+from src.api.routers import health, stocks, schemes, chatbot, insights, admin, amcs
 
 # Create FastAPI app
 app = FastAPI(
@@ -20,13 +20,10 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS configuration for React frontend
+# CORS configuration: Allow all for dev LAN access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React dev server
-        "http://localhost:5173",  # Vite dev server
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,6 +36,7 @@ app.include_router(schemes.router, prefix="/api/v1/schemes", tags=["Schemes"])
 app.include_router(chatbot.router, prefix="/api/v1", tags=["Chatbot"])
 app.include_router(insights.router, prefix="/api/v1/insights", tags=["Insights"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(amcs.router, prefix="/api/v1/amcs", tags=["AMCs"])
 
 
 @app.on_event("startup")

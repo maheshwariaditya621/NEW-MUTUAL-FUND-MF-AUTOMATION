@@ -44,14 +44,14 @@ class HDFCExtractorV1(BaseExtractor):
         for sheet_name in xls.sheet_names:
             logger.debug(f"Processing sheet: {sheet_name}")
             # 1. Read with header=None to find the real header row reliably
-            df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
             
-            if df.empty:
+            if df_raw.empty:
                 logger.warning(f"Sheet {sheet_name} is empty. Skipping.")
                 continue
 
             # Find the header row index
-            header_idx = self.find_header_row(df)
+            header_idx = self.find_header_row(df_raw)
             if header_idx == -1:
                 logger.debug(f"Header row not found in sheet: {sheet_name}. Likely not a portfolio sheet. Skipping.")
                 continue
@@ -90,56 +90,94 @@ class HDFCExtractorV1(BaseExtractor):
             
             logger.debug(f"Final Value Unit for {sheet_name}: {value_unit}")
 
-            # 4. Filter for Equity (Triple Filter)
-            if "isin" not in df.columns:
-                logger.debug(f"ISIN column missing in sheet {sheet_name} after mapping. Skipping.")
-                continue
-                
-            equity_df = self.filter_equity_isins(df, "isin")
+            # 4. Extract Total Net Assets (AUM) from the sheet's footer using df_raw
+            raw_net_assets = None
+            for idx, row in df_raw.iterrows():
+                row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                row_text = " ".join(row_vals)
+                if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text:
+                    candidates = []
+                    for val in row.values:
+                        f_val = self.safe_float(val)
+                        if f_val is not None and f_val > 0:
+                            candidates.append(f_val)
+                    
+                    if candidates:
+                        if len(candidates) > 1:
+                            if abs(candidates[-1] - 100.0) < 0.01:
+                                raw_net_assets = candidates[-2]
+                            else:
+                                raw_net_assets = candidates[-1]
+                        else:
+                            raw_net_assets = candidates[0]
+                        
+                    if raw_net_assets:
+                        break
+                        
+            normalized_net_assets = None
+            if raw_net_assets:
+                normalized_net_assets = self.normalize_currency(raw_net_assets, value_unit)
+
+            # 5. Filter for Equity (Triple Filter)
+            equity_df = pd.DataFrame()
+            if "isin" in df.columns:
+                equity_df = self.filter_equity_isins(df, "isin")
             
-            # 5. Parse Scheme Info
-            # 5. Extract Scheme Name
-            # Prefer Row 0, Col 0 which contains the full legal name
-            # Example: 'HDFC Balanced Advantage Fund (An open ended Balanced Advantage Fund)'
+            # ALL FUNDS RULE: Do not continue if empty if we have AUM to report
+            
+            # 6. Parse Scheme Info
             scheme_name = self._extract_scheme_name_from_row_zero(xls, sheet_name)
             
             # Clean up the name
-            # Remove parenthetical descriptions like "(An open ended...)"
             scheme_name = re.sub(r'\s*\(An open ended.*?\)', '', scheme_name, flags=re.IGNORECASE).strip()
-            # Remove other common parentheses if they look like descriptions (optional, but HDFC uses them heavily)
-            # Actually, let's stick to the "An open ended" pattern first, or generic parentheses if safe.
-            # User wants "HDFC BALANCED ADVANTAGE" not "HDFC BALANCED ADVANTAGE FUND (AN OPEN ENDED...)"
-            
-            # General cleaning of parenthetical content if it's long description
             if "(" in scheme_name:
                  scheme_name = re.sub(r'\s*\(.*?\)', '', scheme_name).strip()
 
-            # Ensure "HDFC" prefix
             if not scheme_name.upper().startswith("HDFC"):
                 scheme_name = f"HDFC {scheme_name}"
             
             scheme_info = self.parse_verbose_scheme_name(scheme_name)
             
-            # 6. Build final records
+            # 7. Build final records
             sheet_holdings = []
-            for _, row in equity_df.iterrows():
-                holding = {
+            
+            if not equity_df.empty:
+                for _, row in equity_df.iterrows():
+                    holding = {
+                        "amc_name": self.amc_name,
+                        "scheme_name": scheme_info["scheme_name"],
+                        "scheme_description": scheme_info["description"],
+                        "plan_type": scheme_info["plan_type"],
+                        "option_type": scheme_info["option_type"],
+                        "is_reinvest": scheme_info["is_reinvest"],
+                        "isin": row.get("isin"),
+                        "company_name": self.clean_company_name(row.get("company_name")),
+                        "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
+                        "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
+                        "percent_of_nav": self.safe_float(row.get("percent_of_nav", 0)),
+                        "sector": self.clean_company_name(row.get("sector", "N/A")),
+                        "total_net_assets": normalized_net_assets
+                    }
+                    sheet_holdings.append(holding)
+            else:
+                # Ghost Holding for Non-Equity Funds
+                sheet_holdings.append({
                     "amc_name": self.amc_name,
                     "scheme_name": scheme_info["scheme_name"],
                     "scheme_description": scheme_info["description"],
                     "plan_type": scheme_info["plan_type"],
                     "option_type": scheme_info["option_type"],
                     "is_reinvest": scheme_info["is_reinvest"],
-                    "isin": row.get("isin"),
-                    "company_name": self.clean_company_name(row.get("company_name")),
-                    "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
-                    "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                    "percent_of_nav": self.safe_float(row.get("percent_of_nav", 0)),
-                    "sector": self.clean_company_name(row.get("sector", "N/A"))
-                }
-                sheet_holdings.append(holding)
+                    "isin": None,
+                    "company_name": "N/A",
+                    "quantity": 0,
+                    "market_value_inr": 0,
+                    "percent_of_nav": 0,
+                    "sector": "N/A",
+                    "total_net_assets": normalized_net_assets
+                })
 
-            if sheet_holdings:
+            if not equity_df.empty:
                 self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
             all_holdings.extend(sheet_holdings)
 

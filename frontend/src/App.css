@@ -132,6 +132,31 @@
   font-size: 14px;
 }
 
+.footer-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.admin-link-btn {
+  text-decoration: none;
+  font-size: 14px;
+  color: var(--text-tertiary);
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-link-btn:hover {
+  color: var(--accent-primary);
+  background-color: var(--accent-light);
+  border-color: var(--border-color);
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
   .header-content {

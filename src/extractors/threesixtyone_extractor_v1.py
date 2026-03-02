@@ -30,101 +30,126 @@ class ThreeSixtyOneExtractorV1(BaseExtractor):
         return self.parse_verbose_scheme_name("Unknown 360 ONE Scheme")
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
-        holdings = []
-        try:
-            xls = pd.ExcelFile(file_path)
-            for sheet_name in xls.sheet_names:
-                logger.info(f"Processing sheet: {sheet_name}")
-                df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
-                
-                if df_raw.empty:
-                    continue
+        logger.info(f"Extracting data from 360 ONE file: {file_path}")
 
-                scheme_info = self.extract_scheme_info(df_raw)
-                header_idx = self.find_header_row(df_raw, self.header_keywords)
+        xls = pd.ExcelFile(file_path, engine="openpyxl")
+        all_holdings: List[Dict[str, Any]] = []
 
-                if header_idx == -1:
-                    logger.warning(f"Header not found in sheet: {sheet_name}")
-                    continue
+        for sheet_name in xls.sheet_names:
+            df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            if df_raw.empty:
+                continue
 
-                # Prepare headers and data
-                headers = [str(h).strip() for h in df_raw.iloc[header_idx]]
-                df = df_raw.iloc[header_idx + 1:].copy()
-                
-                # Handle potential column count mismatch
-                if len(headers) > df.shape[1]:
-                    headers = headers[:df.shape[1]]
-                elif len(headers) < df.shape[1]:
-                    df = df.iloc[:, :len(headers)]
-                
-                df.columns = headers
+            header_idx = self.find_header_row(df_raw, self.header_keywords)
+            if header_idx == -1:
+                logger.warning(f"Header not found in sheet: {sheet_name}")
+                continue
 
-                # Map columns
-                col_map = {
-                    "INSTRUMENT": "company_name",
-                    "ISIN": "isin",
-                    "QUANTITY": "quantity",
-                    "VALUE": "market_value_inr",
-                    "ROUNDED % TO NET ASSETS": "percent_of_nav"
-                }
-
-                final_map = {}
-                for col in df.columns:
-                    col_upper = str(col).upper()
-                    for key, val in col_map.items():
-                        if key in col_upper:
-                            final_map[col] = val
-                            break
-
-                # Ensure mandatory columns exist
-                if 'isin' not in final_map.values():
-                    logger.warning(f"ISIN column not found in sheet: {sheet_name}")
-                    continue
-
-                # Extract rows
-                sheet_holdings = []
-                for _, row in df.iterrows():
-                    # Stop logic
-                    isin_val = str(row.get(next(k for k, v in final_map.items() if v == 'isin'), "")).strip().upper()
-                    if any(kw in isin_val for kw in ["TOTAL", "SUB TOTAL"]):
-                        break
-                    
-                    row_text = " ".join([str(v).upper() for v in row.values if not pd.isna(v)])
-                    if any(kw in row_text for kw in ["TOTAL", "SUB TOTAL", "GRAND TOTAL", "NET ASSETS"]):
-                        if "SUB TOTAL" not in row_text: # Keep processing if just a subtotal of a section, but usually 360one labels are final
-                            break
-
-                    raw_data = {final_map[c]: row[c] for c in final_map if c in df.columns}
-                    
-                    if not raw_data.get('isin') or pd.isna(raw_data['isin']):
-                        continue
-
-                    # Filter equity
-                    if not self.is_valid_equity_isin(str(raw_data['isin'])):
-                        continue
-
-                    # Clean and parse
-                    record = {
-                        "amc_name": self.amc_name,
-                        "scheme_name": scheme_info['scheme_name'],
-                        "scheme_description": scheme_info['description'],
-                        "plan_type": scheme_info['plan_type'],
-                        "option_type": scheme_info['option_type'],
-                        "is_reinvest": scheme_info['is_reinvest'],
-                        "isin": self.clean_isin(raw_data['isin']),
-                        "company_name": self.clean_company_name(raw_data.get('company_name', 'N/A')),
-                        "quantity": self.safe_float(raw_data.get('quantity')),
-                        "market_value_inr": self.normalize_currency(raw_data.get('market_value_inr'), "LAKHS"),
-                        "percent_of_nav": self.parse_percentage(raw_data.get('percent_of_nav', 0.0)),
-                        "sector": self.clean_company_name(row.get('Industry', row.get('Industry / Rating', 'N/A')))
-                    }
-                    sheet_holdings.append(record)
-
-                if sheet_holdings:
-                    if self.validate_nav_completeness(sheet_holdings, scheme_info['scheme_name']):
-                        holdings.extend(sheet_holdings)
-
-        except Exception as e:
-            logger.error(f"Error extracting 360 ONE file {file_path}: {e}")
+            scheme_info = self.extract_scheme_info(df_raw)
             
-        return holdings
+            # Read data
+            df = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx)
+            raw_columns = df.columns.tolist()
+            
+            # 360 ONE is typically in LAKHS
+            value_unit = "LAKHS"
+            
+            # Map columns
+            col_map = {
+                "INSTRUMENT": "company_name",
+                "ISIN": "isin",
+                "QUANTITY": "quantity",
+                "VALUE": "market_value_inr",
+                "ROUNDED % TO NET ASSETS": "percent_of_nav",
+                "INDUSTRY": "sector"
+            }
+            
+            new_cols = {}
+            for col in df.columns:
+                col_upper = str(col).strip().upper()
+                for pattern, canonical in col_map.items():
+                    if pattern in col_upper:
+                        new_cols[col] = canonical
+                        break
+            
+            df = df.rename(columns=new_cols)
+
+            # Extract Total Net Assets (AUM) from the sheet's footer using df_raw
+            raw_net_assets = None
+            for idx, row in df_raw.iterrows():
+                row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                row_text = " ".join(row_vals)
+                if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                    candidates = []
+                    for val in row.values:
+                        f_val = self.safe_float(val)
+                        if f_val is not None and f_val > 105: # Avoid 100.00%
+                            candidates.append(f_val)
+                    
+                    if candidates:
+                        if len(candidates) > 1:
+                             if abs(candidates[-1] - 100.0) < 0.05:
+                                 raw_net_assets = candidates[-2]
+                             else:
+                                 raw_net_assets = candidates[-1]
+                        else:
+                            raw_net_assets = candidates[0]
+                        
+                    if raw_net_assets:
+                        break
+                        
+            normalized_net_assets = None
+            if raw_net_assets:
+                normalized_net_assets = self.normalize_currency(raw_net_assets, value_unit)
+
+            equity_df = pd.DataFrame()
+            if "isin" in df.columns:
+                equity_df = self.filter_equity_isins(df, "isin")
+            
+            sheet_holdings: List[Dict[str, Any]] = []
+
+            if not equity_df.empty:
+                for _, row in equity_df.iterrows():
+                    sheet_holdings.append(
+                        {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": scheme_info["description"],
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": row.get("isin"),
+                            "company_name": self.clean_company_name(row.get("company_name")),
+                            "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
+                            "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
+                            "percent_of_nav": self.parse_percentage(row.get("percent_of_nav", 0)),
+                            "sector": self.clean_company_name(row.get("sector", row.get("Industry", "N/A"))),
+                            "total_net_assets": normalized_net_assets
+                        }
+                    )
+
+            if not sheet_holdings and normalized_net_assets:
+                # Ghost Holding for Non-Equity funds
+                sheet_holdings.append({
+                    "amc_name": self.amc_name,
+                    "scheme_name": scheme_info["scheme_name"],
+                    "scheme_description": scheme_info["description"],
+                    "plan_type": scheme_info["plan_type"],
+                    "option_type": scheme_info["option_type"],
+                    "is_reinvest": scheme_info["is_reinvest"],
+                    "isin": None,
+                    "company_name": "N/A",
+                    "quantity": 0,
+                    "market_value_inr": 0,
+                    "percent_of_nav": 0,
+                    "sector": "N/A",
+                    "total_net_assets": normalized_net_assets
+                })
+
+            if sheet_holdings:
+                # Post-extraction validation
+                self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"])
+                all_holdings.extend(sheet_holdings)
+
+        logger.info(f"Successfully extracted {len(all_holdings)} holdings from {file_path}")
+        return all_holdings

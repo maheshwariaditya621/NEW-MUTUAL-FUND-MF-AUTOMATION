@@ -29,6 +29,33 @@ class NJExtractorV1(BaseExtractor):
             "% TO NET ASSETS": "percent_of_nav"
         }
 
+    def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
+        """Find Net Assets row and extract value."""
+        # Scan from bottom up
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            # Normalize underscores
+            row_text = row_text.replace("_", " ")
+            
+            is_valid_marker = False
+            if "GRAND TOTAL" in row_text:
+                is_valid_marker = True
+            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENT" not in row_text:
+                is_valid_marker = True
+                
+            if is_valid_marker:
+                candidates = []
+                for val in row:
+                    f_val = self.safe_float(val)
+                    # Filter out percentages (like 1.0 or 100.0)
+                    if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
+                        candidates.append(f_val)
+                
+                if candidates:
+                    return self.normalize_currency(max(candidates), unit)
+        return 0.0
+
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
         logger.info(f"Extracting from NJ Mutual Fund: {file_path}")
         
@@ -72,6 +99,12 @@ class NJExtractorV1(BaseExtractor):
 
                 scheme_info = self.parse_verbose_scheme_name(raw_scheme_name)
                 logger.info(f"Processing scheme: {scheme_info['scheme_name']} (from '{raw_scheme_name}')")
+                
+                # Fetch Total AUM from the full dataframe (scanning bottom-up)
+                df_full = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+                normalized_net_assets = self._extract_total_aum(df_full)
+                if normalized_net_assets == 0:
+                    normalized_net_assets = None
                 
                 # 3. Process Data
                 headers = [str(h).strip().upper() for h in df_raw.iloc[header_idx]]
@@ -121,12 +154,33 @@ class NJExtractorV1(BaseExtractor):
                             "scheme_description": raw_scheme_name,
                             "plan_type": scheme_info["plan_type"],
                             "option_type": scheme_info["option_type"],
-                            "is_reinvest": scheme_info["is_reinvest"]
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "total_net_assets": normalized_net_assets
                         }
                         sheet_holdings.append(holding)
                     except Exception as row_err:
                         logger.error(f"[{sheet_name}] Error processing row {idx}: {row_err}")
                         continue
+                
+                if not sheet_holdings and normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
+                    sheet_holdings.append(
+                        {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": raw_scheme_name,
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": None,
+                            "company_name": "N/A",
+                            "quantity": 0,
+                            "market_value_inr": 0,
+                            "percent_of_nav": 0,
+                            "sector": "N/A",
+                            "total_net_assets": normalized_net_assets
+                        }
+                    )
                 
                 # Validation
                 if self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):

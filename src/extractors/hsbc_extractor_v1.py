@@ -75,6 +75,34 @@ class HSBCExtractorV1(BaseExtractor):
                 # 4. Read Data
                 df = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx)
                 
+                # Extract Total Net Assets (AUM) from the sheet's footer using df (raw read)
+                raw_net_assets = None
+                for idx, row in df.iterrows():
+                    row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                    row_text = " ".join(row_vals)
+                    if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                        candidates = []
+                        for val in row.values:
+                            f_val = self.safe_float(val)
+                            if f_val is not None and f_val > 105: # Avoid 100.00%
+                                candidates.append(f_val)
+                        
+                        if candidates:
+                            if len(candidates) > 1:
+                                 if abs(candidates[-1] - 100.0) < 0.05:
+                                     raw_net_assets = candidates[-2]
+                                 else:
+                                     raw_net_assets = candidates[-1]
+                            else:
+                                raw_net_assets = candidates[0]
+                            
+                        if raw_net_assets:
+                            break
+                            
+                normalized_net_assets = None
+                if raw_net_assets:
+                    normalized_net_assets = self.normalize_currency(raw_net_assets, "LAKHS")
+
                 # 5. Map Columns
                 # Fuzzy mapping for "Market Value (Rs in Lacs)"
                 new_cols = {}
@@ -90,32 +118,41 @@ class HSBCExtractorV1(BaseExtractor):
                 
                 df = df.rename(columns=new_cols)
                 
-                if "isin" not in df.columns:
-                    continue
-
                 # 6. Filter Equity
-                equity_df = self.filter_equity_isins(df, "isin")
+                equity_df = pd.DataFrame()
+                if "isin" in df.columns:
+                    equity_df = self.filter_equity_isins(df, "isin")
                 
-                if equity_df.empty:
-                    schemes_processed += 1
-                    continue
-
-                # 7. Check for critical columns
-                if "market_value" not in equity_df.columns or "percent_of_nav" not in equity_df.columns:
-                    logger.warning(f"[HSBC] Missing MV or NAV column in {cleaned_scheme_name}")
-                    schemes_processed += 1
-                    continue
-
                 # 8. Build Holdings
                 sheet_holdings = []
-                for _, row in equity_df.iterrows():
-                    market_val = self.safe_float(row.get("market_value", 0))
-                    nav_val = self.safe_float(row.get("percent_of_nav", 0))
-                    
-                    # Logic: 
-                    # Market Value is in Lakhs -> * 100,000
-                    # NAV is decimal (0.3628) -> * 100 -> 36.28%
-                    
+                if not equity_df.empty:
+                    # Check for critical columns
+                    if "market_value" not in equity_df.columns or "percent_of_nav" not in equity_df.columns:
+                        logger.warning(f"[HSBC] Missing MV or NAV column in {cleaned_scheme_name}")
+                    else:
+                        for _, row in equity_df.iterrows():
+                            market_val = self.safe_float(row.get("market_value", 0))
+                            nav_val = self.safe_float(row.get("percent_of_nav", 0))
+                            
+                            holding = {
+                                "amc_name": self.amc_name,
+                                "scheme_name": scheme_info["scheme_name"],
+                                "scheme_description": scheme_info["description"],
+                                "plan_type": scheme_info["plan_type"],
+                                "option_type": scheme_info["option_type"],
+                                "is_reinvest": scheme_info["is_reinvest"],
+                                "isin": self.clean_isin(row.get("isin")),
+                                "company_name": self.clean_company_name(row.get("security_name")),
+                                "quantity": int(self.safe_float(row.get("quantity", 0))),
+                                "market_value_inr": market_val * 100_000,
+                                "percent_of_nav": nav_val * 100,
+                                "sector": row.get("sector", None),
+                                "total_net_assets": normalized_net_assets
+                            }
+                            sheet_holdings.append(holding)
+
+                if not sheet_holdings and normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
                     holding = {
                         "amc_name": self.amc_name,
                         "scheme_name": scheme_info["scheme_name"],
@@ -123,16 +160,17 @@ class HSBCExtractorV1(BaseExtractor):
                         "plan_type": scheme_info["plan_type"],
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": self.clean_isin(row.get("isin")),
-                        "company_name": self.clean_company_name(row.get("security_name")),
-                        "quantity": int(self.safe_float(row.get("quantity", 0))),
-                        "market_value_inr": market_val * 100_000,
-                        "percent_of_nav": nav_val * 100,
-                        "sector": row.get("sector", None)
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
                     }
                     sheet_holdings.append(holding)
 
-                # 9. Validate (Log warning but always accept data)
+                # 9. Validate
                 self.validate_nav_completeness(sheet_holdings, scheme_info['scheme_name'])
                 all_holdings.extend(sheet_holdings)
                 schemes_with_equity += 1

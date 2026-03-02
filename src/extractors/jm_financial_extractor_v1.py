@@ -42,8 +42,33 @@ class JMFinancialExtractorV1(BaseExtractor):
         df = df.rename(columns=new_cols)
         return df
 
+    def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
+        """Find GRAND TOTAL or NET ASSETS row and extract value."""
+        # Scan from bottom up
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            
+            is_valid_marker = False
+            if "GRAND TOTAL" in row_text:
+                is_valid_marker = True
+            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENTAGE TO" not in row_text:
+                is_valid_marker = True
+                
+            if is_valid_marker:
+                candidates = []
+                for val in row:
+                    f_val = self.safe_float(val)
+                    # Filter out percentages (like 1.0 or 100.0) usually found in the last column
+                    if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
+                        candidates.append(f_val)
+                
+                if candidates:
+                    return self.normalize_currency(max(candidates), unit)
+        return 0.0
+
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
-        holdings = []
+        all_holdings = []
         try:
             xls = pd.ExcelFile(file_path)
             # Iterate all sheets, skip summary if any (usually JM sheets are named by scheme)
@@ -77,6 +102,14 @@ class JMFinancialExtractorV1(BaseExtractor):
                     scheme_name = re.sub(r'\(.*?\)', '', scheme_name, flags=re.DOTALL).strip()
                     scheme_name = re.sub(r'\s+', ' ', scheme_name).strip()
                     
+                    if scheme_name.upper() in ["JM FINANCIAL MUTUAL FUND", "NAN", "NONE", ""]:
+                        # Fallback to sheet name
+                        fallback = sheet_name.split(',')[0].replace(" F", " Fund").strip()
+                        if not fallback.upper().endswith("FUND"):
+                            fallback += " Fund"
+                        scheme_name = fallback
+                        raw_scheme_name = fallback
+                    
                     # Identify Plan/Option
                     plan_type = "Regular" 
                     option_type = "Growth"
@@ -96,6 +129,9 @@ class JMFinancialExtractorV1(BaseExtractor):
                     if not all(col in df_data.columns for col in required_cols):
                         logger.warning(f"[{sheet_name}] Missing columns: {set(required_cols) - set(df_data.columns)}")
                         continue
+
+                    # Extract Total AUM before iterating rows
+                    total_aum = self._extract_total_aum(df)
 
                     # 3. Iterate rows
                     sheet_holdings = []
@@ -132,22 +168,44 @@ class JMFinancialExtractorV1(BaseExtractor):
                                 "scheme_description": raw_scheme_name,
                                 "plan_type": plan_type,
                                 "option_type": option_type,
-                                "is_reinvest": False
+                                "is_reinvest": False,
+                                "total_net_assets": total_aum
                             }
                             sheet_holdings.append(holding)
                         except Exception as row_err:
                             logger.error(f"[{sheet_name}] Error processing row {idx}: {row_err}")
                             continue
+                            
+                    # Ghost Handling for non-equity funds
+                    if not sheet_holdings:
+                        sheet_holdings.append({
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_name,
+                            "scheme_description": raw_scheme_name,
+                            "plan_type": plan_type,
+                            "option_type": option_type,
+                            "is_reinvest": False,
+                            "isin": "IN9999999999",
+                            "company_name": "NON-EQUITY ASSETS",
+                            "quantity": 0,
+                            "market_value_inr": 0,
+                            "percent_of_nav": 0.0,
+                            "sector": "Other",
+                            "total_net_assets": total_aum
+                        })
                     
                     # 4. Sheet specific validation
-                    self.validate_nav_completeness(sheet_holdings, sheet_name)
-                    holdings.extend(sheet_holdings)
+                    is_ghost = len(sheet_holdings) == 1 and sheet_holdings[0]["isin"] == "IN9999999999"
+                    if is_ghost or self.validate_nav_completeness(sheet_holdings, sheet_name):
+                        all_holdings.extend(sheet_holdings)
                     
                 except Exception as e:
+                    import traceback
                     logger.error(f"Error processing sheet {sheet_name}: {e}")
+                    logger.error(traceback.format_exc())
                     continue
                     
-            return holdings
+            return all_holdings
             
         except Exception as e:
             logger.error(f"Failed to extract JM Financial file: {e}")

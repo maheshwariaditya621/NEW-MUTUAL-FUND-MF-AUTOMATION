@@ -131,7 +131,48 @@
     color: var(--text-tertiary);
 }
 
-/* Responsive */
+/* ── Live Price Label (Refined) ── */
+.rv-live-label {
+    background: rgba(16, 185, 129, 0.1);
+    /* Emerald-10% */
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+    /* Emerald-500 */
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+[data-theme="dark"] .rv-live-label {
+    background: rgba(52, 211, 153, 0.08);
+    border-color: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    /* Emerald-400 */
+}
+
+/* ── Standardized Info Icon In Table ── */
+.rv-info-icon-small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+    font-size: 8px;
+    font-weight: 800;
+    font-family: serif;
+    font-style: italic;
+    line-height: normal;
+    cursor: help;
+}
+
 @media (max-width: 768px) {
     .aum-timeline {
         grid-template-columns: repeat(2, 1fr);
@@ -234,6 +275,14 @@
 }
 
 /* ── Headers ─────────────────────────────────────────────────── */
+.shp-table thead {
+    position: sticky;
+    top: 60px;
+    /* Locks right under the 60px control bar */
+    z-index: 90;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
 .shp-th {
     padding: 10px 12px;
     font-size: 10.5px;
@@ -244,11 +293,6 @@
     text-align: center;
     background: var(--shp-header-bg);
     color: var(--shp-header-color);
-    position: sticky;
-    top: 60px !important;
-    /* Locks right under the 60px control bar */
-    /* Row 1: month group headers */
-    z-index: 90 !important;
 }
 
 .shp-th.shp-th-name {
@@ -277,10 +321,6 @@
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     font-weight: 600;
     color: var(--shp-subheader-color);
-    top: 106px !important;
-    /* 60px controls + 46px row1 header */
-    /* Row 2: sits below the row 1 header */
-    z-index: 80 !important;
 }
 
 /* ── Month group tints — header cells ────────────────────────── */

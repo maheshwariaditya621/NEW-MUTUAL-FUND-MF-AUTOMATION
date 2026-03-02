@@ -59,10 +59,7 @@ class CapitalmindExtractorV1(BaseExtractor):
                 # 3. Equity Filter
                 equity_df = self.filter_equity_isins(df, "isin")
                 if equity_df.empty:
-                    # Could be a liquid fund (YB01 etc mapped to CMLIQ)
-                    # We only extract equity holdings as per strategy
-                    logger.info(f"[{sheet_name}] No equity holdings found.")
-                    continue
+                    logger.info(f"[{sheet_name}] No equity holdings found. Proceeding for potential non-equity AUM.")
 
                 # 4. Scheme Info - More robust detection
                 raw_scheme_text = ""
@@ -82,8 +79,9 @@ class CapitalmindExtractorV1(BaseExtractor):
                     logger.warning(f"[{sheet_name}] Could not find SCHEME NAME row. Falling back to sheet name.")
                     raw_scheme_text = str(sheet_name)
                 
-                # Clean up verbose descriptions in parentheses (handle multi-line via re.DOTALL)
-                raw_scheme_text = re.sub(r'\(.*?\)', '', raw_scheme_text, flags=re.DOTALL).strip()
+                # Clean up verbose descriptions in parentheses (usually investment objective)
+                # We use re.DOTALL (via flag) or [\s\S] to handle newlines inside the parentheses
+                raw_scheme_text = re.sub(r'\s*\(.*?\)', '', raw_scheme_text, flags=re.DOTALL).strip()
                 
                 logger.info(f"[{sheet_name}] Detected Scheme: {raw_scheme_text}")
                 scheme_info = self.parse_verbose_scheme_name(raw_scheme_text)
@@ -91,10 +89,31 @@ class CapitalmindExtractorV1(BaseExtractor):
                 # Resolve value unit
                 value_unit = self._resolve_value_unit(raw_columns, global_unit)
                 
+                # 5. Extract Total AUM (Net Assets)
+                total_aum = self._extract_total_aum(df_raw, value_unit)
+                logger.info(f"[{sheet_name}] Extracted Total AUM: {total_aum:,.2f} INR")
+
                 sheet_holdings = []
-                for _, row in equity_df.iterrows():
-                    # ISIN cleaning is handled by filter_equity_isins (which uses clean_isin internally often)
-                    # but we'll be safe here too.
+                if not equity_df.empty:
+                    for _, row in equity_df.iterrows():
+                        sheet_holdings.append({
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": scheme_info["description"],
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": self.clean_isin(row.get("isin")),
+                            "company_name": self.clean_company_name(row.get("company_name")),
+                            "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
+                            "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
+                            "percent_of_nav": self.safe_float(row.get("percent_of_nav", 0)) * 100.0,
+                            "sector": row.get("sector", "Other"),
+                            "total_net_assets": total_aum
+                        })
+
+                # Always ensure at least one record exists to carry Total AUM
+                if not sheet_holdings:
                     sheet_holdings.append({
                         "amc_name": self.amc_name,
                         "scheme_name": scheme_info["scheme_name"],
@@ -102,21 +121,61 @@ class CapitalmindExtractorV1(BaseExtractor):
                         "plan_type": scheme_info["plan_type"],
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": self.clean_isin(row.get("isin")),
-                        "company_name": self.clean_company_name(row.get("company_name")),
-                        "quantity": int(self.normalize_currency(row.get("quantity", 0), "RUPEES")),
-                        "market_value_inr": self.normalize_currency(row.get("market_value_inr", 0), value_unit),
-                        "percent_of_nav": self.safe_float(row.get("percent_of_nav", 0)) * 100.0,
-                        "sector": row.get("sector", "Other"),
+                        "isin": "IN9999999999",
+                        "company_name": "NON-EQUITY ASSETS",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0.0,
+                        "sector": "Other",
+                        "total_net_assets": total_aum
                     })
                 
                 sheet_total_nav = sum(h.get('percent_of_nav', 0.0) for h in sheet_holdings)
                 logger.info(f"[{sheet_name}] Extracted {len(sheet_holdings)} holdings. Total NAV: {sheet_total_nav:.2f}%")
                 
-                if self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):
+                # Validation bypass for ghost holdings (non-equity schemes)
+                is_ghost = len(sheet_holdings) == 1 and sheet_holdings[0]["isin"] == "IN9999999999"
+                if is_ghost or self.validate_nav_completeness(sheet_holdings, scheme_info["scheme_name"]):
                     all_holdings.extend(sheet_holdings)
         
         return all_holdings
+
+    def _extract_total_aum(self, df: pd.DataFrame, unit: str) -> float:
+        """Find GRAND TOTAL or NET ASSETS row and extract value."""
+        # 1. First priority: Look for GRAND TOTAL (usually the last numeric footer row)
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            if "GRAND TOTAL" in row_text:
+                candidates = []
+                for val in row:
+                    f_val = self.safe_float(val)
+                    if f_val > 0 and abs(f_val - 100.0) > 0.01:
+                        candidates.append(f_val)
+                if candidates:
+                    return self.normalize_currency(candidates[0], unit)
+        
+        # 2. Fallback: Look for NET ASSETS
+        for i in range(len(df)-1, -1, -1):
+            row = df.iloc[i]
+            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            if "NET ASSETS" in row_text:
+                # If it's a long description string with a colon, try to parse after colon
+                full_text = ' '.join([str(v) for v in row if pd.notna(v)])
+                if ":" in full_text:
+                    parts = full_text.split(":")
+                    for p in parts[1:]:
+                        f_val = self.safe_float(p)
+                        if f_val > 0 and abs(f_val - 100.0) > 0.01:
+                            return self.normalize_currency(f_val, unit)
+                
+                # Otherwise look for a separate column
+                for val in row:
+                    f_val = self.safe_float(val)
+                    if f_val > 0 and abs(f_val - 100.0) > 0.01:
+                        return self.normalize_currency(f_val, unit)
+                        
+        return 0.0
 
     def _map_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {}

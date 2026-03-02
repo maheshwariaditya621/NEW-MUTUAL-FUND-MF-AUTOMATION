@@ -197,8 +197,9 @@
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: var(--border-color);
-    color: var(--text-secondary);
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.25);
     font-size: 10px;
     font-weight: 800;
     font-family: serif;
@@ -208,8 +209,9 @@
 }
 
 .shp-mcap-info:hover .shp-mcap-info-icon {
-    background: var(--accent-primary, #3b82f6);
+    background: #10b981;
     color: #fff;
+    border-color: #10b981;
 }
 
 /* Tooltip Styles */
@@ -335,6 +337,38 @@
 [data-theme="dark"] .shp-mcap-badge.small-cap {
     background: #3d1030;
     color: #f9a8d4;
+}
+
+/* ── Live Price Chip (Refined) ── */
+.rv-live-price-chip {
+    background: rgba(16, 185, 129, 0.1);
+    /* Emerald-10% */
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+    /* Emerald-500 */
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    animation: fadeIn 0.3s ease-out;
+}
+
+[data-theme="dark"] .rv-live-price-chip {
+    background: rgba(52, 211, 153, 0.08);
+    border-color: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    /* Emerald-400 */
+}
+
+.rv-live-price-chip span:first-of-type {
+    font-size: 9px;
+    opacity: 0.8;
+    letter-spacing: 0.5px;
+    font-weight: 700;
 }
 
 
@@ -537,6 +571,14 @@
 }
 
 /* ── Headers ─────────────────────────────────────────────────── */
+.shp-table thead {
+    position: sticky;
+    top: 60px;
+    /* Locks right under the 60px control bar */
+    z-index: 90;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
 .shp-th {
     padding: 10px 12px;
     font-size: 10.5px;
@@ -547,11 +589,6 @@
     text-align: center;
     background: var(--shp-header-bg);
     color: var(--shp-header-color);
-    position: sticky;
-    top: 60px !important;
-    /* Locks right under the 60px control bar */
-    /* Row 1: month group headers */
-    z-index: 90 !important;
 }
 
 .shp-th.shp-th-name {
@@ -580,11 +617,8 @@
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     font-weight: 600;
     color: var(--shp-subheader-color);
-    top: 92px !important;
-    /* 60px controls + 32px row1 header */
-    /* Row 2: sits below the row 1 header */
-    z-index: 80 !important;
 }
+
 
 /* ── Month group tints — header cells ────────────────────────── */
 .shp-th.shp-month-0 {

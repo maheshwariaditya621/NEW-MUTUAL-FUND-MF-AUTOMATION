@@ -1,10 +1,10 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 /**
  * Base HTTP client for API requests
  */
 export async function apiGet(endpoint, params = {}) {
-    const url = new URL(`${API_BASE_URL}${endpoint}`);
+    const url = new URL(`${API_BASE_URL}${endpoint}`, window.location.origin);
 
     // Add query parameters
     Object.keys(params).forEach(key => {
@@ -15,6 +15,33 @@ export async function apiGet(endpoint, params = {}) {
 
     try {
         const response = await fetch(url);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP Error: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * Base HTTP client for API POST requests
+ */
+export async function apiPost(endpoint, data = {}) {
+    const url = `${API_BASE_URL}${endpoint}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));

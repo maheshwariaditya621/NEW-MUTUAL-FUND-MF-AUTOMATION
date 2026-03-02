@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom';
 import { getStockActivity } from '../api/insights';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
+import MissingData from '../components/common/MissingData';
 import './InsightsPage.css';
 
 // ── Helpers ──
-const fmt = (n) => (n != null ? Number(n).toLocaleString('en-IN') : '-');
-const fmtCr = (n) => (n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '-');
+const fmt = (n) => (n === null || n === undefined) ? null : (n === 0 ? '-' : Number(n).toLocaleString('en-IN'));
+const fmtCr = (n) => (n === null || n === undefined) ? null : (n === 0 ? '-' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
 
 export default function InsightsPage() {
     const [activityType, setActivityType] = useState('buying'); // 'buying' | 'selling'
@@ -82,15 +83,15 @@ export default function InsightsPage() {
     }, [data, filterText, sortConfig]);
 
     const handleSort = (key) => {
-        let direction = 'asc';
-        if (sortConfig.key === key && sortConfig.direction === 'asc') {
-            direction = 'desc';
-        }
-        setSortConfig({ key, direction });
+        setSortConfig(prev => {
+            if (prev.key !== key) return { key, direction: 'desc' };
+            if (prev.direction === 'desc') return { key, direction: 'asc' };
+            return { key: null, direction: 'desc' };
+        });
     };
 
     const SortIcon = ({ columnKey }) => {
-        if (sortConfig.key !== columnKey) return <span className="ins-sort-icon">↕</span>;
+        if (sortConfig.key !== columnKey) return null;
         return <span className="ins-sort-icon active">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
     };
 
@@ -198,7 +199,7 @@ export default function InsightsPage() {
                                         </div>
                                     </td>
                                     <td className="ins-td">
-                                        <span style={{ fontWeight: 500 }}>{item.sector || '-'}</span>
+                                        <span style={{ fontWeight: 500 }}>{item.sector || <MissingData inline />}</span>
                                     </td>
                                     <td className="ins-td">
                                         <div className="ins-mcap-cell">
@@ -207,7 +208,7 @@ export default function InsightsPage() {
                                                 title={item.market_cap ? `Exact: ${fmt(item.market_cap)} INR` : ''}
                                                 style={{ cursor: 'help' }}
                                             >
-                                                {item.market_cap ? fmtCr(item.market_cap / 10000000) : '-'}
+                                                {fmtCr(item.market_cap / 10000000) || <MissingData inline />}
                                             </span>
                                             {item.classification && (
                                                 <span className={`ins-badge mcap ${item.classification.toLowerCase().replace(' ', '-')}`}>

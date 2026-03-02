@@ -284,3 +284,29 @@ textarea:focus-visible {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ===== TABLE SORTING ===== */
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--transition-fast);
+}
+
+.sortable:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="dark"] .sortable:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.ins-sort-icon {
+  margin-left: 4px;
+  font-size: 0.8em;
+  opacity: 0.5;
+}
+
+.ins-sort-icon.active {
+  opacity: 1;
+  color: var(--accent-primary);
+}

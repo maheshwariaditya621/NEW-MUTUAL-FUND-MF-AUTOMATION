@@ -419,7 +419,33 @@ class BaseExtractor(abc.ABC):
                 if clean_regex:
                     scheme_name_extracted = re.sub(clean_regex, '', scheme_name_extracted).strip()
                 
-                # 8. PROCESS COLUMNS (Fuzzy Mapping)
+                # 8. Extract Total Net Assets (AUM) from footer
+                raw_net_assets = None
+                for idx, row in df_raw.iterrows():
+                    row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                    row_text = " ".join(row_vals)
+                    if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text:
+                        candidates = []
+                        for val in row.values:
+                            f_val = self.safe_float(val)
+                            if f_val > 0:
+                                candidates.append(f_val)
+                        
+                        if candidates:
+                            # If we have [Value, 100], take the first one (Value)
+                            if len(candidates) > 1 and abs(candidates[-1] - 100.0) < 0.01:
+                                raw_net_assets = candidates[-2]
+                            else:
+                                raw_net_assets = candidates[-1]
+                        
+                        if raw_net_assets:
+                            break
+                            
+                normalized_net_assets = None
+                if raw_net_assets:
+                    normalized_net_assets = self.normalize_currency(raw_net_assets, global_unit)
+
+                # 9. PROCESS COLUMNS (Fuzzy Mapping)
                 # Create a map of Raw Column Name -> Standard Column Name
                 final_col_map = {}
                 for df_col in df.columns:
@@ -439,40 +465,54 @@ class BaseExtractor(abc.ABC):
                 if raw_isin_col:
                      df = df.dropna(subset=[raw_isin_col])
                 
+                parsed_scheme = self.parse_verbose_scheme_name(scheme_name_extracted)
+                
+                if df.empty or not raw_isin_col:
+                    # Ghost Holding for 0-equity schemes using config-based extraction
+                    record = {
+                        "amc_name": self.amc_name,
+                        "scheme_name": parsed_scheme['scheme_name'],
+                        "scheme_plan": parsed_scheme['plan_type'],
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
+                    }
+                    all_data.append(record)
+                    continue
+
                 for _, row in df.iterrows():
                     row_data = {}
                     # Build row data using the map
                     for raw_col, std_col in final_col_map.items():
                         row_data[std_col] = row[raw_col]
                     
-                    if 'ISIN' not in row_data:
+                    if 'isin' not in row_data or not row_data['isin']:
                         continue
                         
-                    if not self.is_valid_equity_isin(row_data['ISIN']):
+                    if not self.is_valid_equity_isin(row_data['isin']):
                         continue
                         
-                    parsed_scheme = self.parse_verbose_scheme_name(scheme_name_extracted)
-                    
                     # Unit Normalization
-                    # Check column specific units? For now use global.
-                    # TODO: Add per-column unit detection from config if needed.
-                    
-                    market_val = self.safe_float(row_data.get('Market Value', 0))
+                    market_val = self.safe_float(row_data.get('market_value_inr', 0))
                     market_val_norm = self.normalize_currency(market_val, global_unit)
                     
-                    qty = self.safe_float(row_data.get('Quantity', 0))
-                    nav = self.safe_float(row_data.get('NAV', 0))
+                    qty = self.safe_float(row_data.get('quantity', 0))
                     
                     record = {
                         "amc_name": self.amc_name,
                         "scheme_name": parsed_scheme['scheme_name'],
                         "scheme_plan": parsed_scheme['plan_type'],
-                        "isin": str(row_data['ISIN']).strip(),
-                        "company_name": row_data.get('Company Name', 'N/A'),
+                        "isin": str(row_data['isin']).strip(),
+                        "company_name": row_data.get('company_name', 'N/A'),
                         "quantity": qty,
                         "market_value_inr": market_val_norm,
-                        "percent_of_nav": self.safe_float(row_data.get('Percent to NAV', 0)),
-                        "sector": row_data.get('Sector', 'N/A')
+                        "percent_of_nav": self.safe_float(row_data.get('percent_of_nav', 0)),
+                        "sector": row_data.get('sector', 'N/A'),
+                        "total_net_assets": normalized_net_assets
                     }
                     all_data.append(record)
                     
@@ -490,3 +530,36 @@ class BaseExtractor(abc.ABC):
         if not isin.startswith("INE"): return False
         if isin[8:10] != "10": return False
         return True
+
+    def _map_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Maps raw column names to canonical names based on self.column_mapping.
+        """
+        new_cols = {}
+        for col in df.columns:
+            col_upper = str(col).upper()
+            for pattern, canonical in self.column_mapping.items():
+                if pattern.upper() in col_upper:
+                    new_cols[col] = canonical
+                    break
+        return df.rename(columns=new_cols)
+
+    def _resolve_value_unit(self, raw_columns: List[Any], default_unit: str) -> str:
+        """
+        Refines the currency unit by checking column headers.
+        """
+        value_unit = default_unit
+        for col in raw_columns:
+            col_upper = str(col).upper()
+            is_mv_col = False
+            for pattern, canonical in self.column_mapping.items():
+                if pattern.upper() in col_upper and canonical == "market_value_inr":
+                    is_mv_col = True
+                    break
+
+            if is_mv_col:
+                header_unit = self.detect_units(col)
+                if header_unit != "RUPEES":
+                    return header_unit
+
+        return value_unit

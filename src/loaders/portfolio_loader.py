@@ -186,8 +186,13 @@ class PortfolioLoader:
                 merged_holdings_map = {} # isin -> holding_dict
                 
                 for h in data["items"]:
-                    isin = h['isin']
+                    isin = h.get('isin')
                     
+                    if not isin:
+                        # This is a 'ghost holding' for a non-equity fund
+                        # We don't need to resolve a company, just move to next
+                        continue
+
                     # Dedup/Merge Logic
                     if isin in merged_holdings_map:
                         existing = merged_holdings_map[isin]
@@ -255,15 +260,23 @@ class PortfolioLoader:
                     })
 
                 # 4. Atomic Load per Scheme
-                if not db_holdings:
-                    logger.info(f"Scheme '{s_key[0]}' has no valid equity holdings. Skipping DB store.")
+                # ALL FUNDS RULE: Even if no equity (db_holdings empty), we proceed if total_net_assets exists
+                if not db_holdings and not data["info"].get("total_net_assets"):
+                    logger.info(f"Scheme '{s_key[0]}' has no holdings and no AUM footer. Skipping DB store.")
                     continue
 
                 total_value = sum(h['market_value_inr'] for h in db_holdings)
                 total_nav_percent = sum(float(h['percent_of_nav']) for h in db_holdings)
+                
+                # Calculate real holdings count (excluding ghost ISIN IN9999999999)
+                # We need to find the company_id for the ghost ISIN if it was added
+                ghost_isin = "IN9999999999"
+                ghost_company_id = PortfolioLoader._company_cache.get(ghost_isin)
+                real_holdings = [h for h in db_holdings if h['company_id'] != ghost_company_id]
+                real_holdings_count = len(real_holdings)
 
                 # %NAV Guard: Check if sum is within 95-105% (Standard Equity Range)
-                if not (95.0 <= total_nav_percent <= 105.0):
+                if real_holdings_count > 0 and not (95.0 <= total_nav_percent <= 105.0):
                     logger.warning(
                         f"[%NAV GUARD] Scheme '{s_key[0]}' has unusual total equity exposure: {total_nav_percent:.2f}% "
                         f"(Expected 95-105%). Verify if significant Cash/Debt was excluded."
@@ -272,9 +285,10 @@ class PortfolioLoader:
                 snapshot_id = create_snapshot(
                     scheme_id=scheme_id,
                     period_id=period_id,
-                    total_holdings=len(db_holdings),
+                    total_holdings=real_holdings_count,
                     total_value_inr=total_value,
-                    holdings_count=len(db_holdings)
+                    holdings_count=real_holdings_count,
+                    total_net_assets_inr=data["info"].get("total_net_assets")
                 )
 
                 insert_holdings(snapshot_id, db_holdings)

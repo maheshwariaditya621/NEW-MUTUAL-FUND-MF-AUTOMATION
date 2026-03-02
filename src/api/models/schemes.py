@@ -20,7 +20,8 @@ class SchemeSearchResult(BaseModel):
 class MonthlyHoldingSnapshot(BaseModel):
     """Holdings data for a specific month."""
     month: str = Field(..., description="Month in YYYY-MM format")
-    aum_cr: Decimal = Field(..., description="Assets Under Management in crores")
+    equity_aum_cr: Decimal = Field(..., description="Equity Assets Under Management in crores")
+    total_aum_cr: Decimal = Field(..., description="Total Assets Under Management in crores")
     percent_to_aum: Decimal = Field(..., description="% of AUM for this holding")
     num_shares: Optional[int] = Field(None, description="Number of shares held. None if AMC data not uploaded.")
     is_adjusted: bool = Field(False, description="Whether share count was adjusted for corporate actions")
@@ -34,6 +35,7 @@ class PortfolioHolding(BaseModel):
     sector: Optional[str] = Field(None, description="Sector classification")
     market_cap: Optional[Decimal] = Field(None, description="Market cap in crores")
     mcap_type: Optional[str] = Field(None, description="Market cap type (Large Cap, etc.)")
+    live_price: Optional[float] = Field(None, description="Current market price (LTP)")
     monthly_data: List[MonthlyHoldingSnapshot] = Field(..., description="Monthly snapshots (last N months)")
 
 

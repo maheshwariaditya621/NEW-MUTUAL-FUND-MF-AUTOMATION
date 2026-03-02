@@ -84,34 +84,72 @@ class ICICIExtractorV1(BaseExtractor):
                     logger.warning(f"[ICICI] No ISIN column in {sheet_name}, skipping")
                     continue
 
+                # Extract Total Net Assets (AUM) from the sheet's footer using df (raw read)
+                raw_net_assets = None
+                for idx, row in df.iterrows():
+                    row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
+                    row_text = " ".join(row_vals)
+                    if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
+                        candidates = []
+                        for val in row.values:
+                            f_val = self.safe_float(val)
+                            if f_val is not None and f_val > 105: # Avoid 100.00%
+                                candidates.append(f_val)
+                        
+                        if candidates:
+                            if len(candidates) > 1:
+                                 if abs(candidates[-1] - 100.0) < 0.05:
+                                     raw_net_assets = candidates[-2]
+                                 else:
+                                     raw_net_assets = candidates[-1]
+                            else:
+                                raw_net_assets = candidates[0]
+                            
+                        if raw_net_assets:
+                            break
+                            
+                normalized_net_assets = None
+                if raw_net_assets:
+                    normalized_net_assets = self.normalize_currency(raw_net_assets, "LAKHS")
+
                 # Filter equity holdings (this also removes section headers)
-                equity_df = self.filter_equity_isins(df, "isin")
+                equity_df = pd.DataFrame()
+                if "isin" in df.columns:
+                    equity_df = self.filter_equity_isins(df, "isin")
                 
-                if equity_df.empty:
-                    logger.debug(f"[ICICI] No equity in {sheet_name}")
-                    schemes_processed += 1
-                    continue
-                
-                
-                # Build holdings
                 sheet_holdings = []
                 
-                # DEBUG: Check if percent_of_nav column exists
-                if 'percent_of_nav' not in equity_df.columns:
-                    logger.error(f"[ICICI] {scheme_name}: percent_of_nav column missing after mapping!")
-                    logger.error(f"[ICICI] Available columns: {equity_df.columns.tolist()}")
-                    schemes_processed += 1
-                    continue
-                
-                for _, row in equity_df.iterrows():
-                    # Market value: convert from Lakhs to INR
-                    market_value_lakhs = self.safe_float(row.get("market_value", 0))
-                    market_value_inr = market_value_lakhs * 100_000
+                if not equity_df.empty:
+                    # DEBUG: Check if percent_of_nav column exists
+                    if 'percent_of_nav' not in equity_df.columns:
+                        logger.error(f"[ICICI] {cleaned_scheme_name}: percent_of_nav column missing after mapping!")
+                        schemes_processed += 1
+                        continue
                     
-                    # NAV percentage: convert from decimal to percentage
-                    nav_decimal = self.safe_float(row.get("percent_of_nav", 0))
-                    nav_pct = nav_decimal * 100  # 0.061137 -> 6.1137
-                    
+                    for _, row in equity_df.iterrows():
+                        market_value_lakhs = self.safe_float(row.get("market_value", 0))
+                        market_value_inr = market_value_lakhs * 100_000
+                        nav_decimal = self.safe_float(row.get("percent_of_nav", 0))
+                        nav_pct = nav_decimal * 100
+                        
+                        holding = {
+                            "amc_name": self.amc_name,
+                            "scheme_name": scheme_info["scheme_name"],
+                            "scheme_description": scheme_info["description"],
+                            "plan_type": scheme_info["plan_type"],
+                            "option_type": scheme_info["option_type"],
+                            "is_reinvest": scheme_info["is_reinvest"],
+                            "isin": self.clean_isin(row.get("isin")),
+                            "company_name": self.clean_company_name(row.get("security_name")),
+                            "quantity": int(self.safe_float(row.get("quantity", 0))),
+                            "market_value_inr": market_value_inr,
+                            "percent_of_nav": nav_pct,
+                            "sector": self.clean_company_name(row.get("sector", "N/A")),
+                            "total_net_assets": normalized_net_assets
+                        }
+                        sheet_holdings.append(holding)
+                elif normalized_net_assets:
+                    # Ghost Holding for Non-Equity funds
                     holding = {
                         "amc_name": self.amc_name,
                         "scheme_name": scheme_info["scheme_name"],
@@ -119,14 +157,20 @@ class ICICIExtractorV1(BaseExtractor):
                         "plan_type": scheme_info["plan_type"],
                         "option_type": scheme_info["option_type"],
                         "is_reinvest": scheme_info["is_reinvest"],
-                        "isin": self.clean_isin(row.get("isin")),
-                        "company_name": self.clean_company_name(row.get("security_name")),
-                        "quantity": int(self.safe_float(row.get("quantity", 0))),
-                        "market_value_inr": market_value_inr,
-                        "percent_of_nav": nav_pct,
-                        "sector": self.clean_company_name(row.get("sector", "N/A"))
+                        "isin": None,
+                        "company_name": "N/A",
+                        "quantity": 0,
+                        "market_value_inr": 0,
+                        "percent_of_nav": 0,
+                        "sector": "N/A",
+                        "total_net_assets": normalized_net_assets
                     }
                     sheet_holdings.append(holding)
+                else:
+                    logger.debug(f"[ICICI] No equity or AUM in {sheet_name}")
+                    schemes_processed += 1
+                    continue
+
 
                 # Pre-validation: Aggregate duplicates by ISIN
                 # Some sheets (e.g. ELSS Tax Saver) may contain duplicate ISINs which fail strict validation.
