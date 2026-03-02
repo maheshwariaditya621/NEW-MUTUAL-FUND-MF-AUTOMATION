@@ -151,10 +151,6 @@ class WealthCompanyDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if self._page:
-                     try:
-                        self._page.screenshot(path=f"wealth_company_debug_{year}_{month}_attempt_{attempt}.png")
-                     except: pass
                 if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
 
         if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)

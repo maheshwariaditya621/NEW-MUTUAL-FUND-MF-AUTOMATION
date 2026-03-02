@@ -57,7 +57,7 @@ class DownloaderFactory:
         "unifi": ("src.downloaders.unifi_downloader", "UnifiDownloader"),
         "union": ("src.downloaders.union_downloader", "UnionDownloader"),
         "uti": ("src.downloaders.uti_downloader", "UTIDownloader"),
-        "wealth_company": ("src.downloaders.wealth_company_downloader", "WealthDownloader"),
+        "wealth_company": ("src.downloaders.wealth_company_downloader", "WealthCompanyDownloader"),
         "whiteoak": ("src.downloaders.whiteoak_downloader", "WhiteOakDownloader"),
         "zerodha": ("src.downloaders.zerodha_downloader", "ZerodhaDownloader"),
     }
