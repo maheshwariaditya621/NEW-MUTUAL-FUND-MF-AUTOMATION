@@ -266,13 +266,22 @@ class BandhanDownloader(BaseDownloader):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Bandhan Mutual Fund Downloader")
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, required=True)
+    parser.add_argument("--dry-run", action="store_true", help="Dry run mode")
+    parser.add_argument("--redo", action="store_true", help="Redo mode")
     args = parser.parse_args()
 
+    # Pass global config if needed (though Bandhan uses config.DRY_RUN)
+    # To keep it simple, we'll just run it. 
+    # The BandhanDownloader already uses config.DRY_RUN, but we can override locally if needed.
+    
     downloader = BandhanDownloader()
     result = downloader.download(args.year, args.month)
+    
+    # CRITICAL: Print JSON result for orchestrator to capture
+    print(json.dumps(result))
 
     status = result["status"]
     if status == "success":

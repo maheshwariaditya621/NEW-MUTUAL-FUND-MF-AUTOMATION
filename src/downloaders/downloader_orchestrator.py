@@ -69,14 +69,27 @@ class PipelineOrchestrator:
                         logger.warning(f"Redo requested: Deleting existing raw folder {target_v}")
                         shutil.rmtree(target_v)
 
-                # RUN DOWNLOADER IN SUBPROCESS to avoid Playwright/Asyncio conflicts
+                # Prepare command
                 cmd = [sys.executable, file_path, "--year", str(year), "--month", str(month)]
+                
+                # Check if script supports dry-run/redo (simple heuristic)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        if "--dry-run" in content:
+                            if dry_run: cmd.append("--dry-run")
+                        if "--redo" in content:
+                            if redo: cmd.append("--redo")
+                except Exception:
+                    logger.debug(f"Could not check CLI flags for {file_path}")
+
                 logger.info(f"Running downloader in subprocess: {' '.join(cmd)}")
                 
-                # Telegram Notification (Start)
-                self.notifier.alert(f"🚀 <b>[{amc_slug.upper()}]</b> Download started for {month:02d}/{year}")
+                # Setup environment
+                env = os.environ.copy()
+                env["PYTHONPATH"] = "."
 
-                process = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                process = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
                 
                 # Parse JSON result from stdout (even on failure)
                 download_res = {}

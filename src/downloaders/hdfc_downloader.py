@@ -497,6 +497,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HDFC Mutual Fund Downloader")
     parser.add_argument("--year", type=int, required=True, help="Calendar year (YYYY)")
     parser.add_argument("--month", type=int, required=True, help="Month (1-12)")
+    parser.add_argument("--dry-run", action="store_true", help="Dry run mode")
+    parser.add_argument("--redo", action="store_true", help="Redo mode")
     
     args = parser.parse_args()
     
