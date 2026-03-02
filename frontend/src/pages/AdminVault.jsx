@@ -60,16 +60,18 @@ const AdminVault = () => {
             const resp = await fetch(`${API_BASE}/stats`, {
                 headers: { 'X-Admin-Secret': pass }
             });
-            if (resp.ok) {
+            if (resp.status === 401) {
+                setError('Invalid Secret Key');
+            } else if (!resp.ok) {
+                setError(`Server Error: ${resp.status}`);
+            } else {
                 const data = await resp.json();
                 setStats(data);
                 setIsAuthenticated(true);
                 setError(null);
-            } else {
-                setError('Invalid Secret Key');
             }
         } catch (err) {
-            setError('Failed to connect to API');
+            setError('Connection failed. Is the API running?');
         } finally {
             setLoading(false);
         }

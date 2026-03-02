@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 from src.config import logger
 from src.extractors.extractor_factory import ExtractorFactory
 from src.loaders.portfolio_loader import PortfolioLoader
-from src.utils.db_backup import backup_database, prune_old_backups
+from src.utils.db_backup import prune_old_backups
 from src.extractors.drift_detector import DriftDetector
 from src.db import (
     upsert_amc, upsert_period, record_extraction_run, 
@@ -134,12 +134,7 @@ class ExtractionOrchestrator:
                 # 5. Generate Reconciliation Report
                 self._generate_reconciliation_report(amc_slug, year, month, holdings)
 
-                # 6. Automated Backup (Harden)
-                backup_path = backup_database()
-                if backup_path:
-                    prune_old_backups(keep_count=6)
-
-                # 7. Post-Load Hook: Anomaly Detection (Splits/Bonuses)
+                # 6. Post-Load Hook: Anomaly Detection (Splits/Bonuses)
                 from src.loaders.anomaly_detector import AnomalyDetector
                 AnomalyDetector.run(period_id)
             

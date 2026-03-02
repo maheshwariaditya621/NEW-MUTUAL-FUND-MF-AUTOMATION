@@ -25,8 +25,15 @@ def backup_database():
     
     logger.info(f"Starting database backup: {backup_file}")
     
-    # Path to pg_dump
-    pg_dump_path = r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe"
+    # Path to pg_dump - Make it platform aware
+    import platform
+    if platform.system() == "Windows":
+        # Check standard installation paths or assume it's in PATH
+        pg_dump_path = os.getenv("PG_DUMP_PATH", r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe")
+        if not os.path.exists(pg_dump_path):
+            pg_dump_path = "pg_dump.exe" # Fallback to PATH
+    else:
+        pg_dump_path = "pg_dump" # Standard Linux behavior
     
     # DB Credentials
     db_host = os.getenv("DB_HOST", "localhost")

@@ -35,6 +35,10 @@ class TelegramNotifier:
         self.templates = TelegramTemplates()
         self.alerts_enabled = ALERTS_ENABLED
     
+    def alert(self, message: str) -> bool:
+        """Convenience method for sending raw HTML alerts."""
+        return self.client.send_message(message, parse_mode="HTML")
+    
     def _should_send(self, alert_type: str) -> bool:
         """
         Check if alert type should be sent.
