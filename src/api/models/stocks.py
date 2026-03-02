@@ -33,7 +33,7 @@ class HistoricalHolding(BaseModel):
     """Holding data for a specific month within a scheme."""
     month: str = Field(..., description="Month in YYYY-MM format")
     num_shares: Optional[int] = Field(None, description="Number of shares held. None if AMC data not uploaded for this month.")
-    percent_to_aum: Decimal = Field(..., description="Percentage of AUM")
+    percent_to_aum: Optional[Decimal] = Field(None, description="Percentage of AUM")
     ownership_percent: Optional[float] = Field(None, description="Percentage of company shares held by this scheme in this month")
     trend: Optional[str] = Field(None, description="Trend indicator: up/down/same")
     is_adjusted: bool = Field(False, description="Whether the quantity was adjusted for corporate actions")
