@@ -72,12 +72,7 @@ class AbakkusDownloader(BaseDownloader):
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(
             headless=HEADLESS,
-            args=[
-                "--window-size=1920,1080",
-                "--start-maximized",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
+            args=["--window-size=1920,1080", "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
             slow_mo=500
         )
         self._context = self._browser.new_context(

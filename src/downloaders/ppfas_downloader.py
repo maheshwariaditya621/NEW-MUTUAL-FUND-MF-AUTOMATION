@@ -96,7 +96,8 @@ class PPFASDownloader(BaseDownloader):
         
         with sync_playwright() as p:
             # Use Chrome channel and non-headless as per proven success
-            browser = p.chromium.launch(channel="chrome", headless=False)
+            browser = p.chromium.launch(channel="chrome", headless=False,
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"])
             context = browser.new_context(
                 accept_downloads=True,
                 user_agent="Mozilla/5.0"

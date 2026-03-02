@@ -237,12 +237,7 @@ class BajajDownloader(BaseDownloader):
             pw = sync_playwright().start()
             browser = pw.chromium.launch(
                 headless=False,
-                args=[
-                    "--window-size=1920,1080",
-                    "--start-maximized",
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                ],
+                args=["--window-size=1920,1080", "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
                 slow_mo=1000
             )
             context = browser.new_context(

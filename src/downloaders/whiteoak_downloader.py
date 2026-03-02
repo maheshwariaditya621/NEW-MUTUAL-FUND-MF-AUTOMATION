@@ -156,12 +156,12 @@ class WhiteOakDownloader(BaseDownloader):
                 browser = pw.chromium.launch(
                     headless=HEADLESS,
                     channel="chrome",
-                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"]
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars", "--disable-dev-shm-usage", "--disable-gpu"]
                 )
             except:
                 browser = pw.chromium.launch(
                     headless=HEADLESS,
-                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
                 )
 
             context = browser.new_context(

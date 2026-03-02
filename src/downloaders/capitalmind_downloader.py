@@ -85,7 +85,7 @@ class CapitalMindDownloader(BaseDownloader):
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(
             headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
         )
         self._context = self._browser.new_context(
             viewport={"width": 1920, "height": 1080},

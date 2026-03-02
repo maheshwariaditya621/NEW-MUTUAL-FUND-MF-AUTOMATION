@@ -232,11 +232,7 @@ class AngelOneDownloader(BaseDownloader):
             pw = sync_playwright().start()
             browser = pw.chromium.launch(
                 headless=HEADLESS,
-                args=[
-                    "--window-size=1920,1080",
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                ]
+                args=["--window-size=1920,1080", "--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
             )
             context = browser.new_context(
                 viewport={"width": 1920, "height": 1080},

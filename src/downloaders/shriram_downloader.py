@@ -182,7 +182,7 @@ class ShriramDownloader(BaseDownloader):
             pw = sync_playwright().start()
             browser = pw.chromium.launch(
                 headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
             )
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

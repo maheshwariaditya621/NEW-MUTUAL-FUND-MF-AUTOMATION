@@ -121,7 +121,7 @@ class ZerodhaDownloader(BaseDownloader):
             pw = sync_playwright().start()
             browser = pw.chromium.launch(
                 headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
             )
             # Accept downloads is key
             context = browser.new_context(

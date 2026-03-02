@@ -159,7 +159,7 @@ class MotilalDownloader(BaseDownloader):
             pw = sync_playwright().start()
             browser = pw.chromium.launch(
                 headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
             )
             context = browser.new_context(
                 viewport={"width": 1920, "height": 1080},
