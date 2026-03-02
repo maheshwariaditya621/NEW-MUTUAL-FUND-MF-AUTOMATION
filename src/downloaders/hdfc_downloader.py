@@ -202,6 +202,7 @@ class HDFCDownloader(BaseDownloader):
             logger.info("MODE: DRY RUN (no network calls)")
         logger.info("=" * 60)
 
+        fy = self._financial_year(year, month)
         target_dir = Path(self.get_target_folder("hdfc", year, month))
         
         # Check for incomplete month (folder exists but no _SUCCESS.json)
@@ -242,9 +243,11 @@ class HDFCDownloader(BaseDownloader):
         self.ensure_directory(str(target_dir))
 
         # API payload: MUST include all three fields
-        # NOTE: HDFC API uses the calendar year, NOT financial year
+        # HDFC API uses the FINANCIAL YEAR (starting year convention):
+        #   Apr-Dec: fy = calendar year  (e.g. Nov 2025 → fy=2025 → FY 2025-26)
+        #   Jan-Mar: fy = calendar year - 1  (e.g. Jan 2026 → fy=2025 → FY 2025-26)
         data = {
-            "year": year,
+            "year": fy,
             "type": "monthly",
             "month": month
         }
@@ -257,7 +260,7 @@ class HDFCDownloader(BaseDownloader):
             "User-Agent": "Mozilla/5.0",
         }
 
-        logger.info(f"Calling HDFC API (year={year}, month={month})")
+        logger.info(f"Calling HDFC API (FY={fy}, month={month})")
 
         # DRY RUN MODE
         if DRY_RUN:
@@ -348,17 +351,23 @@ class HDFCDownloader(BaseDownloader):
                 
                 # VALIDATION: Check if filename contains requested year and month name
                 # HDFC filenames follow pattern: "... - 31 March 2025.xlsx"
+                # If the filename doesn't match, the API is returning a fallback (old data)
+                # because the requested month hasn't been published yet.
                 month_name = self.MONTH_NAMES[month]
                 if str(year) not in name or month_name not in name:
-                    logger.error(f"CORRUPT DATA: Requested {month_name} {year} but API returned {name}")
+                    logger.warning(f"HDFC API returned data for a different period: {name}")
+                    logger.warning(f"Requested {month_name} {year} — data not yet published (API fallback detected)")
                     if target_dir.exists():
                         shutil.rmtree(target_dir)
+                    self.notifier.notify_not_published(amc="HDFC", year=year, month=month)
                     return {
                         "amc": "HDFC Mutual Fund",
                         "year": year,
                         "month": month,
-                        "status": "failed",
-                        "reason": f"AMC API returned data for wrong period: {name}"
+                        "files_downloaded": 0,
+                        "files": [],
+                        "status": "not_published",
+                        "reason": f"{month_name} {year} not yet published (API returned {name})"
                     }
 
                 path = target_dir / name
