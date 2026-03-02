@@ -16,6 +16,27 @@ const AdminVault = () => {
     const [syncResult, setSyncResult] = useState(null);
     const [sortConfig, setSortConfig] = useState({ key: 'confidence', direction: 'desc' });
 
+    // Extraction state
+    const ALL_SLUGS = [
+        'abakkus', 'absl', 'angelone', 'axis', 'bajaj', 'bandhan', 'baroda',
+        'boi', 'canara', 'capitalmind', 'choice', 'dsp', 'edelweiss', 'franklin',
+        'groww', 'hdfc', 'helios', 'hsbc', 'icici', 'invesco', 'iti', 'jio_br',
+        'jmfinancial', 'kotak', 'lic', 'mahindra', 'mirae_asset', 'motilal',
+        'navi', 'nippon', 'nj', 'old_bridge', 'pgim_india', 'ppfas', 'quant',
+        'quantum', 'samco', 'sbi', 'shriram', 'sundaram', 'tata', 'taurus',
+        'threesixtyone', 'trust', 'unifi', 'union', 'uti', 'wealth_company',
+        'whiteoak', 'zerodha'
+    ];
+    const now = new Date();
+    const [selectedSlugs, setSelectedSlugs] = useState([]);
+    const [extYear, setExtYear] = useState(now.getFullYear());
+    const [extMonth, setExtMonth] = useState(now.getMonth() + 1);
+    const [isDryRun, setIsDryRun] = useState(true);
+    const [isRedo, setIsRedo] = useState(false);
+    const [extJobs, setExtJobs] = useState([]);
+    const [triggering, setTriggering] = useState(false);
+    const [activeJobId, setActiveJobId] = useState(null);
+
     const API_BASE = '/api/v1/admin';
 
     const handleLogin = (e) => {
@@ -79,6 +100,25 @@ const AdminVault = () => {
     useEffect(() => {
         if (isAuthenticated) fetchData();
     }, [isAuthenticated, activeTab]);
+
+    // Poll active extraction job
+    useEffect(() => {
+        if (!activeJobId) return;
+        const interval = setInterval(async () => {
+            try {
+                const resp = await fetch(`${API_BASE}/extraction-jobs/${activeJobId}`, {
+                    headers: { 'X-Admin-Secret': password }
+                });
+                const data = await resp.json();
+                setExtJobs(prev => prev.map(j => j.job_id === activeJobId ? data : j));
+                if (data.status === 'completed') {
+                    setActiveJobId(null);
+                    clearInterval(interval);
+                }
+            } catch { }
+        }, 2000);
+        return () => clearInterval(interval);
+    }, [activeJobId, password]);
 
     const handleApprove = async (mergeId) => {
         const pass = password;
@@ -213,24 +253,10 @@ const AdminVault = () => {
             </div>
 
             <div className="admin-tabs">
-                <button
-                    className={`tab-btn ${activeTab === 'merges' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('merges')}
-                >
-                    Scheme Merges
-                </button>
-                <button
-                    className={`tab-btn ${activeTab === 'alerts' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('alerts')}
-                >
-                    System Alerts
-                </button>
-                <button
-                    className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('data')}
-                >
-                    Data Management
-                </button>
+                <button className={`tab-btn ${activeTab === 'merges' ? 'active' : ''}`} onClick={() => setActiveTab('merges')}>Scheme Merges</button>
+                <button className={`tab-btn ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>System Alerts</button>
+                <button className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>Data Management</button>
+                <button className={`tab-btn ${activeTab === 'extraction' ? 'active' : ''}`} onClick={() => setActiveTab('extraction')}>⚡ Extraction Control</button>
             </div>
 
             <div className="tab-content">
@@ -426,6 +452,167 @@ const AdminVault = () => {
                                 <li><strong>Classification</strong> (Large/Mid/Small)</li>
                             </ul>
                         </div>
+                    </div>
+                )}
+                {activeTab === 'extraction' && (
+                    <div className="data-management">
+                        <div className="uploader-card">
+                            <h3>⚡ Extraction Control Panel</h3>
+                            <p>Select AMCs, configure period and options, then trigger extract + DB load.</p>
+
+                            {/* AMC Selection */}
+                            <div style={{ marginTop: '16px' }}>
+                                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center' }}>
+                                    <strong>AMCs ({selectedSlugs.length}/{ALL_SLUGS.length} selected)</strong>
+                                    <button className="btn-secondary" style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                                        onClick={() => setSelectedSlugs([...ALL_SLUGS])}>Select All</button>
+                                    <button className="btn-secondary" style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                                        onClick={() => setSelectedSlugs([])}>Clear</button>
+                                </div>
+                                <div style={{
+                                    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
+                                    gap: '6px', maxHeight: '220px', overflowY: 'auto',
+                                    border: '1px solid #333', borderRadius: '8px', padding: '10px'
+                                }}>
+                                    {ALL_SLUGS.map(slug => (
+                                        <label key={slug} style={{
+                                            display: 'flex', alignItems: 'center', gap: '6px',
+                                            cursor: 'pointer', fontSize: '0.82rem',
+                                            padding: '4px 6px', borderRadius: '4px',
+                                            background: selectedSlugs.includes(slug) ? 'rgba(99,102,241,0.2)' : 'transparent',
+                                            border: selectedSlugs.includes(slug) ? '1px solid #6366f1' : '1px solid transparent'
+                                        }}>
+                                            <input type="checkbox" checked={selectedSlugs.includes(slug)}
+                                                onChange={e => {
+                                                    if (e.target.checked) setSelectedSlugs(p => [...p, slug]);
+                                                    else setSelectedSlugs(p => p.filter(s => s !== slug));
+                                                }} />
+                                            {slug}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Period + Options */}
+                            <div style={{ display: 'flex', gap: '16px', marginTop: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                <div>
+                                    <label style={{ fontSize: '0.85rem', display: 'block', marginBottom: '4px' }}>Year</label>
+                                    <input type="number" value={extYear} onChange={e => setExtYear(+e.target.value)}
+                                        min="2020" max="2030" style={{
+                                            padding: '8px 12px', borderRadius: '6px', border: '1px solid #444',
+                                            background: '#1a1a2e', color: '#fff', width: '90px'
+                                        }} />
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: '0.85rem', display: 'block', marginBottom: '4px' }}>Month</label>
+                                    <select value={extMonth} onChange={e => setExtMonth(+e.target.value)}
+                                        style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #444', background: '#1a1a2e', color: '#fff' }}>
+                                        {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                                            .map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+                                    </select>
+                                </div>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={isDryRun} onChange={e => setIsDryRun(e.target.checked)} />
+                                    <span style={{ fontSize: '0.9rem' }}>Dry Run (no DB write)</span>
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={isRedo} onChange={e => setIsRedo(e.target.checked)} />
+                                    <span style={{ fontSize: '0.9rem' }}>Redo (purge existing)</span>
+                                </label>
+                            </div>
+
+                            {/* Trigger Button */}
+                            <button
+                                className="btn-approve"
+                                disabled={triggering || selectedSlugs.length === 0}
+                                style={{ marginTop: '16px', padding: '12px 28px', fontSize: '1rem' }}
+                                onClick={async () => {
+                                    setTriggering(true);
+                                    try {
+                                        const resp = await fetch(`${API_BASE}/trigger-extraction`, {
+                                            method: 'POST',
+                                            headers: { 'X-Admin-Secret': password, 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                amc_slugs: selectedSlugs,
+                                                year: extYear, month: extMonth,
+                                                dry_run: isDryRun, redo: isRedo
+                                            })
+                                        });
+                                        const data = await resp.json();
+                                        if (resp.ok) {
+                                            const newJob = {
+                                                ...data, status: 'queued', results: {}, done: 0,
+                                                total: selectedSlugs.length, amc_slugs: selectedSlugs,
+                                                year: extYear, month: extMonth, dry_run: isDryRun, redo: isRedo,
+                                                started_at: new Date().toISOString()
+                                            };
+                                            setExtJobs(prev => [newJob, ...prev]);
+                                            setActiveJobId(data.job_id);
+                                        }
+                                    } catch { alert('Failed to trigger'); }
+                                    finally { setTriggering(false); }
+                                }}
+                            >
+                                {triggering ? '🔄 Triggering...' : `⚡ Run Extraction (${selectedSlugs.length} AMCs)`}
+                            </button>
+                        </div>
+
+                        {/* Jobs Panel */}
+                        {extJobs.length > 0 && (
+                            <div className="uploader-card" style={{ marginTop: '20px' }}>
+                                <h3>Job History</h3>
+                                {extJobs.map(job => (
+                                    <div key={job.job_id} style={{
+                                        border: '1px solid #333', borderRadius: '8px',
+                                        padding: '12px', marginBottom: '12px'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                            <div>
+                                                <strong>Job #{job.job_id}</strong>
+                                                <span style={{ marginLeft: '10px', fontSize: '0.8rem', color: '#aaa' }}>
+                                                    {job.year}-{String(job.month).padStart(2, '0')} • {job.dry_run ? 'Dry Run' : 'Load Mode'} {job.redo ? '• Redo' : ''}
+                                                </span>
+                                            </div>
+                                            <span style={{
+                                                padding: '3px 10px', borderRadius: '20px', fontSize: '0.8rem',
+                                                background: job.status === 'completed' ? '#16a34a33' : job.status === 'running' ? '#b45309' + '33' : '#6366f133',
+                                                color: job.status === 'completed' ? '#4ade80' : job.status === 'running' ? '#fbbf24' : '#a5b4fc'
+                                            }}>{job.status.toUpperCase()}</span>
+                                        </div>
+
+                                        {/* Progress bar */}
+                                        <div style={{ background: '#1e1e2e', borderRadius: '4px', height: '6px', marginBottom: '8px' }}>
+                                            <div style={{
+                                                background: 'linear-gradient(90deg, #6366f1, #8b5cf6)',
+                                                width: `${job.total > 0 ? (job.done / job.total) * 100 : 0}%`,
+                                                height: '100%', borderRadius: '4px', transition: 'width 0.3s'
+                                            }} />
+                                        </div>
+                                        <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '8px' }}>
+                                            {job.done}/{job.total} AMCs processed
+                                        </div>
+
+                                        {/* Results grid */}
+                                        {Object.keys(job.results).length > 0 && (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                                                {Object.entries(job.results).map(([slug, res]) => (
+                                                    <span key={slug} title={JSON.stringify(res)} style={{
+                                                        padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem',
+                                                        background: res.status === 'error' ? '#7f1d1d55' :
+                                                            (res.rows_inserted > 0 || res.rows_read > 0) ? '#14532d55' : '#1e293b',
+                                                        color: res.status === 'error' ? '#f87171' :
+                                                            (res.rows_inserted > 0 || res.rows_read > 0) ? '#4ade80' : '#94a3b8',
+                                                        border: '1px solid currentColor'
+                                                    }}>
+                                                        {slug} {res.status === 'error' ? '✗' : res.rows_inserted > 0 ? `✓ ${res.rows_inserted}r` : res.rows_read > 0 ? `~ ${res.rows_read}r` : '–'}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

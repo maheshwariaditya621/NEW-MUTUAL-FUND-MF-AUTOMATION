@@ -1,7 +1,9 @@
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, BackgroundTasks, Query, Path
 from psycopg2.extensions import cursor
+from pydantic import BaseModel
 import os
+import uuid
 from datetime import datetime
 import json
 import pandas as pd
@@ -13,6 +15,29 @@ from src.config import logger
 from src.services.admin_file_service import admin_file_service
 
 router = APIRouter()
+
+# ─────────────────────────────────────────────
+# In-memory job store for extraction runs
+# ─────────────────────────────────────────────
+_extraction_jobs: Dict[str, Any] = {}
+
+ALL_AMC_SLUGS = [
+    "abakkus", "absl", "angelone", "axis", "bajaj", "bandhan", "baroda",
+    "boi", "canara", "capitalmind", "choice", "dsp", "edelweiss", "franklin",
+    "groww", "hdfc", "helios", "hsbc", "icici", "invesco", "iti", "jio_br",
+    "jmfinancial", "kotak", "lic", "mahindra", "mirae_asset", "motilal",
+    "navi", "nippon", "nj", "old_bridge", "pgim_india", "ppfas", "quant",
+    "quantum", "samco", "sbi", "shriram", "sundaram", "tata", "taurus",
+    "threesixtyone", "trust", "unifi", "union", "uti", "wealth_company",
+    "whiteoak", "zerodha"
+]
+
+class ExtractionRequest(BaseModel):
+    amc_slugs: List[str]
+    year: int
+    month: int
+    dry_run: bool = True
+    redo: bool = False
 
 @router.get("/pending-merges", response_model=List[PendingMerge], dependencies=[Depends(verify_admin)])
 async def get_pending_merges(cur: cursor = Depends(get_db_cursor)):
@@ -350,3 +375,86 @@ async def bulk_delete_files(
     cur.connection.commit()
 
     return {"status": "success", "message": f"Bulk deleted {deleted_count} {category} file sets for {year}-{month}"}
+
+
+# ─────────────────────────────────────────────────────────
+# Extraction Control Endpoints
+# ─────────────────────────────────────────────────────────
+
+@router.get("/amc-slugs", dependencies=[Depends(verify_admin)])
+async def get_amc_slugs():
+    """Return list of all valid AMC slugs."""
+    return {"slugs": ALL_AMC_SLUGS}
+
+
+@router.post("/trigger-extraction", dependencies=[Depends(verify_admin)])
+async def trigger_extraction(
+    request: ExtractionRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Trigger extract+load for one or more AMCs in the background."""
+    from src.extractors.orchestrator import ExtractionOrchestrator
+
+    job_id = str(uuid.uuid4())[:8].upper()
+    slugs = ALL_AMC_SLUGS if "all" in request.amc_slugs else request.amc_slugs
+
+    _extraction_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "amc_slugs": slugs,
+        "year": request.year,
+        "month": request.month,
+        "dry_run": request.dry_run,
+        "redo": request.redo,
+        "results": {},
+        "started_at": datetime.utcnow().isoformat(),
+        "completed_at": None,
+        "total": len(slugs),
+        "done": 0,
+    }
+
+    def run_extraction():
+        try:
+            orchestrator = ExtractionOrchestrator()
+            _extraction_jobs[job_id]["status"] = "running"
+            for slug in slugs:
+                try:
+                    result = orchestrator.process_amc_month(
+                        amc_slug=slug,
+                        year=request.year,
+                        month=request.month,
+                        dry_run=request.dry_run,
+                        redo=request.redo,
+                    )
+                    _extraction_jobs[job_id]["results"][slug] = result
+                except Exception as e:
+                    _extraction_jobs[job_id]["results"][slug] = {
+                        "status": "error", "error": str(e)[:300]
+                    }
+                _extraction_jobs[job_id]["done"] += 1
+        finally:
+            _extraction_jobs[job_id]["status"] = "completed"
+            _extraction_jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
+
+    background_tasks.add_task(run_extraction)
+    return {"job_id": job_id, "status": "queued", "amc_count": len(slugs)}
+
+
+@router.get("/extraction-jobs", dependencies=[Depends(verify_admin)])
+async def get_extraction_jobs():
+    """List the 20 most recent extraction jobs."""
+    jobs = sorted(
+        _extraction_jobs.values(),
+        key=lambda x: x["started_at"],
+        reverse=True
+    )[:20]
+    return jobs
+
+
+@router.get("/extraction-jobs/{job_id}", dependencies=[Depends(verify_admin)])
+async def get_extraction_job(job_id: str):
+    """Get status of a specific extraction job."""
+    job = _extraction_jobs.get(job_id.upper())
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job

@@ -17,3 +17,11 @@ apscheduler
 beautifulsoup4
 sqlalchemy
 xlrd
+rapidfuzz
+pyotp
+yfinance
+smartapi-python
+urllib3
+logzero
+websocket-client
+python-multipart
