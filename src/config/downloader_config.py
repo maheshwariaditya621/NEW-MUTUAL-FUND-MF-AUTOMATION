@@ -24,5 +24,9 @@ MAX_RETRIES = 3
 # Backoff delays in seconds for each retry
 RETRY_BACKOFF = [5, 15, 30]  # Retry 1: 5s, Retry 2: 15s, Retry 3: 30s
 
+import sys
+
 # Browser Headless mode
-HEADLESS = False
+# - Linux/Mac (servers): must be True — no display available
+# - Windows (local dev): False allows seeing the browser for debugging
+HEADLESS = sys.platform != "win32"
