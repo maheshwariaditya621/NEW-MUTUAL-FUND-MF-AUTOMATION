@@ -202,7 +202,6 @@ class HDFCDownloader(BaseDownloader):
             logger.info("MODE: DRY RUN (no network calls)")
         logger.info("=" * 60)
 
-        fy = self._financial_year(year, month)
         target_dir = Path(self.get_target_folder("hdfc", year, month))
         
         # Check for incomplete month (folder exists but no _SUCCESS.json)
@@ -243,11 +242,10 @@ class HDFCDownloader(BaseDownloader):
         self.ensure_directory(str(target_dir))
 
         # API payload: MUST include all three fields
-        # HDFC API uses the FINANCIAL YEAR (starting year convention):
-        #   Apr-Dec: fy = calendar year  (e.g. Nov 2025 → fy=2025 → FY 2025-26)
-        #   Jan-Mar: fy = calendar year - 1  (e.g. Jan 2026 → fy=2025 → FY 2025-26)
+        # CONFIRMED: HDFC API uses CALENDAR YEAR directly.
+        # Tested: year=2026,month=1 -> Jan 2026 files; year=2025,month=1 -> Jan 2025 files.
         data = {
-            "year": fy,
+            "year": year,
             "type": "monthly",
             "month": month
         }
@@ -260,7 +258,7 @@ class HDFCDownloader(BaseDownloader):
             "User-Agent": "Mozilla/5.0",
         }
 
-        logger.info(f"Calling HDFC API (FY={fy}, month={month})")
+        logger.info(f"Calling HDFC API (year={year}, month={month})")
 
         # DRY RUN MODE
         if DRY_RUN:
@@ -351,24 +349,11 @@ class HDFCDownloader(BaseDownloader):
                 
                 # VALIDATION: Check if filename contains requested year and month name
                 # HDFC filenames follow pattern: "... - 31 March 2025.xlsx"
-                # If the filename doesn't match, the API is returning a fallback (old data)
-                # because the requested month hasn't been published yet.
+                # Some API responses include a few stale files mixed in — skip those.
                 month_name = self.MONTH_NAMES[month]
                 if str(year) not in name or month_name not in name:
-                    logger.warning(f"HDFC API returned data for a different period: {name}")
-                    logger.warning(f"Requested {month_name} {year} — data not yet published (API fallback detected)")
-                    if target_dir.exists():
-                        shutil.rmtree(target_dir)
-                    self.notifier.notify_not_published(amc="HDFC", year=year, month=month)
-                    return {
-                        "amc": "HDFC Mutual Fund",
-                        "year": year,
-                        "month": month,
-                        "files_downloaded": 0,
-                        "files": [],
-                        "status": "not_published",
-                        "reason": f"{month_name} {year} not yet published (API returned {name})"
-                    }
+                    logger.warning(f"Skipping stale file (wrong period): {name}")
+                    continue
 
                 path = target_dir / name
 
@@ -384,6 +369,22 @@ class HDFCDownloader(BaseDownloader):
 
                 saved_files.append(str(path))
                 logger.success(f"Saved: {path.name}")
+
+            # If all files were stale (wrong period), data is not yet published
+            if not saved_files:
+                logger.warning(f"All {len(files)} API files were stale. {self.MONTH_NAMES[month]} {year} not yet published.")
+                if target_dir.exists():
+                    shutil.rmtree(target_dir)
+                self.notifier.notify_not_published(amc="HDFC", year=year, month=month)
+                return {
+                    "amc": "HDFC Mutual Fund",
+                    "year": year,
+                    "month": month,
+                    "files_downloaded": 0,
+                    "files": [],
+                    "status": "not_published",
+                    "reason": f"{self.MONTH_NAMES[month]} {year} not yet published (all API files were from a different period)"
+                }
 
             # File count sanity check (logging only)
             self._check_file_count(len(saved_files), year, month)
