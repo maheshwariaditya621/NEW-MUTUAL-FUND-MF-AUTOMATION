@@ -202,7 +202,6 @@ class HDFCDownloader(BaseDownloader):
             logger.info("MODE: DRY RUN (no network calls)")
         logger.info("=" * 60)
 
-        fy = self._financial_year(year, month)
         target_dir = Path(self.get_target_folder("hdfc", year, month))
         
         # Check for incomplete month (folder exists but no _SUCCESS.json)
@@ -243,8 +242,9 @@ class HDFCDownloader(BaseDownloader):
         self.ensure_directory(str(target_dir))
 
         # API payload: MUST include all three fields
+        # NOTE: HDFC API uses the calendar year, NOT financial year
         data = {
-            "year": fy,
+            "year": year,
             "type": "monthly",
             "month": month
         }
@@ -257,7 +257,7 @@ class HDFCDownloader(BaseDownloader):
             "User-Agent": "Mozilla/5.0",
         }
 
-        logger.info(f"Calling HDFC API (FY={fy}, month={month})")
+        logger.info(f"Calling HDFC API (year={year}, month={month})")
 
         # DRY RUN MODE
         if DRY_RUN:
