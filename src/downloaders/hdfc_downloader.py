@@ -346,10 +346,11 @@ class HDFCDownloader(BaseDownloader):
                 url = file_obj["url"]
                 name = file_obj["filename"]
                 
-                # VALIDATION: Check if filename contains requested year
+                # VALIDATION: Check if filename contains requested year and month name
                 # HDFC filenames follow pattern: "... - 31 March 2025.xlsx"
-                if str(year) not in name:
-                    logger.error(f"CORRUPT DATA: Requested {year} but API returned {name}")
+                month_name = self.MONTH_NAMES[month]
+                if str(year) not in name or month_name not in name:
+                    logger.error(f"CORRUPT DATA: Requested {month_name} {year} but API returned {name}")
                     if target_dir.exists():
                         shutil.rmtree(target_dir)
                     return {

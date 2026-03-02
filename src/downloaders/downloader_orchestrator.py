@@ -84,6 +84,7 @@ class PipelineOrchestrator:
                     results["steps"]["download"] = {"status": "failed", "reason": f"Subprocess error: {error_out[:200]}"}
                     results["status"] = "failed"
                     self.notifier.notify_error(amc_slug.upper(), year, month, "Download Error", f"Subprocess exit {process.returncode}")
+                    return results
                 else:
                     # Parse the last line of output which should be the JSON result
                     try:
