@@ -401,13 +401,13 @@ async def trigger_pipeline(
     slugs = ALL_AMC_SLUGS if "all" in request.amc_slugs else request.amc_slugs
 
     # PREVENT FUTURE DATA RUNS
-    # Data is only available after the month ends.
+    # Data is only available after the month ends — block current and future months.
     now = datetime.now()
-    if request.year > now.year or (request.year == now.year and request.month >= now.month):
+    if (request.year, request.month) >= (now.year, now.month):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot trigger pipeline for {request.year}-{request.month:02d}. "
-                   f"Data is only available for past months."
+                   f"Data is only available for completed past months (before {now.year}-{now.month:02d})."
         )
 
     _extraction_jobs[job_id] = {
