@@ -345,6 +345,21 @@ class HDFCDownloader(BaseDownloader):
                 
                 url = file_obj["url"]
                 name = file_obj["filename"]
+                
+                # VALIDATION: Check if filename contains requested year
+                # HDFC filenames follow pattern: "... - 31 March 2025.xlsx"
+                if str(year) not in name:
+                    logger.error(f"CORRUPT DATA: Requested {year} but API returned {name}")
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir)
+                    return {
+                        "amc": "HDFC Mutual Fund",
+                        "year": year,
+                        "month": month,
+                        "status": "failed",
+                        "reason": f"AMC API returned data for wrong period: {name}"
+                    }
+
                 path = target_dir / name
 
                 logger.info(f"Downloading {i}/{len(files)}: {name}")

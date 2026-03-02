@@ -399,6 +399,16 @@ async def trigger_pipeline(
     job_id = str(uuid.uuid4())[:8].upper()
     slugs = ALL_AMC_SLUGS if "all" in request.amc_slugs else request.amc_slugs
 
+    # PREVENT FUTURE DATA RUNS
+    # Data is only available after the month ends.
+    now = datetime.now()
+    if request.year > now.year or (request.year == now.year and request.month >= now.month):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot trigger pipeline for {request.year}-{request.month:02d}. "
+                   f"Data is only available for past months."
+        )
+
     _extraction_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",

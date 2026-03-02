@@ -41,6 +41,13 @@ const AdminVault = () => {
 
     const API_BASE = '/api/v1/admin';
 
+    const isFutureDate = useMemo(() => {
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth() + 1;
+        return extYear > currentYear || (extYear === currentYear && extMonth >= currentMonth);
+    }, [extYear, extMonth]);
+
     const handleLogin = (e) => {
         e.preventDefault();
         // We'll verify by trying to fetch stats
@@ -552,10 +559,24 @@ const AdminVault = () => {
                             </div>
 
                             {/* Trigger Button */}
+                            {isFutureDate && (
+                                <div style={{
+                                    marginTop: '16px', padding: '10px', background: 'rgba(239,68,68,0.1)',
+                                    border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', color: '#fca5a5',
+                                    fontSize: '0.85rem'
+                                }}>
+                                    ⚠️ Cannot run pipeline for the current or future month. Data is only available for past months.
+                                </div>
+                            )}
                             <button
                                 className="btn-approve"
-                                disabled={triggering || selectedSlugs.length === 0 || selectedSteps.length === 0}
-                                style={{ marginTop: '16px', padding: '12px 28px', fontSize: '1rem', background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}
+                                disabled={triggering || selectedSlugs.length === 0 || selectedSteps.length === 0 || isFutureDate}
+                                style={{
+                                    marginTop: '16px', padding: '12px 28px', fontSize: '1rem',
+                                    background: isFutureDate ? '#333' : 'linear-gradient(135deg, #6366f1, #a855f7)',
+                                    cursor: isFutureDate ? 'not-allowed' : 'pointer',
+                                    opacity: isFutureDate ? 0.6 : 1
+                                }}
                                 onClick={async () => {
                                     setTriggering(true);
                                     try {
