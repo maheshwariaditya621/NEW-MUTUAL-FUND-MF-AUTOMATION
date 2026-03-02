@@ -16,3 +16,4 @@ pytest
 apscheduler
 beautifulsoup4
 sqlalchemy
+xlrd

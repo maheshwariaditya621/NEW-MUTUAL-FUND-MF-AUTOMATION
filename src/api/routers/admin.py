@@ -10,6 +10,7 @@ import io
 from src.api.models.admin import PendingMerge, NotificationLog, AdminStats
 from src.api.dependencies import get_db_cursor, verify_admin
 from src.config import logger
+from src.services.admin_file_service import admin_file_service
 
 router = APIRouter()
 
@@ -283,4 +284,69 @@ async def trigger_shares_sync(background_tasks: BackgroundTasks):
     except Exception as e:
         logger.error(f"Error pushing shares sync: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to sync shares: {str(e)}")
+@router.get("/files/inventory", dependencies=[Depends(verify_admin)])
+async def get_file_inventory(cur: cursor = Depends(get_db_cursor)):
+    """List all raw and merged files with their DB status."""
+    try:
+        inventory = admin_file_service.get_inventory(cur)
+        stats = admin_file_service.get_storage_stats()
+        return {
+            "status": "success",
+            "inventory": inventory,
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error getting file inventory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/files", dependencies=[Depends(verify_admin)])
+async def delete_file(
+    amc_slug: str = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    category: str = Query(..., regex="^(raw|merged)$"),
+    cur: cursor = Depends(get_db_cursor)
+):
+    """Delete a specific raw data folder or merged Excel file."""
+    success = admin_file_service.delete_files(amc_slug, year, month, category)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"File/folder not found for {amc_slug} {year}-{month} ({category})")
+    
+    # Log the action
+    cur.execute("""
+        INSERT INTO notification_logs (level, category, content)
+        VALUES ('WARNING', 'FILE_MANAGEMENT', %s)
+    """, (f"Admin manually DELETED {category} files for {amc_slug} period {year}-{month}",))
+    cur.connection.commit()
+    
+    return {"status": "success", "message": f"Successfully deleted {category} for {amc_slug} {year}-{month}"}
+
+@router.delete("/files/bulk", dependencies=[Depends(verify_admin)])
+async def bulk_delete_files(
+    year: int = Query(...),
+    month: int = Query(...),
+    category: str = Query(..., regex="^(raw|merged)$"),
+    cur: cursor = Depends(get_db_cursor)
+):
+    """Delete ALL files for a specific month/year across all AMCs."""
+    inventory = admin_file_service.get_inventory(cur)
+    deleted_count = 0
+    
+    for item in inventory:
+        if item['year'] == year and item['month'] == month:
+            # Check if requested category is present
+            if (category == 'raw' and item['raw_present']) or (category == 'merged' and item['merged_present']):
+                if admin_file_service.delete_files(item['amc_slug'], year, month, category):
+                    deleted_count += 1
+    
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"No {category} files found for period {year}-{month} to delete.")
+
+    # Log the action
+    cur.execute("""
+        INSERT INTO notification_logs (level, category, content)
+        VALUES ('CRITICAL', 'FILE_MANAGEMENT', %s)
+    """, (f"Admin triggered BULK DELETE of {category} files for period {year}-{month}. Total deleted: {deleted_count}",))
+    cur.connection.commit()
+
+    return {"status": "success", "message": f"Bulk deleted {deleted_count} {category} file sets for {year}-{month}"}

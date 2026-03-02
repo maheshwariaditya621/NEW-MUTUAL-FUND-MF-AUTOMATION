@@ -3,6 +3,7 @@ import glob
 import re
 import shutil
 import zipfile
+import subprocess
 from copy import copy
 from pathlib import Path
 from typing import List, Optional
@@ -43,9 +44,6 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
     if "Sheet" in master_wb.sheetnames:
         master_wb.remove(master_wb["Sheet"])
     
-    # ... rest of openpyxl logic ...
-
-
     for idx, file_path in enumerate(files):
         # Decode filename to handle %20 and other URL-encoded characters
         file_name = unquote(os.path.basename(file_path))
@@ -64,8 +62,6 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
 
             for src_ws in worksheets:
                 # --- Naming Logic ---
-                # Case A: Single sheet file -> Use Filename (Preserves backward compatibility)
-                # Case B: Multi sheet file -> Use Filename + Sheet Title (Preserves context e.g. "HDFC Arbitrage" + "Portfolio")
                 if len(worksheets) == 1:
                     base_raw_name = file_name.rsplit('.', 1)[0]
                 else:
@@ -78,7 +74,6 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
                 sheet_name = base_raw_name.replace("_", " ").replace("-", " ").strip()
                 
                 # Keywords to strip
-                # Added day numbers (01-31) and "Disclosure"
                 days = [str(i).zfill(2) for i in range(1, 40)] + [str(i) for i in range(1, 40)]
                 strip_keywords = [
                     'ICICI', 'Prudential', 'HDFC', 'SBI', 'Axis', 'Nippon', 'India', 'Tata', 'Quant', 
@@ -95,7 +90,6 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
                 sheet_name = re.sub(pattern, '', sheet_name, flags=re.IGNORECASE)
                 
                 # 3. Strip hex-like strings (4+ chars) but PROTECT years (4 digits)
-                # (Years are already stripped above, so this is safe for hex)
                 sheet_name = re.sub(r'\b[0-9a-f]{4,}\b', '', sheet_name, flags=re.IGNORECASE)
                 
                 # 4. Final Cleanup: Resize multiple spaces to single
@@ -121,13 +115,7 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
                 
                 dest_ws = master_wb.create_sheet(title=sheet_name)
 
-                # --- Style Cache (Per Sheet) ---
-                style_cache = {}
-
-                # Optimization: Read-only mode iter_rows is faster
-                # We skip style copying for empty cells to save time
-                
-                # Define dimensions (may be None in read_only mode)
+                # In read_only mode, we can't always trust max_row, so we rely more on the loop
                 max_r = src_ws.max_row
                 max_c = src_ws.max_column
                 
@@ -135,7 +123,6 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
                 consecutive_empty_rows = 0
                 MAX_EMPTY_ROWS = 50  # Stop after 50 empty rows AFTER data starts
                 
-                # In read_only mode, we can't always trust max_row, so we rely more on the loop
                 for r_idx, row in enumerate(src_ws.iter_rows(max_row=max_r, max_col=max_c), 1):
                     # Check if row is empty
                     is_empty_row = all(cell.value is None for cell in row)
@@ -163,16 +150,8 @@ def merge_project_excels_openpyxl(folder_path: Path, output_filename: Path) -> O
                         
                         dest_cell = dest_ws.cell(row=r_idx, column=c_idx, value=val)
                         
-                        # Basic style copying - copying objects is expensive
-                        # Only copy if strictly necessary. For now, let's copy values primarily
-                        # to ensure the merge completes. The user prioritized success over perfect style.
                         if src_cell.has_style:
                             dest_cell.number_format = src_cell.number_format
-                            
-                            # Caching improvement:
-                            # Instead of deep copying everything, we can try assigning the style object directly?
-                            # No, styles are immutable but can be shared.
-                            # Let's limit the heavy copying.
                             if r_idx < 20: # Conserve headers/top rows style
                                 dest_cell.font = copy(src_cell.font)
                                 dest_cell.border = copy(src_cell.border)
@@ -220,7 +199,6 @@ def merge_project_excels_com(folder_path: Path, output_filename: Path) -> Option
 
     logger.info(f"Starting High-Fidelity COM Merge in: {folder_path}")
     
-    # 0. Extraction and Conversion (same as openpyxl version)
     _prepare_raw_folder(folder_path)
 
     files = [f for f in glob.glob(str(folder_path / "*.xlsx")) if not os.path.basename(f).startswith("~$")]
@@ -252,12 +230,10 @@ def merge_project_excels_com(folder_path: Path, output_filename: Path) -> Option
         while master_wb.Sheets.Count > 1:
             master_wb.Sheets(1).Delete()
         
-        # We need at least one sheet to start, we'll delete it later
         dummy_sheet = master_wb.Sheets(1)
         dummy_sheet.Name = "TEMP_INITIAL_SHEET"
 
         for idx, file_path in enumerate(files):
-            # Decode filename to handle %20 and other URL-encoded characters
             file_name = unquote(os.path.basename(file_path))
             if file_name == output_filename.name:
                 continue
@@ -266,31 +242,19 @@ def merge_project_excels_com(folder_path: Path, output_filename: Path) -> Option
             abs_path = str(Path(file_path).resolve())
             
             try:
-                # Open in current instance
                 src_wb = excel.Workbooks.Open(abs_path, ReadOnly=True, UpdateLinks=False)
                 
-                logger.info(f"    Source file has {src_wb.Sheets.Count} sheets.")
-                
-                # Maintain sequence: Copy sheet AFTER the last sheet of master
                 for s_idx in range(1, src_wb.Sheets.Count + 1):
                     src_sheet = src_wb.Sheets(s_idx)
-                    logger.debug(f"      Copying sheet [{s_idx}/{src_wb.Sheets.Count}]: {src_sheet.Name}")
-                    
                     clean_name = _get_clean_sheet_name(file_name, src_sheet.Name, [s.Name for s in master_wb.Sheets])
                     
-                    # Positional arguments: Copy(Before, After)
-                    # To copy After, we pass None for Before
                     target_after = master_wb.Sheets(master_wb.Sheets.Count)
                     src_sheet.Copy(None, target_after)
                     
-                    # The copied sheet becomes the last sheet
                     new_sheet = master_wb.Sheets(master_wb.Sheets.Count)
                     try:
                         new_sheet.Name = clean_name
-                        logger.debug(f"      Renamed to: {clean_name}")
-                    except Exception as e:
-                        logger.warning(f"      Rename failed for {clean_name}: {e}")
-                        # Filter out invalid chars manually if cleanup failed
+                    except:
                         safe_name = re.sub(r'[*?:\/\[\]]', '', clean_name)[:31]
                         try:
                             new_sheet.Name = safe_name
@@ -310,7 +274,6 @@ def merge_project_excels_com(folder_path: Path, output_filename: Path) -> Option
 
         output_filename.parent.mkdir(parents=True, exist_ok=True)
         abs_output = str(output_filename.resolve())
-        # FileFormat 51 = .xlsx
         master_wb.SaveAs(abs_output, FileFormat=51)
         master_wb.Close()
         
@@ -341,109 +304,149 @@ def _prepare_raw_folder(folder_path: Path, excel_app=None):
                     logger.info(f"Extracting Excel files from {zip_path.name}...")
                     for f in excel_files_in_zip: zip_ref.extract(f, folder_path)
         except Exception as e: logger.error(f"ZIP error: {e}")
+    
+    _convert_xls_to_xlsx(folder_path, excel_app)
 
-    # 0.1 Pre-processing: Convert .xls to .xlsx
+def is_soffice_available() -> bool:
+    """Checks if LibreOffice 'soffice' command is available in the system path."""
+    return shutil.which('soffice') is not None
+
+def convert_xls_to_xlsx_soffice(xls_path: Path, xlsx_path: Path) -> bool:
+    """
+    Converts .xls to .xlsx using LibreOffice (soffice) headless command.
+    High-fidelity solution for Linux/macOS.
+    """
+    try:
+        out_dir = str(xlsx_path.parent.resolve())
+        cmd = [
+            'soffice', 
+            '--headless', 
+            '--convert-to', 'xlsx', 
+            '--outdir', out_dir, 
+            str(xls_path.resolve())
+        ]
+        logger.info(f"Running LibreOffice conversion: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0:
+            expected_auto_name = xls_path.with_suffix('.xlsx')
+            if expected_auto_name.exists() and expected_auto_name != xlsx_path:
+                shutil.move(str(expected_auto_name), str(xlsx_path))
+            return xlsx_path.exists()
+        else:
+            logger.error(f"Soffice conversion failed: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"Soffice error: {e}")
+        return False
+
+def _convert_xls_to_xlsx(folder_path: Path, excel_app=None):
+    """Internal logic to convert all .xls files in a folder to .xlsx."""
     xls_files = glob.glob(str(folder_path / "*.xls"))
-    if xls_files:
-        try:
-            import pandas as pd
-            for xls_path_str in xls_files:
-                xls_path = Path(xls_path_str)
-                if xls_path.suffix.lower() != ".xls": continue
-                xlsx_path = xls_path.with_suffix(".xlsx")
-                if xlsx_path.exists() and xlsx_path.stat().st_mtime > xls_path.stat().st_mtime: continue
-                
-                logger.info(f"Converting {xls_path.name} -> .xlsx")
-                conversion_success = False
+    if not xls_files:
+        return
 
-                # Magic byte check
-                try:
-                    with open(xls_path, 'rb') as f:
-                        if f.read(2) == b'PK':
-                            shutil.copy(xls_path, xlsx_path)
-                            conversion_success = True
-                except: pass
+    try:
+        for xls_path_str in xls_files:
+            xls_path = Path(xls_path_str)
+            if xls_path.suffix.lower() != ".xls": 
+                continue
+            
+            xlsx_path = xls_path.with_suffix(".xlsx")
+            if xlsx_path.exists() and xlsx_path.stat().st_mtime > xls_path.stat().st_mtime: 
+                continue
+            
+            logger.info(f"Converting {xls_path.name} -> .xlsx")
+            conversion_success = False
 
-                if not conversion_success:
-                    # COM Conversion - reuse excel_app if provided
-                    try:
-                        import win32com.client
-                        import pythoncom
-                        abs_xls, abs_xlsx = str(xls_path.resolve()), str(xlsx_path.resolve())
-                        
-                        managed_excel = False
-                        if excel_app is None:
-                            pythoncom.CoInitialize()
-                            excel = win32com.client.Dispatch("Excel.Application")
-                            excel.Visible = False
-                            excel.DisplayAlerts = False
-                            managed_excel = True
-                        else:
-                            excel = excel_app
-                        
-                        try:
-                            wb = excel.Workbooks.Open(abs_xls, UpdateLinks=0)
-                            # FileFormat 51 = .xlsx
-                            wb.SaveAs(abs_xlsx, FileFormat=51)
-                            wb.Close()
-                            conversion_success = True
-                        finally:
-                            if managed_excel:
-                                excel.Quit()
-                                pythoncom.CoUninitialize()
-                    except Exception as e:
-                        logger.debug(f"  COM Conversion error: {e}")
-
-                if not conversion_success:
-                    # xlrd -> openpyxl fallback (preserve all sheets explicitly)
-                    try:
-                        import xlrd
-                        src_book = xlrd.open_workbook(str(xls_path), formatting_info=False)
-                        out_wb = Workbook()
-                        if "Sheet" in out_wb.sheetnames:
-                            out_wb.remove(out_wb["Sheet"])
-
-                        for i in range(src_book.nsheets):
-                            src_ws = src_book.sheet_by_index(i)
-                            safe_name = re.sub(r'[\\/*?:\[\]]', '', (src_ws.name or f"Sheet{i+1}")).strip()[:31]
-                            if not safe_name:
-                                safe_name = f"Sheet{i+1}"
-                            if safe_name in out_wb.sheetnames:
-                                base = safe_name[:28]
-                                suffix = 1
-                                while f"{base}_{suffix}" in out_wb.sheetnames:
-                                    suffix += 1
-                                safe_name = f"{base}_{suffix}"
-
-                            out_ws = out_wb.create_sheet(title=safe_name)
-                            for r in range(src_ws.nrows):
-                                row_vals = src_ws.row_values(r)
-                                for c, val in enumerate(row_vals, start=1):
-                                    write_val = val
-                                    if isinstance(write_val, str):
-                                        write_val = ILLEGAL_CHARACTERS_RE.sub('', write_val)
-                                        if write_val.startswith("="):
-                                            write_val = "'" + write_val
-                                    out_ws.cell(row=r + 1, column=c, value=write_val)
-
-                        out_wb.save(str(xlsx_path))
+            # 1. Magic byte check
+            try:
+                with open(xls_path, 'rb') as f:
+                    if f.read(2) == b'PK':
+                        shutil.copy(xls_path, xlsx_path)
                         conversion_success = True
-                    except Exception as e:
-                        logger.exception(f"  xlrd conversion fallback failed for {xls_path.name}: {e}")
+            except: pass
 
-                if not conversion_success:
-                    logger.error(f"Failed to convert {xls_path.name} to .xlsx; source may require COM conversion.")
-        except Exception as e: logger.error(f"XLS Conversion error: {e}")
+            # 2. Windows COM Conversion
+            if not conversion_success and os.name == 'nt':
+                try:
+                    import win32com.client
+                    import pythoncom
+                    abs_xls, abs_xlsx = str(xls_path.resolve()), str(xlsx_path.resolve())
+                    
+                    managed_excel = False
+                    if excel_app is None:
+                        pythoncom.CoInitialize()
+                        excel = win32com.client.Dispatch("Excel.Application")
+                        excel.Visible = False
+                        excel.DisplayAlerts = False
+                        managed_excel = True
+                    else:
+                        excel = excel_app
+                    
+                    try:
+                        wb = excel.Workbooks.Open(abs_xls, UpdateLinks=0)
+                        wb.SaveAs(abs_xlsx, FileFormat=51)
+                        wb.Close()
+                        conversion_success = True
+                    finally:
+                        if managed_excel:
+                            excel.Quit()
+                            pythoncom.CoUninitialize()
+                except Exception as e:
+                    logger.debug(f"  COM Conversion error: {e}")
+
+            # 3. Linux/macOS LibreOffice Conversion (High Fidelity)
+            if not conversion_success and os.name != 'nt' and is_soffice_available():
+                conversion_success = convert_xls_to_xlsx_soffice(xls_path, xlsx_path)
+
+            # 4. Pure Python Fallback (xlrd -> openpyxl)
+            if not conversion_success:
+                try:
+                    import xlrd
+                    src_book = xlrd.open_workbook(str(xls_path), formatting_info=False)
+                    out_wb = Workbook()
+                    if "Sheet" in out_wb.sheetnames:
+                        out_wb.remove(out_wb["Sheet"])
+
+                    for i in range(src_book.nsheets):
+                        src_ws = src_book.sheet_by_index(i)
+                        safe_name = re.sub(r'[\\/*?:\[\]]', '', (src_ws.name or f"Sheet{i+1}")).strip()[:31]
+                        if not safe_name:
+                            safe_name = f"Sheet{i+1}"
+                        if safe_name in out_wb.sheetnames:
+                            base = safe_name[:28]
+                            suffix = 1
+                            while f"{base}_{suffix}" in out_wb.sheetnames:
+                                suffix += 1
+                            safe_name = f"{base}_{suffix}"
+
+                        out_ws = out_wb.create_sheet(title=safe_name)
+                        for r in range(src_ws.nrows):
+                            row_vals = src_ws.row_values(r)
+                            for c, val in enumerate(row_vals, start=1):
+                                write_val = val
+                                if isinstance(write_val, str):
+                                    write_val = ILLEGAL_CHARACTERS_RE.sub('', write_val)
+                                    if write_val.startswith("="):
+                                        write_val = "'" + write_val
+                                out_ws.cell(row=r + 1, column=c, value=write_val)
+
+                    out_wb.save(str(xlsx_path))
+                    conversion_success = True
+                except Exception as e:
+                    logger.exception(f"  xlrd conversion fallback failed for {xls_path.name}: {e}")
+
+            if not conversion_success:
+                logger.error(f"Failed to convert {xls_path.name} to .xlsx; source may require COM or LibreOffice conversion.")
+
+    except Exception as e: 
+        logger.error(f"XLS Conversion error: {e}")
 
 def _get_clean_sheet_name(file_name: str, sheet_title: str, existing_names: List[str]) -> str:
     """Refactored sheet name cleaning logic."""
-    # Decode filename to handle %20 and other URL-encoded characters
     decoded_file_name = unquote(file_name)
-    
-    # Combine filename and sheet title context
     base_raw_name = f"{decoded_file_name.rsplit('.', 1)[0]} {sheet_title}"
-    
-    # Cleaning
     sheet_name = base_raw_name.replace("_", " ").replace("-", " ").strip()
     
     days = [str(i).zfill(2) for i in range(1, 40)] + [str(i) for i in range(1, 40)]
@@ -489,11 +492,6 @@ def consolidate_amc_downloads(amc_slug: str, year: int, month: int) -> Optional[
     """
     Helper to consolidate all downloads for a specific AMC and period.
     Standardizes output to data/output/merged excels/{amc_slug}/{year}/
-    
-    SMART LOGIC:
-    - If consolidated file doesn't exist -> CREATE
-    - If consolidated file exists but raw files are NEWER -> UPDATE
-    - If consolidated file exists and is NEWER than raw files -> SKIP
     """
     raw_folder = Path(f"data/raw/{amc_slug}/{year}_{month:02d}")
     if not raw_folder.exists():
@@ -503,52 +501,32 @@ def consolidate_amc_downloads(amc_slug: str, year: int, month: int) -> Optional[
     output_folder = Path(f"data/output/merged excels/{amc_slug}/{year}")
     output_filename = output_folder / f"CONSOLIDATED_{amc_slug.upper()}_{year}_{month:02d}.xlsx"
     
-    # Check if we should skip
     if output_filename.exists():
         try:
             output_mtime = output_filename.stat().st_mtime
-            
-            # Get max mtime of raw files
             raw_files = list(raw_folder.glob("*.xls*"))
             if raw_files:
                 latest_raw_mtime = max(f.stat().st_mtime for f in raw_files)
-                
-                # If output is newer than all raw files, we can skip
                 if output_mtime > latest_raw_mtime:
                     logger.info(f"Consolidated file is up to date: {output_filename}")
-                    
-                    # Notify success (skipped)
                     notifier = get_notifier()
                     notifier.notify_merge_success(
-                        amc=amc_slug.upper(), 
-                        year=year, 
-                        month=month, 
-                        output_file=str(output_filename)
+                        amc=amc_slug.upper(), year=year, month=month, output_file=str(output_filename)
                     )
                     return output_filename
-                else:
-                    logger.info(f"New raw files detected. Updating consolidated file...")
         except Exception as e:
             logger.warning(f"Error checking timestamps, forcing update: {e}")
     
     result = merge_project_excels(raw_folder, output_filename)
     
-    # Telegram Notification
     notifier = get_notifier()
     if result:
         notifier.notify_merge_success(
-            amc=amc_slug.upper(), 
-            year=year, 
-            month=month, 
-            output_file=str(result)
+            amc=amc_slug.upper(), year=year, month=month, output_file=str(result)
         )
     else:
         notifier.notify_merge_error(
-            amc=amc_slug.upper(), 
-            year=year, 
-            month=month, 
-            error="Merging failed or no valid sheets found"
+            amc=amc_slug.upper(), year=year, month=month, error="Merging failed or no valid sheets found"
         )
             
     return result
-
