@@ -179,6 +179,41 @@ class MotilalDownloader(BaseDownloader):
             time.sleep(3)
             logger.info("  ✓ Page loaded")
 
+            # Close any popup/ad that may appear (e.g. NFO video popup)
+            logger.info("Checking for popups/ads...")
+            try:
+                # Try pressing Escape first (closes most modals)
+                page.keyboard.press("Escape")
+                time.sleep(1)
+                
+                # Try common close button selectors
+                close_selectors = [
+                    "button.close",
+                    "[class*='close']",
+                    "[class*='modal'] [aria-label='Close']",
+                    "[class*='popup'] button",
+                    "button[aria-label='close']",
+                    ".modal-close",
+                    "[data-dismiss='modal']",
+                ]
+                for sel in close_selectors:
+                    try:
+                        btn = page.locator(sel).first
+                        if btn.is_visible(timeout=1000):
+                            btn.click()
+                            logger.info(f"  ✓ Closed popup via selector: {sel}")
+                            time.sleep(1)
+                            break
+                    except Exception:
+                        continue
+                        
+                # Last resort: click outside the modal/popup
+                page.mouse.click(50, 50)
+                time.sleep(1)
+                logger.info("  ✓ Popup handling done")
+            except Exception as e:
+                logger.debug(f"Popup handling skipped: {e}")
+
             # Select Year
             logger.info(f"Selecting year: {selection_year}...")
             page.locator(".css-19bb58m").first.click()
@@ -196,12 +231,43 @@ class MotilalDownloader(BaseDownloader):
             logger.info(f"  ✓ Month {selection_month_name} selected")
 
             # Click document icon for Scheme Portfolio
+            # IMPORTANT: Use a precise row-level locator to avoid hitting the Fortnightly Report
+            # Strategy: find list item rows (li or tr or card-level div) that EXACTLY match
+            #   "Scheme Portfolio Details" + month_name. We look for the narrowest container.
             logger.info("Locating Scheme Portfolio document icon...")
-            # Find the card that specifically mentions 'Scheme Portfolio Details' to avoid 'Fortnightly'
-            card = page.locator("div").filter(has_text="Scheme Portfolio Details").filter(has_text=month_name).first
             
-            # Click the XLS icon within that card
-            card.locator("img[src*='xls']").first.click()
+            # Method: find all elements that contain both phrases, pick the one with shortest text (most specific)
+            scheme_text = f"Scheme Portfolio Details {month_name}"
+            
+            # First try: locator matching inner text that ends with the scheme text (most precise)
+            row = page.locator(f"text=Scheme Portfolio Details {month_name} {str(selection_year)}").first
+            try:
+                row.wait_for(timeout=5000)
+                # Find the ancestor list item or card wrapper
+                card = row.locator("xpath=ancestor::*[self::li or self::tr or self::div][1]")
+                card.locator("img[src*='xls']").first.click()
+                logger.info("  ✓ XLS icon clicked via text-exact match")
+            except Exception:
+                # Fallback: iterate all matching rows and pick the one whose text exactly contains
+                # 'Scheme Portfolio Details' but NOT 'Fortnightly'
+                logger.info("  Falling back to filtered row search...")
+                all_rows = page.locator("div").all()
+                clicked = False
+                for row in all_rows:
+                    try:
+                        txt = row.inner_text(timeout=500).strip()
+                        if f"Scheme Portfolio Details" in txt and month_name in txt and "Fortnightly" not in txt:
+                            xls_icon = row.locator("img[src*='xls']")
+                            if xls_icon.count() > 0:
+                                xls_icon.first.click()
+                                logger.info(f"  ✓ XLS clicked in row: {txt[:80]}")
+                                clicked = True
+                                break
+                    except Exception:
+                        continue
+                if not clicked:
+                    raise Exception(f"Could not locate 'Scheme Portfolio Details {month_name}' row")
+            
             time.sleep(2)
             logger.info("  ✓ XLS icon clicked, waiting for popup")
 
