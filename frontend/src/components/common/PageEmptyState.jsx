@@ -143,9 +143,6 @@ const PageEmptyState = ({
                             autoComplete="off"
                         />
                         {loading && <Loader2 className="pes-search-loader spin" size={16} />}
-                        <button onClick={handleSubmit} className="pes-search-btn">
-                            Search
-                        </button>
                     </div>
 
                     {showDropdown && (inputValue.length >= 2) && (

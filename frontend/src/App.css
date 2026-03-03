@@ -123,13 +123,28 @@
 .app-footer {
   background-color: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
-  padding: 24px 0;
+  padding: 24px 0 16px;
   margin-top: auto;
 }
 
 .app-footer p {
   margin: 0;
   font-size: 14px;
+}
+
+.footer-disclaimer {
+  margin-top: 16px !important;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px !important;
+  color: var(--text-tertiary);
+  line-height: 1.7;
+  text-align: center;
+}
+
+.footer-disclaimer strong {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .footer-content {

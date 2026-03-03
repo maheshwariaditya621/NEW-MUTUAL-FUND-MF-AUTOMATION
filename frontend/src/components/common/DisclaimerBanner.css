@@ -1,0 +1,181 @@
+/* ===== Disclaimer Overlay ===== */
+.disclaimer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: overlayFadeIn 0.4s ease;
+}
+
+@keyframes overlayFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* ===== Card ===== */
+.disclaimer-card {
+    background: var(--bg-card, #1e293b);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-radius: 16px;
+    width: 100%;
+    max-width: 580px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    animation: cardSlideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes cardSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(32px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ===== Header ===== */
+.disclaimer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+}
+
+.disclaimer-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.disclaimer-icon {
+    color: #f59e0b;
+}
+
+.disclaimer-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.disclaimer-close {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+    padding: 5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.disclaimer-close:hover {
+    background: rgba(255, 59, 48, 0.12);
+    border-color: rgba(255, 59, 48, 0.3);
+    color: #ff3b30;
+}
+
+/* ===== Body ===== */
+.disclaimer-body {
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.disclaimer-body p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.65;
+    margin: 0;
+}
+
+.disclaimer-body strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* ===== Footer ===== */
+.disclaimer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px 14px;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+}
+
+.disclaimer-timer-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}
+
+.disclaimer-understood-btn {
+    background: var(--accent-primary, #6366f1);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.disclaimer-understood-btn:hover {
+    background: #4f46e5;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+}
+
+/* ===== Auto-dismiss Progress Bar ===== */
+.disclaimer-progress-track {
+    height: 3px;
+    background: var(--border-color, rgba(255, 255, 255, 0.06));
+    width: 100%;
+}
+
+.disclaimer-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #6366f1, #a855f7);
+    transition: width 0.1s linear;
+}
+
+/* ===== Light Mode ===== */
+[data-theme='light'] .disclaimer-card {
+    background: #fff;
+    border-color: #e2e8f0;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme='light'] .disclaimer-overlay {
+    background: rgba(15, 23, 42, 0.4);
+}
+
+[data-theme='light'] .disclaimer-close {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #64748b;
+}
+
+[data-theme='light'] .disclaimer-progress-track {
+    background: #e2e8f0;
+}

@@ -378,9 +378,11 @@ export default function SchemePortfolioPage() {
                         type="scheme"
                         suggestions={["Quant Small Cap", "HDFC Flexi Cap", "Parag Parikh Flexi Cap", "SBI Bluechip", "ICICI Prudential Bluechip"]}
                         onSearch={(val) => {
-                            searchParams.set('scheme_id', val);
-                            setSearchParams(searchParams);
+                            const next = new URLSearchParams(searchParams);
+                            next.set('scheme_id', String(val));
+                            setSearchParams(next);
                         }}
+
                     />
                 )}
             </div>

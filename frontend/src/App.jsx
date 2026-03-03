@@ -10,6 +10,7 @@ import AMCExplorerPage from './pages/AMCExplorerPage';
 import AdminVault from './pages/AdminVault';
 import HeaderSearch from './components/common/HeaderSearch';
 import Chatbot from './components/Chatbot';
+import DisclaimerBanner from './components/common/DisclaimerBanner';
 import './App.css';
 
 function App() {
@@ -61,8 +62,16 @@ function App() {
                 </p>
                 <Link to="/admin-vault" className="admin-link-btn">🔐 Admin Vault</Link>
               </div>
+              <p className="footer-disclaimer">
+                <strong>Disclaimer:</strong> Data and information presented on this platform have been gathered from sources believed to be reliable.
+                No warranties (express or implied) are made as to accuracy or completeness. This platform is for <strong>informational purposes only</strong> and
+                does not constitute financial advice. The platform shall not be liable for any loss arising from use of this information.
+              </p>
             </div>
           </footer>
+
+          {/* Disclaimer banner — shown once per browser session */}
+          <DisclaimerBanner />
 
           {/* AI Chatbot widget — visible on every page */}
           <Chatbot />
