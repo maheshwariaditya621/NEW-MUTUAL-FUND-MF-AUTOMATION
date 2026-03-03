@@ -197,100 +197,112 @@ class ShriramDownloader(BaseDownloader):
             time.sleep(5)
             logger.info("  ✓ Page loaded")
 
-            # Step 1: Click "Monthly, Fortnightly & Weekly Portfolio of Scheme(s)" accordion to expand it
-            logger.info("Clicking 'Monthly, Fortnightly & Weekly Portfolio' accordion...")
+            # Step 1: Click the accordion header (div.cursor-pointer containing the heading text)
+            # Confirmed via DOM inspection: the clickable element is a DIV with class "cursor-pointer"
+            logger.info("Expanding 'Monthly, Fortnightly & Weekly Portfolio' accordion...")
             try:
-                # Try exact heading first
-                clicked = False
-                for selector_text in [
-                    "Monthly, Fortnightly & Weekly Portfolio of Scheme(s)",
-                    "Monthly, Fortnightly & Weekly Portfolio",
-                    "Monthly & Fortnightly",
-                    "Monthly Portfolio",
-                ]:
-                    try:
-                        el = page.get_by_text(selector_text, exact=False)
-                        if el.count() > 0:
-                            el.first.click(timeout=8000)
-                            time.sleep(2)
-                            logger.info(f"  ✓ Accordion opened via: '{selector_text}'")
-                            clicked = True
-                            break
-                    except Exception:
-                        continue
-                if not clicked:
-                    logger.warning("  ⚠ Could not click accordion, trying scroll and continue")
+                accordion_clicked = page.evaluate("""
+                    (function() {
+                        // The accordion header is a div.cursor-pointer
+                        var divs = document.querySelectorAll('div.cursor-pointer');
+                        for (var i = 0; i < divs.length; i++) {
+                            var text = divs[i].innerText || divs[i].textContent || '';
+                            if (text.includes('Monthly, Fortnightly') && text.includes('Portfolio of Scheme')) {
+                                divs[i].click();
+                                return 'clicked_ok';
+                            }
+                        }
+                        return 'not_found';
+                    })();
+                """)
+                logger.info(f"  Accordion result: {accordion_clicked}")
+                time.sleep(3)  # Wait for accordion animation to complete
             except Exception as e:
-                logger.warning(f"  ⚠ Could not click accordion: {str(e)[:60]}")
+                logger.warning(f"  ⚠ Accordion JS failed: {str(e)[:80]}")
 
-            # Step 2: Click "Monthly Portfolio for the FY" button/tab
-            logger.info("Clicking 'Monthly Portfolio for the FY' button...")
+            # Step 2: Click "Monthly Portfolio for the FY" tab
+            logger.info("Clicking 'Monthly Portfolio for the FY' tab...")
             try:
-                page.get_by_role("button", name="Monthly Portfolio for the FY").click(timeout=10000)
+                # Find button elements that contain this text
+                tab_found = page.evaluate("""
+                    (function() {
+                        var btns = document.querySelectorAll('button, a, div[role="tab"]');
+                        for (var i = 0; i < btns.length; i++) {
+                            var text = btns[i].innerText || '';
+                            if (text.includes('Monthly Portfolio for the FY')) {
+                                btns[i].click();
+                                return 'clicked:' + i;
+                            }
+                        }
+                        return 'not_found';
+                    })();
+                """)
+                logger.info(f"  Tab result: {tab_found}")
                 time.sleep(2)
-                logger.info("  ✓ Monthly Portfolio section opened")
             except Exception as e:
-                logger.warning(f"  ⚠ Could not click 'Monthly Portfolio for the FY': {str(e)[:60]}")
+                logger.warning(f"  ⚠ Tab JS failed: {str(e)[:80]}")
 
-            # Step 3: Select the correct FY from the dropdown (shows full strings e.g. "2024-2025")
-            logger.info(f"Selecting FY '{fy_label}' from dropdown...")
+            # Step 3: Select the correct FY from custom combobox
+            # IMPORTANT: There are 20+ comboboxes on the page (all accordion sections)
+            # We must find the one that is NOW VISIBLE inside the expanded "Monthly Portfolio" section
+            # Strategy: find the combobox that has the currently expected FY as a nearby option
+            logger.info(f"Selecting FY '{fy_label}' from custom combobox...")
             try:
-                # Try multiple selectors for the FY dropdown
-                fy_dropdown_selectors = [
-                    "[id^='select-year_']",
-                    "select[name*='year']",
-                    "select",  # any <select> on the section
-                ]
-                dropdown_clicked = False
-                for sel in fy_dropdown_selectors:
-                    try:
-                        el = page.locator(sel).first
-                        if el.count() > 0 and el.is_visible(timeout=2000):
-                            # Try select_option first (works for <select> tags)
-                            try:
-                                el.select_option(label=fy_label, timeout=3000)
-                                logger.info(f"  ✓ Selected FY via select_option: {fy_label}")
-                                dropdown_clicked = True
-                                break
-                            except Exception:
-                                pass
-                            # Fallback: click to open then pick option
-                            el.click(timeout=3000)
-                            time.sleep(1)
-                    except Exception:
-                        continue
+                selected = page.evaluate(f"""
+                    (function() {{
+                        // Find all combobox inputs
+                        var combos = document.querySelectorAll('input[id^="select-year_"][role="combobox"]');
+                        // Find the first one whose parent section contains a visible listbox
+                        for (var i = 0; i < combos.length; i++) {{
+                            var rect = combos[i].getBoundingClientRect();
+                            // Check if the combobox is in the viewport (visible)
+                            if (rect.top >= 0 && rect.bottom <= window.innerHeight && rect.width > 0) {{
+                                combos[i].click();
+                                return 'clicked_combo_' + i + ':' + combos[i].id;
+                            }}
+                        }}
+                        // Fallback: click the first combo that is scrolled into rough position
+                        if (combos.length > 0) {{
+                            combos[0].scrollIntoView({{block: 'center'}});
+                            combos[0].click();
+                            return 'fallback_clicked_0';
+                        }}
+                        return 'no_combo_found';
+                    }})();
+                """)
+                logger.info(f"  Combobox click result: {selected}")
+                time.sleep(2)
 
-                if not dropdown_clicked:
-                    # Last resort: look for a clickable element showing the FY text or a dropdown trigger
-                    for trigger_text in [fy_label, "Select-Year", "Select Year"]:
-                        try:
-                            trigger = page.get_by_text(trigger_text, exact=False).first
-                            if trigger.is_visible(timeout=2000):
-                                trigger.click()
-                                time.sleep(1)
-                                # Now click the option
-                                opt = page.get_by_role("option", name=fy_label)
-                                if opt.count() > 0:
-                                    opt.first.click()
-                                    logger.info(f"  ✓ Selected FY via text trigger: {fy_label}")
-                                    dropdown_clicked = True
-                                    break
-                                else:
-                                    opt2 = page.locator(f"[role='option']:has-text('{fy_label}')")
-                                    if opt2.count() > 0:
-                                        opt2.first.click()
-                                        logger.info(f"  ✓ Selected FY via has-text: {fy_label}")
-                                        dropdown_clicked = True
-                                        break
-                        except Exception:
-                            continue
-
-                if not dropdown_clicked:
-                    logger.warning(f"  ⚠ Could not select FY '{fy_label}', using default displayed FY")
-
+                # Now click the matching FY option in the opened dropdown
+                option_clicked = page.evaluate(f"""
+                    (function() {{
+                        // The listbox options are in ul.select-box-list > li
+                        var lists = document.querySelectorAll('ul.select-box-list');
+                        for (var l = 0; l < lists.length; l++) {{
+                            var rect = lists[l].getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {{
+                                // This list is visible - find our option
+                                var items = lists[l].querySelectorAll('li');
+                                for (var i = 0; i < items.length; i++) {{
+                                    if (items[i].innerText.trim() === '{fy_label}') {{
+                                        items[i].click();
+                                        return 'selected:' + items[i].innerText.trim();
+                                    }}
+                                }}
+                                // List is visible but label not found - log what's there
+                                var opts = Array.from(items).map(function(li){{return li.innerText.trim();}});
+                                return 'label_not_found:' + opts.slice(0,5).join(',');
+                            }}
+                        }}
+                        return 'no_visible_list';
+                    }})();
+                """)
+                logger.info(f"  FY option result: {option_clicked}")
                 time.sleep(3)
+
             except Exception as e:
-                logger.error(f"  ✗ FY selection error: {str(e)[:100]}")
+                logger.warning(f"  ⚠ FY selection error: {str(e)[:100]}")
+
 
             # Step 4: Find the month card and click its "Download" link
             # The grid shows cards like: [PDF icon] [Month Year] [Download]
