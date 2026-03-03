@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
+import PageEmptyState from '../components/common/PageEmptyState';
 import { searchSchemes, getSchemePortfolio } from '../api/schemes';
 import { getBulkPrices } from '../api/stocks';
 import { handleApiError } from '../api/client';
@@ -369,10 +370,17 @@ export default function SchemePortfolioPage() {
                 )}
 
                 {!schemeIdParam && !loading && !error && (
-                    <div className="shp-empty-state">
-                        <div className="shp-empty-icon">📊</div>
-                        <p>Search for a scheme in the header above to view its portfolio holdings.</p>
-                    </div>
+                    <PageEmptyState
+                        title="Deep-Dive Portfolio Explorer"
+                        description="Explore the DNA of your mutual fund investments. Deep-dive into any fund's equity portfolio to see exactly where your money is invested, discover new stocks they've added, and monitor how they are shifting their sectoral weights over time."
+                        placeholder="Search by Scheme Name or AMC (e.g. Quant Small Cap, HDFC)"
+                        type="scheme"
+                        suggestions={["Quant Small Cap", "HDFC Flexi Cap", "Parag Parikh Flexi Cap", "SBI Bluechip", "ICICI Prudential Bluechip"]}
+                        onSearch={(val) => {
+                            searchParams.set('scheme_id', val);
+                            setSearchParams(searchParams);
+                        }}
+                    />
                 )}
             </div>
         </div>

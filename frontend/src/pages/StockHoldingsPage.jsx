@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
+import PageEmptyState from '../components/common/PageEmptyState';
 import { getStockHoldings, getStockPrice } from '../api/stocks';
 import { handleApiError } from '../api/client';
 import { formatNumber } from '../utils/helpers';
@@ -277,6 +278,20 @@ export default function StockHoldingsPage() {
                     <ErrorMessage
                         message={error}
                         onRetry={() => identifierParam && handleFetchHoldings(identifierParam, 4, selectedMonth)}
+                    />
+                )}
+
+                {!identifierParam && !loading && !error && (
+                    <PageEmptyState
+                        title="Institutional Ownership Insights"
+                        description="Unlock the secrets of institutional stock ownership. Track which mutual funds are backing your favorite stocks, monitor exactly how much they are buying or selling each month, and analyze ownership trends to make smarter investment decisions."
+                        placeholder="Search by Stock Name or ISIN (e.g. Reliance, INE002A01018)"
+                        type="stock"
+                        suggestions={["Reliance", "HDFC Bank", "ICICI Bank", "Infosys", "ITC"]}
+                        onSearch={(val) => {
+                            searchParams.set('isin', val);
+                            setSearchParams(searchParams);
+                        }}
                     />
                 )}
 
