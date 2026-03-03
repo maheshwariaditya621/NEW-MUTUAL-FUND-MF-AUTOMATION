@@ -82,24 +82,23 @@ class ShriramDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("SHRIRAM", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def _get_fy_option_text(self, year: int, month: int) -> str:
+    def _get_fy_label(self, year: int, month: int) -> str:
         """
-        Compute the FY option text suffix used in the Shriram website dropdown.
+        Compute the full FY label shown in the Shriram website dropdown.
+        Dropdown shows full strings like '2024-2025'.
 
         Indian FY runs April → March.
-        - Months Jan/Feb/Mar belong to the FY that ENDS in that calendar year.
-          e.g. Jan 2025 → FY 2024-2025 → option suffix "-2025"
-        - Months Apr→Dec belong to the FY that STARTS in that calendar year.
-          e.g. Nov 2025 → FY 2025-2026 → option suffix "-2026"
+        - Jan/Feb/Mar: FY is (year-1)-(year), e.g. Jan 2025 → '2024-2025'
+        - Apr→Dec: FY is (year)-(year+1), e.g. Oct 2024 → '2024-2025'
         """
         if month <= 3:
-            # Jan/Feb/Mar: FY end year = same calendar year
+            fy_start = year - 1
             fy_end = year
         else:
-            # Apr→Dec: FY end year = next calendar year
+            fy_start = year
             fy_end = year + 1
 
-        return f"-{fy_end}"
+        return f"{fy_start}-{fy_end}"
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -173,8 +172,9 @@ class ShriramDownloader(BaseDownloader):
         month_abbr = self.MONTH_ABBR[target_month]
         search_label = f"{month_abbr} {target_year}"
 
-        # e.g. "-2026" for Apr-Dec 2025, "-2025" for Jan-Mar 2025
-        fy_option_suffix = self._get_fy_option_text(target_year, target_month)
+        # e.g. "2024-2025" for Oct 2024; "2025-2026" for Nov 2025
+        fy_label = self._get_fy_label(target_year, target_month)
+        logger.info(f"Target FY: {fy_label}")
 
         pw = None
         browser = None
@@ -232,30 +232,63 @@ class ShriramDownloader(BaseDownloader):
             except Exception as e:
                 logger.warning(f"  ⚠ Could not click 'Monthly Portfolio for the FY': {str(e)[:60]}")
 
-            # Step 3: Select the correct FY from the dropdown
-            # Dropdown options like "2025-2026", "2024-2025". We match by suffix e.g. "-2026"
-            logger.info(f"Selecting FY option ending with '{fy_option_suffix}'...")
+            # Step 3: Select the correct FY from the dropdown (shows full strings e.g. "2024-2025")
+            logger.info(f"Selecting FY '{fy_label}' from dropdown...")
             try:
-                year_select = page.locator("[id^='select-year_']")
-                if year_select.count() > 0:
-                    year_select.first.click(timeout=5000)
-                    time.sleep(1)
-                    # Match option that ends with the FY end year, e.g. "2025-2026" matches "-2026"
-                    fy_option = page.get_by_role("option", name=fy_option_suffix)
-                    if fy_option.count() > 0:
-                        fy_option.first.click()
-                        logger.info(f"  ✓ Selected FY ending {fy_option_suffix}")
-                    else:
-                        # Fallback: look for listitem/option containing the suffix text
-                        fy_option_text = page.locator(f"[role='option']:has-text('{fy_option_suffix}')")
-                        if fy_option_text.count() > 0:
-                            fy_option_text.first.click()
-                            logger.info(f"  ✓ Selected FY via text fallback: {fy_option_suffix}")
-                        else:
-                            logger.warning(f"  ⚠ FY option '{fy_option_suffix}' not found, using default FY")
-                    time.sleep(3)
-                else:
-                    logger.warning("  ⚠ Year selector not found, using default FY")
+                # Try multiple selectors for the FY dropdown
+                fy_dropdown_selectors = [
+                    "[id^='select-year_']",
+                    "select[name*='year']",
+                    "select",  # any <select> on the section
+                ]
+                dropdown_clicked = False
+                for sel in fy_dropdown_selectors:
+                    try:
+                        el = page.locator(sel).first
+                        if el.count() > 0 and el.is_visible(timeout=2000):
+                            # Try select_option first (works for <select> tags)
+                            try:
+                                el.select_option(label=fy_label, timeout=3000)
+                                logger.info(f"  ✓ Selected FY via select_option: {fy_label}")
+                                dropdown_clicked = True
+                                break
+                            except Exception:
+                                pass
+                            # Fallback: click to open then pick option
+                            el.click(timeout=3000)
+                            time.sleep(1)
+                    except Exception:
+                        continue
+
+                if not dropdown_clicked:
+                    # Last resort: look for a clickable element showing the FY text or a dropdown trigger
+                    for trigger_text in [fy_label, "Select-Year", "Select Year"]:
+                        try:
+                            trigger = page.get_by_text(trigger_text, exact=False).first
+                            if trigger.is_visible(timeout=2000):
+                                trigger.click()
+                                time.sleep(1)
+                                # Now click the option
+                                opt = page.get_by_role("option", name=fy_label)
+                                if opt.count() > 0:
+                                    opt.first.click()
+                                    logger.info(f"  ✓ Selected FY via text trigger: {fy_label}")
+                                    dropdown_clicked = True
+                                    break
+                                else:
+                                    opt2 = page.locator(f"[role='option']:has-text('{fy_label}')")
+                                    if opt2.count() > 0:
+                                        opt2.first.click()
+                                        logger.info(f"  ✓ Selected FY via has-text: {fy_label}")
+                                        dropdown_clicked = True
+                                        break
+                        except Exception:
+                            continue
+
+                if not dropdown_clicked:
+                    logger.warning(f"  ⚠ Could not select FY '{fy_label}', using default displayed FY")
+
+                time.sleep(3)
             except Exception as e:
                 logger.error(f"  ✗ FY selection error: {str(e)[:100]}")
 
