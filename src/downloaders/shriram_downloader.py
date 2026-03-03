@@ -197,14 +197,31 @@ class ShriramDownloader(BaseDownloader):
             time.sleep(5)
             logger.info("  ✓ Page loaded")
 
-            # Step 1: Click "Monthly & Fortnightly" section to expand it
-            logger.info("Clicking 'Monthly & Fortnightly'...")
+            # Step 1: Click "Monthly, Fortnightly & Weekly Portfolio of Scheme(s)" accordion to expand it
+            logger.info("Clicking 'Monthly, Fortnightly & Weekly Portfolio' accordion...")
             try:
-                page.get_by_text("Monthly & Fortnightly").click(timeout=10000)
-                time.sleep(2)
-                logger.info("  ✓ Monthly & Fortnightly section opened")
+                # Try exact heading first
+                clicked = False
+                for selector_text in [
+                    "Monthly, Fortnightly & Weekly Portfolio of Scheme(s)",
+                    "Monthly, Fortnightly & Weekly Portfolio",
+                    "Monthly & Fortnightly",
+                    "Monthly Portfolio",
+                ]:
+                    try:
+                        el = page.get_by_text(selector_text, exact=False)
+                        if el.count() > 0:
+                            el.first.click(timeout=8000)
+                            time.sleep(2)
+                            logger.info(f"  ✓ Accordion opened via: '{selector_text}'")
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+                if not clicked:
+                    logger.warning("  ⚠ Could not click accordion, trying scroll and continue")
             except Exception as e:
-                logger.warning(f"  ⚠ Could not click 'Monthly & Fortnightly': {str(e)[:60]}")
+                logger.warning(f"  ⚠ Could not click accordion: {str(e)[:60]}")
 
             # Step 2: Click "Monthly Portfolio for the FY" button/tab
             logger.info("Clicking 'Monthly Portfolio for the FY' button...")
