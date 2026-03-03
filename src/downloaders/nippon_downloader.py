@@ -321,4 +321,6 @@ if __name__ == "__main__":
         logger.info(f"ℹ️  Info: Month not yet published")
     else:
         logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
-        raise SystemExit(1)
+    
+    # Print JSON result for Orchestrator
+    print(json.dumps(result))

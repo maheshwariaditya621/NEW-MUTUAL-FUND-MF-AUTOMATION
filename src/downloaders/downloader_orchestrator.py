@@ -89,7 +89,7 @@ class PipelineOrchestrator:
                 env = os.environ.copy()
                 env["PYTHONPATH"] = "."
 
-                process = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
+                process = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, env=env)
                 
                 # Parse JSON result from stdout (even on failure)
                 download_res = {}
@@ -117,7 +117,13 @@ class PipelineOrchestrator:
                 else:
                     # Fallback if success but no JSON found
                     if not download_res:
-                        download_res = {"status": "success", "files_downloaded": 0, "reason": "No JSON output captured"}
+                        # Secondary check: see if the target folder exists and has a success marker
+                        target_v = os.path.join("data", "raw", amc_slug, f"{year}_{month:02d}")
+                        if os.path.exists(os.path.join(target_v, "_SUCCESS.json")):
+                            logger.info(f"Found existing success marker for {amc_slug} {year}-{month:02d}. Treating as skipped.")
+                            download_res = {"status": "skipped", "files_downloaded": 1}
+                        else:
+                            download_res = {"status": "success", "files_downloaded": 0, "reason": "No JSON output captured and no success marker found"}
                     
                     results["steps"]["download"] = download_res
                     
