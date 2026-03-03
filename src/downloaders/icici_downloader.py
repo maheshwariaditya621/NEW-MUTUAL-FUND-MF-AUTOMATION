@@ -368,11 +368,13 @@ class ICICIDownloader(BaseDownloader):
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description="ICICI Prudential Mutual Fund Downloader")
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, required=True)
     args = parser.parse_args()
+
+    downloader = ICICIDownloader()
+    result = downloader.download(args.year, args.month)
 
     status = result["status"]
     if status == "success":

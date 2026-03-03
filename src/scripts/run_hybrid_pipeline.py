@@ -13,9 +13,7 @@ Usage:
 
 import argparse
 import sys
-import os
 from pathlib import Path
-from datetime import datetime
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,45 +23,56 @@ if str(PROJECT_ROOT) not in sys.path:
 # Force local environment to point to AWS if configured
 # You should set DB_HOST to your AWS EC2 IP/DNS in your local .env
 from src.config import logger, DB_HOST
-from src.downloaders.downloader_orchestrator import DownloaderOrchestrator
-from src.extractors.orchestrator import ExtractionOrchestrator
+from src.downloaders.downloader_orchestrator import PipelineOrchestrator
 
-def run_pipeline(amc_slug: str, year: int, month: int, dry_run: bool = False, redo: bool = False):
+def run_hybrid(amc_slug: str, year: int, month: int, dry_run: bool = False, redo: bool = False):
     logger.info("=" * 60)
     logger.info(f"🚀 STARTING HYBRID PIPELINE: {amc_slug.upper()} {year}-{month:02d}")
     logger.info(f"Target Database Host: {DB_HOST}")
     logger.info("=" * 60)
 
-    # 1. DOWNLOAD
-    logger.info("\n--- PHASE 1: DOWNLOAD ---")
-    downloader = DownloaderOrchestrator()
-    dl_result = downloader.download_amc_month(amc_slug, year, month)
+    # Use the existing PipelineOrchestrator which handles Download -> Merge -> Extract -> Load
+    orchestrator = PipelineOrchestrator()
     
-    if dl_result.get("status") not in ["success", "skipped"]:
-        logger.error(f"❌ Download failed: {dl_result.get('reason')}")
-        return dl_result
-
-    # 2. EXTRACTION & LOAD
-    # The ExtractionOrchestrator handles merging (internally in some extractors) 
-    # and loading into the DB defined in src.config
-    logger.info("\n--- PHASE 2: EXTRACTION & REMOTE LOAD ---")
-    extractor = ExtractionOrchestrator()
-    ext_result = extractor.process_amc_month(
-        amc_slug=amc_slug, 
-        year=year, 
-        month=month, 
-        redo=redo, 
-        dry_run=dry_run
+    # We run all steps: download the raw data, merge into Excel, then extract and load to DB
+    steps = ["download", "merge", "extract"]
+    
+    result = orchestrator.run_pipeline(
+        amc_slug=amc_slug,
+        year=year,
+        month=month,
+        steps=steps,
+        dry_run=dry_run,
+        redo=redo
     )
 
-    if ext_result.get("status") == "success":
-        logger.success(f"✅ Pipeline completed successfully for {amc_slug}")
-        if not dry_run:
-            logger.info(f"Rows Inserted to AWS: {ext_result.get('rows_inserted')}")
+    status = result.get("status")
+    
+    if status == "success":
+        logger.success(f"✅ Hybrid Pipeline completed successfully for {amc_slug}")
+        # Show extraction stats if available
+        ext_res = result.get("steps", {}).get("extract", {})
+        if ext_res:
+             logger.info(f"Rows Inserted to AWS: {ext_res.get('rows_inserted', 0)}")
+             
+    elif status == "stopped":
+        reason = result.get("reason", "Internal stop")
+        logger.info(f"ℹ️  Pipeline stopped gracefully: {reason}")
+        
+    elif status == "failed":
+        # Check for specific step failures
+        failed_step = next((s for s, r in result.get("steps", {}).items() if r.get("status") in ["failed", "error"]), None)
+        if failed_step:
+            step_res = result["steps"][failed_step]
+            step_reason = step_res.get("reason") or step_res.get("error") or "Unknown error"
+            logger.error(f"❌ Hybrid Pipeline failed at '{failed_step}' step: {step_reason}")
+        else:
+            logger.error(f"❌ Hybrid Pipeline failed: {result.get('reason') or 'Unknown error'}")
+            
     else:
-        logger.error(f"❌ Extraction/Load failed: {ext_result.get('reason') or ext_result.get('error')}")
+        logger.warning(f"⚠️ Pipeline finished with status: {status}")
 
-    return ext_result
+    return result
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hybrid Local-to-Remote Pipeline")
@@ -76,7 +85,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     try:
-        run_pipeline(args.amc, args.year, args.month, args.dry_run, args.redo)
+        run_hybrid(args.amc, args.year, args.month, args.dry_run, args.redo)
     except KeyboardInterrupt:
         logger.info("Pipeline manually interrupted.")
         sys.exit(1)

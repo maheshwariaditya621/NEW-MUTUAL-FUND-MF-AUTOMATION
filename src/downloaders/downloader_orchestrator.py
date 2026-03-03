@@ -121,15 +121,21 @@ class PipelineOrchestrator:
                     
                     results["steps"]["download"] = download_res
                     
-                    if download_res.get("status") == "failed":
-                        logger.error(f"Download failed for {amc_slug}: {download_res.get('reason')}")
-                        results["status"] = "failed"
-                        # Orchestrator doesn't need to send another alert here as the downloader 
-                        # usually sends its own specific notify_not_published or notify_error
+                    # Check if we should proceed to next steps
+                    status = download_res.get("status")
+                    if status not in ["success", "skipped"]:
+                        logger.warning(f"Download for {amc_slug} returned status: {status}. Stopping pipeline.")
+                        results["status"] = "stopped"
+                        results["reason"] = download_res.get("reason") or f"Download status: {status}"
                         return results
-                    else:
-                        # Downloader subprocess already sent its own Telegram notification.
-                        pass
+                    
+                    # If success but no files, we should also probably stop
+                    if status == "success" and download_res.get("files_downloaded", 0) == 0:
+                        logger.warning(f"No files were downloaded for {amc_slug}. Stopping pipeline.")
+                        results["status"] = "stopped"
+                        results["reason"] = "No files downloaded"
+                        return results
+
 
             except Exception as e:
                 logger.error(f"Error during download for {amc_slug}: {e}")
