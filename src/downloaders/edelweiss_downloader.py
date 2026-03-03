@@ -151,6 +151,7 @@ class EdelweissDownloader(BaseDownloader):
 
     def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, download_folder: Path) -> Optional[Path]:
         url = "https://www.edelweissmf.com/statutory/portfolio-of-schemes"
+        month_name = self.MONTH_NAMES[target_month]
 
         pw = None
         browser = None
@@ -194,42 +195,57 @@ class EdelweissDownloader(BaseDownloader):
             except:
                 logger.info("  ⚠ Tab not found or already active.")
 
-            # 2) Select Year and Month from dropdowns
-            logger.info(f"Selecting Year: {target_year}, Month: {month_abbr}...")
+            # 2) Select Year
+            logger.info(f"Selecting Year: {target_year}...")
             
-            # Find visible dropdowns
-            visible_dropdowns = page.locator("mat-select:visible")
-            dropdown_count = visible_dropdowns.count()
-            logger.info(f"  Found {dropdown_count} visible dropdowns.")
+            # Locator that works for both mat-select and standard select
+            year_locator = page.locator("mat-select, select, [role='combobox'], ng-select").filter(has_text=re.compile(r"Year|Select Year", re.IGNORECASE)).first
+            year_locator.wait_for(state="visible", timeout=10000)
             
-            if dropdown_count >= 2:
-                # Select Year
-                year_dropdown = visible_dropdowns.nth(0)
-                year_dropdown.scroll_into_view_if_needed()
-                year_dropdown.click(force=True)
+            is_select_tag = year_locator.evaluate("el => el.tagName.toLowerCase() === 'select'")
+            if is_select_tag:
+                year_locator.select_option(label=str(target_year))
+            else:
+                year_locator.click(force=True)
                 time.sleep(1)
                 page.get_by_role("option", name=str(target_year), exact=True).click(force=True)
-                time.sleep(1)
-                
-                # Select Month
-                month_dropdown = visible_dropdowns.nth(1)
-                month_dropdown.scroll_into_view_if_needed()
-                month_dropdown.click(force=True)
-                time.sleep(1)
-                page.get_by_role("option", name=month_abbr, exact=True).click(force=True)
-                time.sleep(3)  # Wait for link to update
-            else:
-                raise Exception(f"Could not find both dropdowns (found {dropdown_count})")
-
-            # 3) Find and download the portfolio link
-            logger.info("Finding download link...")
-            download_links = page.get_by_role("link").filter(has_text=re.compile(r"Monthly Portfolio", re.IGNORECASE))
             
-            if download_links.count() == 0:
-                logger.warning("No download link found!")
-                return None
+            logger.info(f"  ✓ Selected Year: {target_year}")
+            time.sleep(3)  # Wait for links to update/load
 
-            target_link = download_links.first
+            # 3) Find and download the portfolio link for the specific month
+            logger.info(f"Finding download link for {month_name} {target_year}...")
+            
+            # The list of links should now be visible below the dropdown
+            # Link text examples: "Monthly Portfolio - January 31, 2026", "Monthly Portfolio - December 31, 2025"
+            link_pattern = re.compile(rf"Monthly Portfolio.*{month_name}.*{target_year}", re.IGNORECASE)
+            
+            # Wait for some links to be visible
+            page.wait_for_selector("a", state="visible", timeout=10000)
+            
+            all_links = page.get_by_role("link").all()
+            target_link = None
+            for link in all_links:
+                text = link.inner_text().strip()
+                if link_pattern.search(text):
+                    target_link = link
+                    logger.info(f"  Found matching link: {text}")
+                    break
+            
+            if not target_link:
+                logger.warning(f"No download link found for {month_name} {target_year}")
+                # Fallback: check for month abbreviation if full name fails
+                month_abbr = self.MONTH_ABBR[target_month]
+                abbr_pattern = re.compile(rf"Monthly Portfolio.*{month_abbr}.*{target_year}", re.IGNORECASE)
+                for link in all_links:
+                    text = link.inner_text().strip()
+                    if abbr_pattern.search(text):
+                        target_link = link
+                        logger.info(f"  Found matching link (abbr): {text}")
+                        break
+            
+            if not target_link:
+                return None
             link_text = target_link.inner_text().strip()
             logger.info(f"  Found link: {link_text}")
             
