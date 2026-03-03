@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { debounce } from '../../utils/helpers';
 import { searchStocks } from '../../api/stocks';
 import { searchSchemes } from '../../api/schemes';
 import './PageEmptyState.css';
+
 
 /**
  * A premium, high-fidelity empty state component for main pages with fuzzy autocomplete.

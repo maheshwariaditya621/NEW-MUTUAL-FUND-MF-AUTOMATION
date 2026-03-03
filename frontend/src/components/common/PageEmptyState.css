@@ -94,9 +94,161 @@
 .pes-search-form {
     width: 100%;
     max-width: 500px;
-    /* narrower */
     margin-bottom: 24px;
+    position: relative;
+    /* For autocomplete dropdown positioning */
 }
+
+.pes-suggestions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.pes-suggestion-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    letter-spacing: 0.1em;
+}
+
+.pes-suggestion-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+}
+
+.pes-suggestion-chip {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 4px 12px;
+    border-radius: 100px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pes-suggestion-chip:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: var(--accent-primary, #6366f1);
+    transform: translateY(-2px);
+}
+
+.pes-footer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    opacity: 0.8;
+    z-index: 1000;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.pes-footer-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.pes-footer-right:hover {
+    color: var(--text-primary);
+}
+
+.pes-admin-icon {
+    font-size: 14px;
+}
+
+.pes-discoverability-hint {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.pes-hint-arrow {
+    font-size: 14px;
+    animation: bounce 2s infinite;
+}
+
+.pes-discoverability-hint p {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+@keyframes bounceVertical {
+
+    0%,
+    20%,
+    50%,
+    80%,
+    100% {
+        transform: translateY(0);
+    }
+
+    40% {
+        transform: translateY(-10px);
+    }
+
+    60% {
+        transform: translateY(-5px);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.8s ease forwards;
+}
+
+/* Light Mode Overrides */
+[data-theme='light'] .pes-title {
+    background: linear-gradient(135deg, #1e293b 0%, #64748b 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+[data-theme='light'] .pes-search-input {
+    color: #1e293b;
+}
+
+[data-theme='light'] .pes-search-input-wrapper {
+    background: #fff;
+    border-color: #e2e8f0;
+}
+
+[data-theme='light'] .pes-suggestion-chip {
+    background: #fff;
+    border-color: #e2e8f0;
+    color: #1e293b;
+}
+
 
 .pes-search-input-wrapper {
     position: relative;
