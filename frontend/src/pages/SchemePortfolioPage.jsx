@@ -50,7 +50,8 @@ function TrendIcon({ current, previous }) {
 }
 
 export default function SchemePortfolioPage() {
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
+
     const schemeIdParam = searchParams.get('scheme_id');
 
     const [portfolio, setPortfolio] = useState(null);
