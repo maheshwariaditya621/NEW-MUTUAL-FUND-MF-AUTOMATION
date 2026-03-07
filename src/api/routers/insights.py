@@ -73,7 +73,14 @@ async def get_stock_activity(
         
         cur.execute(
             f"""
-            WITH curr_h AS (
+            WITH splits AS (
+                SELECT entity_id, ratio_factor 
+                FROM corporate_actions 
+                WHERE effective_date > (SELECT period_end_date FROM periods WHERE period_id = %s)
+                AND effective_date <= (SELECT period_end_date FROM periods WHERE period_id = %s)
+                AND status = 'CONFIRMED'
+            ),
+            curr_h AS (
                 SELECT 
                     COALESCE(c.entity_id, c.company_id + 10000000) as uid,
                     ss.scheme_id,
@@ -102,7 +109,15 @@ async def get_stock_activity(
                     COUNT(DISTINCT curr.scheme_id) as num_funds_curr,
                     COUNT(DISTINCT prev.scheme_id) as num_funds_prev,
                     SUM(COALESCE(curr.adj_qty, 0)) as qty_curr,
-                    SUM(COALESCE(prev.adj_qty, 0)) as qty_prev,
+                    -- Self-healing: if adj_qty is same as quantity, and a split happened, apply it on the fly
+                    SUM(COALESCE(
+                        CASE 
+                            WHEN prev.adj_qty = prev.quantity AND s.ratio_factor IS NOT NULL 
+                            THEN prev.quantity * s.ratio_factor
+                            ELSE prev.adj_qty
+                        END, 
+                        0
+                    )) as qty_prev,
                     SUM(COALESCE(curr.mval, 0)) as mval_curr,
                     -- Entrant: held now, NOT held before, but was uploaded before
                     COUNT(DISTINCT curr.scheme_id) FILTER (
@@ -118,6 +133,7 @@ async def get_stock_activity(
                     ) as exits
                 FROM curr_h curr
                 FULL OUTER JOIN prev_h prev ON curr.uid = prev.uid AND curr.scheme_id = prev.scheme_id
+                LEFT JOIN splits s ON (COALESCE(curr.uid, prev.uid) = s.entity_id)
                 GROUP BY coalesce(curr.uid, prev.uid)
             )
             SELECT DISTINCT ON (net_qty, uid)
@@ -143,7 +159,7 @@ async def get_stock_activity(
             ORDER BY net_qty {order_direction}, h_agg.uid, c.updated_at DESC
             LIMIT %s
             """,
-            [p1_id, p0_id, p0_id, p1_id] + ([mcap_category] if mcap_category else []) + [limit]
+            [p0_id, p1_id, p1_id, p0_id, p0_id, p1_id] + ([mcap_category] if mcap_category else []) + [limit]
         )
         
         rows = cur.fetchall()
