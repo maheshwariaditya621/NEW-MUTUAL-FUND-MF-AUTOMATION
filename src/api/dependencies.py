@@ -56,3 +56,60 @@ def verify_admin(x_admin_secret: str = Header(None)) -> bool:
     if not x_admin_secret or x_admin_secret != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid Admin Secret")
     return True
+
+from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, status
+from src.api.utils.auth_utils import decode_access_token
+
+# Token URL must match the login endpoint
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    cur = Depends(get_db_cursor)
+) -> dict:
+    """
+    Dependency to get the currently authenticated user from a JWT token.
+    
+    Returns:
+        User data dictionary
+        
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    payload = decode_access_token(token)
+    if payload is None:
+        raise credentials_exception
+        
+    username: str = payload.get("sub")
+    if username is None:
+        raise credentials_exception
+        
+    # Fetch user from database
+    cur.execute(
+        "SELECT id, username, email, role, is_active, created_at, last_login FROM users WHERE username = %s",
+        (username,)
+    )
+    user = cur.fetchone()
+    
+    if user is None:
+        raise credentials_exception
+        
+    if not user[4]: # is_active
+        raise HTTPException(status_code=400, detail="Inactive user")
+        
+    return {
+        "id": user[0],
+        "username": user[1],
+        "email": user[2],
+        "role": user[3],
+        "is_active": user[4],
+        "created_at": user[5],
+        "last_login": user[6]
+    }

@@ -1,59 +1,124 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ThemeToggle from './components/common/ThemeToggle';
 import ScrollToTop from './components/common/ScrollToTop';
+import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
 import StockHoldingsPage from './pages/StockHoldingsPage';
 import SchemePortfolioPage from './pages/SchemePortfolioPage';
 import InsightsPage from './pages/InsightsPage';
 import AMCExplorerPage from './pages/AMCExplorerPage';
 import AdminVault from './pages/AdminVault';
+import LoginPage from './pages/LoginPage';
 import HeaderSearch from './components/common/HeaderSearch';
 import Chatbot from './components/Chatbot';
 import DisclaimerBanner from './components/common/DisclaimerBanner';
 import './App.css';
 
-function App() {
+// Helper component to handle global auth events like 401
+const AuthHandler = ({ children }) => {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      logout();
+      navigate('/login');
+    };
+
+    window.addEventListener('api-unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('api-unauthorized', handleUnauthorized);
+  }, [logout, navigate]);
+
+  return children;
+};
+
+// Component for the header to handle auth state
+const Header = () => {
+  const { user, logout, isAuthenticated } = useAuth();
+
   return (
-    <ThemeProvider>
-      <BrowserRouter>
-        <ScrollToTop />
-        <div className="app">
-          <header className="app-header">
-            <div className="container">
-              <div className="header-content">
-                <div className="header-left">
-                  <Link to="/" className="logo">
-                    <h1>MF Analytics</h1>
-                  </Link>
+    <header className="app-header">
+      <div className="container">
+        <div className="header-content">
+          <div className="header-left">
+            <Link to="/" className="logo">
+              <h1>MF Analytics</h1>
+            </Link>
 
-                  <nav className="nav">
-                    <Link to="/stocks" className="nav-link">Stock Holdings</Link>
-                    <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
-                    <Link to="/amcs" className="nav-link">Funds Explorer</Link>
-                    <Link to="/insights" className="nav-link">Insights</Link>
-                  </nav>
-                </div>
+            {isAuthenticated && (
+              <nav className="nav">
+                <Link to="/stocks" className="nav-link">Stock Holdings</Link>
+                <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
+                <Link to="/amcs" className="nav-link">Funds Explorer</Link>
+                <Link to="/insights" className="nav-link">Insights</Link>
+              </nav>
+            )}
+          </div>
 
-                <div className="header-right">
-                  <HeaderSearch />
-                  <ThemeToggle />
-                </div>
-              </div>
-            </div>
-          </header>
+          <div className="header-right">
+            {isAuthenticated && <HeaderSearch />}
+            <ThemeToggle />
+            {isAuthenticated && (
+              <button onClick={logout} className="logout-btn" title="Logout">
+                Logout
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+};
 
-          <main className="app-main">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/stocks" element={<StockHoldingsPage />} />
-              <Route path="/schemes" element={<SchemePortfolioPage />} />
-              <Route path="/amcs" element={<AMCExplorerPage />} />
-              <Route path="/insights" element={<InsightsPage />} />
-              <Route path="/admin-vault" element={<AdminVault />} />
-            </Routes>
-          </main>
+function AppContent() {
+  const { isAuthenticated } = useAuth();
 
+  return (
+    <AuthHandler>
+      <div className="app">
+        {isAuthenticated && <Header />}
+
+        <main className={isAuthenticated ? "app-main" : "app-main-auth"}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+
+            <Route path="/" element={
+              <ProtectedRoute>
+                <Home />
+              </ProtectedRoute>
+            } />
+            <Route path="/stocks" element={
+              <ProtectedRoute>
+                <StockHoldingsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/schemes" element={
+              <ProtectedRoute>
+                <SchemePortfolioPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/amcs" element={
+              <ProtectedRoute>
+                <AMCExplorerPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/insights" element={
+              <ProtectedRoute>
+                <InsightsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin-vault" element={
+              <ProtectedRoute>
+                <AdminVault />
+              </ProtectedRoute>
+            } />
+          </Routes>
+        </main>
+
+        {isAuthenticated && (
           <footer className="app-footer">
             <div className="container">
               <div className="footer-content">
@@ -69,13 +134,23 @@ function App() {
               </p>
             </div>
           </footer>
+        )}
 
-          {/* Disclaimer banner — shown once per browser session */}
-          <DisclaimerBanner />
+        {isAuthenticated && <DisclaimerBanner />}
+        {isAuthenticated && <Chatbot />}
+      </div>
+    </AuthHandler>
+  );
+}
 
-          {/* AI Chatbot widget — visible on every page */}
-          <Chatbot />
-        </div>
+function App() {
+  return (
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <ScrollToTop />
+          <AppContent />
+        </AuthProvider>
       </BrowserRouter>
     </ThemeProvider>
   );
