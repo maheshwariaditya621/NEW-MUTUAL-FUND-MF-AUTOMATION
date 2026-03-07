@@ -211,7 +211,7 @@ class QuantumDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -341,17 +341,17 @@ if __name__ == "__main__":
     status = result.get("status")
 
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
         exit(0)
 
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
         exit(0)
 
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
         exit(0)
 
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

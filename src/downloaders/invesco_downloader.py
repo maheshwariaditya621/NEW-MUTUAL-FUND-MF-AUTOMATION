@@ -110,7 +110,7 @@ class InvescoDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -145,7 +145,7 @@ class InvescoDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("Invesco", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ {self.AMC_NAME} download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] {self.AMC_NAME} download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -195,10 +195,10 @@ class InvescoDownloader(BaseDownloader):
                     year_loc = page.locator("#ddlYearCompleteMonthlyHoldings li").filter(has_text=re.compile(rf"^{target_year}$"))
                     if year_loc.count() > 0:
                         year_loc.first.click()
-                        logger.info(f"  ✓ Selected Year: {target_year}")
+                        logger.info(f"  [OK] Selected Year: {target_year}")
                         time.sleep(4)
                     else:
-                        logger.warning(f"  ✗ Year {target_year} not found in selection list")
+                        logger.warning(f"  [FAIL] Year {target_year} not found in selection list")
                         continue
 
                     # Find rows
@@ -243,13 +243,13 @@ class InvescoDownloader(BaseDownloader):
                                     save_path = download_folder / fname
                                 
                                 dl.save_as(save_path)
-                                logger.info(f"      ✓ Saved: {fname}")
+                                logger.info(f"      [OK] Saved: {fname}")
                                 files_downloaded += 1
                                 cat_files += 1
                                 time.sleep(0.5)
                                 
                             except Exception as e:
-                                logger.error(f"      ✗ Failed to download: {e}")
+                                logger.error(f"      [FAIL] Failed to download: {e}")
 
                         except Exception as e:
                             continue
@@ -279,11 +279,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

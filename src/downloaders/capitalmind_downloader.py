@@ -135,7 +135,7 @@ class CapitalMindDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -171,7 +171,7 @@ class CapitalMindDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("CAPITALMIND", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ CAPITALMIND download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] CAPITALMIND download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -200,7 +200,7 @@ class CapitalMindDownloader(BaseDownloader):
                 logger.warning(f"Navigation warning: {e}")
             
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Handle US Person Declaration
             logger.info("Handling declaration modal...")
@@ -214,7 +214,7 @@ class CapitalMindDownloader(BaseDownloader):
                 btn = page.locator(sel).first
                 if btn.count() > 0 and btn.is_visible():
                     btn.click()
-                    logger.info(f"  ✓ Clicked modal button via selector: {sel}")
+                    logger.info(f"  [OK] Clicked modal button via selector: {sel}")
                     try:
                         page.locator(".modal-backdrop").wait_for(state="hidden", timeout=5000)
                     except:
@@ -231,7 +231,7 @@ class CapitalMindDownloader(BaseDownloader):
             except:
                 page.mouse.click(179, 772) # Fallback pixel click if needed
                 time.sleep(3)
-            logger.info("  ✓ Tab selected")
+            logger.info("  [OK] Tab selected")
 
             # Discover schemes
             logger.info("Discovering schemes...")
@@ -251,7 +251,7 @@ class CapitalMindDownloader(BaseDownloader):
                             "panel": item.locator(".accordion-collapse").first
                         })
             
-            logger.info(f"  ✓ Found {len(scheme_info)} schemes")
+            logger.info(f"  [OK] Found {len(scheme_info)} schemes")
 
             total_downloaded = 0
             
@@ -289,9 +289,9 @@ class CapitalMindDownloader(BaseDownloader):
                         fy_heading = s_panel.locator("h6").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
                         if fy_heading.count() > 0:
                             search_area = s_panel
-                            logger.info(f"    ✓ Found FY heading (Static)")
+                            logger.info(f"    [OK] Found FY heading (Static)")
                         else:
-                            logger.warning(f"    ✗ FY section '{target_fy}' not found for {scheme_name}")
+                            logger.warning(f"    [FAIL] FY section '{target_fy}' not found for {scheme_name}")
                             continue
 
                     # Find Month row
@@ -323,19 +323,19 @@ class CapitalMindDownloader(BaseDownloader):
                                 save_path = download_folder / filename
                                 download.save_as(save_path)
                                 
-                                logger.info(f"    ✓ Downloaded: {filename}")
+                                logger.info(f"    [OK] Downloaded: {filename}")
                                 total_downloaded += 1
                                 time.sleep(1)
                                 
                             except Exception as d_err:
-                                logger.error(f"    ✗ Download failed: {str(d_err)[:80]}")
+                                logger.error(f"    [FAIL] Download failed: {str(d_err)[:80]}")
                         else:
-                            logger.warning(f"    ✗ Download link not found in row for {month_name}")
+                            logger.warning(f"    [FAIL] Download link not found in row for {month_name}")
                     else:
-                        logger.warning(f"    ✗ Month '{month_name}' row not found")
+                        logger.warning(f"    [FAIL] Month '{month_name}' row not found")
                         
                 except Exception as scheme_err:
-                    logger.error(f"    ✗ Error processing scheme: {str(scheme_err)[:100]}")
+                    logger.error(f"    [FAIL] Error processing scheme: {str(scheme_err)[:100]}")
                     continue
 
             return total_downloaded
@@ -357,11 +357,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -12,6 +12,18 @@ from colorama import init, Fore, Style
 # Initialize colorama for Windows color support
 init(autoreset=True)
 
+# Fix for Windows UnicodeEncodeError in console
+if sys.platform == "win32":
+    try:
+        # Reconfigure stdout/stderr to use UTF-8
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        # Fallback if reconfiguration fails
+        pass
+
 # Custom log levels
 SUCCESS = 25  # Between INFO (20) and WARNING (30)
 ROLLBACK = 35  # Between WARNING (30) and ERROR (40)

@@ -367,43 +367,11 @@ def _convert_xls_to_xlsx(folder_path: Path, excel_app=None):
                         conversion_success = True
             except: pass
 
-            # 2. Windows COM Conversion
-            if not conversion_success and os.name == 'nt':
-                try:
-                    import win32com.client
-                    import pythoncom
-                    abs_xls, abs_xlsx = str(xls_path.resolve()), str(xlsx_path.resolve())
-                    
-                    managed_excel = False
-                    if excel_app is None:
-                        pythoncom.CoInitialize()
-                        excel = win32com.client.Dispatch("Excel.Application")
-                        excel.Visible = False
-                        excel.DisplayAlerts = False
-                        managed_excel = True
-                    else:
-                        excel = excel_app
-                    
-                    try:
-                        wb = excel.Workbooks.Open(abs_xls, UpdateLinks=0)
-                        wb.SaveAs(abs_xlsx, FileFormat=51)
-                        wb.Close()
-                        conversion_success = True
-                    finally:
-                        if managed_excel:
-                            excel.Quit()
-                            pythoncom.CoUninitialize()
-                except Exception as e:
-                    logger.debug(f"  COM Conversion error: {e}")
-
-            # 3. Linux/macOS LibreOffice Conversion (High Fidelity)
-            if not conversion_success and os.name != 'nt' and is_soffice_available():
-                conversion_success = convert_xls_to_xlsx_soffice(xls_path, xlsx_path)
-
-            # 4. Pure Python Fallback (xlrd -> openpyxl)
+            # 2. Pure Python Strategy (xlrd -> openpyxl) - Most Stable
             if not conversion_success:
                 try:
                     import xlrd
+                    # xlrd 2.0+ only supports .xls, which is exactly what we want here
                     src_book = xlrd.open_workbook(str(xls_path), formatting_info=False)
                     out_wb = Workbook()
                     if "Sheet" in out_wb.sheetnames:
@@ -411,15 +379,18 @@ def _convert_xls_to_xlsx(folder_path: Path, excel_app=None):
 
                     for i in range(src_book.nsheets):
                         src_ws = src_book.sheet_by_index(i)
+                        # Clean sheet name for openpyxl
                         safe_name = re.sub(r'[\\/*?:\[\]]', '', (src_ws.name or f"Sheet{i+1}")).strip()[:31]
                         if not safe_name:
                             safe_name = f"Sheet{i+1}"
-                        if safe_name in out_wb.sheetnames:
-                            base = safe_name[:28]
-                            suffix = 1
-                            while f"{base}_{suffix}" in out_wb.sheetnames:
-                                suffix += 1
-                            safe_name = f"{base}_{suffix}"
+                        
+                        # Handle duplicate names in the same workbook
+                        orig_safe_name = safe_name
+                        counter = 1
+                        while safe_name in out_wb.sheetnames:
+                            suffix = f"_{counter}"
+                            safe_name = f"{orig_safe_name[:31-len(suffix)]}{suffix}"
+                            counter += 1
 
                         out_ws = out_wb.create_sheet(title=safe_name)
                         for r in range(src_ws.nrows):
@@ -434,8 +405,44 @@ def _convert_xls_to_xlsx(folder_path: Path, excel_app=None):
 
                     out_wb.save(str(xlsx_path))
                     conversion_success = True
+                    logger.debug(f"  Successfully converted {xls_path.name} using xlrd")
                 except Exception as e:
-                    logger.exception(f"  xlrd conversion fallback failed for {xls_path.name}: {e}")
+                    logger.debug(f"  xlrd conversion failed: {e}")
+
+            # 3. Windows COM Strategy (Fallback)
+            if not conversion_success and os.name == 'nt':
+                try:
+                    import win32com.client
+                    import pythoncom
+                    abs_xls, abs_xlsx = str(xls_path.resolve()), str(xlsx_path.resolve())
+                    
+                    managed_excel = False
+                    if excel_app is None:
+                        pythoncom.CoInitialize()
+                        # Use DispatchEx for isolation
+                        excel = win32com.client.DispatchEx("Excel.Application")
+                        excel.Visible = False
+                        excel.DisplayAlerts = False
+                        managed_excel = True
+                    else:
+                        excel = excel_app
+                    
+                    try:
+                        wb = excel.Workbooks.Open(abs_xls, UpdateLinks=0)
+                        wb.SaveAs(abs_xlsx, FileFormat=51)
+                        wb.Close()
+                        conversion_success = True
+                        logger.debug(f"  Successfully converted {xls_path.name} using COM")
+                    finally:
+                        if managed_excel:
+                            excel.Quit()
+                            pythoncom.CoUninitialize()
+                except Exception as e:
+                    logger.debug(f"  COM Conversion error: {e}")
+
+            # 4. Linux/macOS LibreOffice Strategy (High Fidelity Fallback)
+            if not conversion_success and os.name != 'nt' and is_soffice_available():
+                conversion_success = convert_xls_to_xlsx_soffice(xls_path, xlsx_path)
 
             if not conversion_success:
                 logger.error(f"Failed to convert {xls_path.name} to .xlsx; source may require COM or LibreOffice conversion.")

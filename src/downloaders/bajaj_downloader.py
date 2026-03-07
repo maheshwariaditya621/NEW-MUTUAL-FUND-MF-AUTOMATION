@@ -114,7 +114,7 @@ class BajajDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -175,7 +175,7 @@ class BajajDownloader(BaseDownloader):
                 duration = time.time() - start_time
                 self.notifier.notify_success("BAJAJ", year, month, files_downloaded=1, duration=duration)
                 
-                logger.success(f"✅ Bajaj download completed")
+                logger.success(f"[SUCCESS] Bajaj download completed")
                 logger.info("=" * 60)
                 logger.info(f"[SUMMARY]")
                 logger.info(f"AMC: Bajaj")
@@ -386,11 +386,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

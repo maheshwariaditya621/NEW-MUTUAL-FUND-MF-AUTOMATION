@@ -406,7 +406,7 @@ class HDFCDownloader(BaseDownloader):
                 duration=duration
             )
 
-            logger.success("✅ HDFC download completed")
+            logger.success("[SUCCESS] HDFC download completed")
             logger.info("=" * 60)
             logger.info(f"[SUMMARY]")
             logger.info(f"AMC: HDFC")
@@ -525,11 +525,11 @@ if __name__ == "__main__":
     
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result['files_downloaded']} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result['files_downloaded']} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

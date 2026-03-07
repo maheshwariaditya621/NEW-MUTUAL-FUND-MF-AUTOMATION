@@ -96,7 +96,7 @@ class SBIDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
 
@@ -133,7 +133,7 @@ class SBIDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("SBI", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ SBI download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] SBI download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -157,9 +157,9 @@ class SBIDownloader(BaseDownloader):
         if option.count() > 0:
             option.click()
             time.sleep(2)
-            logger.info(f"  ✓ Selected {dropdown_id}: {target_text}")
+            logger.info(f"  [OK] Selected {dropdown_id}: {target_text}")
         else:
-            logger.warning(f"  ✗ Not found in {dropdown_id}: {target_text}")
+            logger.warning(f"  [FAIL] Not found in {dropdown_id}: {target_text}")
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
         url = "https://www.sbimf.com/portfolios"
@@ -183,7 +183,7 @@ class SBIDownloader(BaseDownloader):
             page.goto(url, timeout=60000)
             page.wait_for_load_state("networkidle")
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Select filters using custom dropdowns
             logger.info("Setting filters...")
@@ -199,17 +199,17 @@ class SBIDownloader(BaseDownloader):
             anchor = page.locator('a').filter(has_text="All Schemes").filter(has_text="Monthly Portfolio").filter(has_text=month_name).filter(has_text=str(target_year)).first
             
             if anchor.count() == 0:
-                logger.warning(f"  ✗ Portfolio link not found for {month_name} {target_year}")
+                logger.warning(f"  [FAIL] Portfolio link not found for {month_name} {target_year}")
                 return None
 
-            logger.info(f"  ✓ Found: {anchor.text_content().strip()}")
+            logger.info(f"  [OK] Found: {anchor.text_content().strip()}")
             
             # Find the download button in the same row
             row = page.locator("div.portfolio-list-wrapper .row, tr").filter(has=anchor).first
             download_btn = row.locator('a:has-text("Download")').first
             
             if download_btn.count() == 0:
-                logger.warning("  ✗ Download button not found")
+                logger.warning("  [FAIL] Download button not found")
                 return None
 
             # Download the file
@@ -222,7 +222,7 @@ class SBIDownloader(BaseDownloader):
             save_path = download_folder / filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {filename}")
+            logger.info(f"  [OK] Saved: {filename}")
             
             return save_path
 
@@ -243,11 +243,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -228,7 +228,7 @@ class PPFASDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -277,7 +277,7 @@ class PPFASDownloader(BaseDownloader):
                 duration = time.time() - start_time
                 self.notifier.notify_success("PPFAS", year, month, files_downloaded=1, duration=duration)
                 
-                logger.success("✅ PPFAS download completed")
+                logger.success("[SUCCESS] PPFAS download completed")
                 logger.info("=" * 60)
                 logger.info(f"[SUMMARY]")
                 logger.info(f"AMC: PPFAS")
@@ -371,11 +371,11 @@ if __name__ == "__main__":
     result = downloader.download(year=args.year, month=args.month)
     
     if result["status"] == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif result["status"] == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif result["status"] == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published: {result.get('reason')}")
+        logger.info(f"[INFO]  Info: Month not yet published: {result.get('reason')}")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

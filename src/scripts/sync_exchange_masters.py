@@ -49,10 +49,10 @@ def download_file(url: str, filename: str) -> Optional[Path]:
         with open(output_path, "wb") as f:
             f.write(response.content)
         
-        logger.info(f"  ✓ Saved to {output_path}")
+        logger.info(f"  [OK] Saved to {output_path}")
         return output_path
     except Exception as e:
-        logger.error(f"  ✗ Failed to download {url}: {e}")
+        logger.error(f"  [FAIL] Failed to download {url}: {e}")
         return None
 
 def sync_isin_master():
@@ -115,7 +115,7 @@ def sync_isin_master():
                     nse_symbol = EXCLUDED.nse_symbol,
                     updated_at = CURRENT_TIMESTAMP
             """, (isin, row['name'], row['symbol']))
-        logger.info(f"  ✓ Accepted {accepted} NSE Equity ISINs")
+        logger.info(f"  [OK] Accepted {accepted} NSE Equity ISINs")
 
         logger.info("Upserting BSE data into isin_master...")
         accepted = 0
@@ -135,7 +135,7 @@ def sync_isin_master():
                     bse_code = EXCLUDED.bse_code,
                     updated_at = CURRENT_TIMESTAMP
             """, (isin, row['name'], b_sym))
-        logger.info(f"  ✓ Accepted {accepted} BSE Equity ISINs")
+        logger.info(f"  [OK] Accepted {accepted} BSE Equity ISINs")
         
         conn.commit()
     except Exception as e:

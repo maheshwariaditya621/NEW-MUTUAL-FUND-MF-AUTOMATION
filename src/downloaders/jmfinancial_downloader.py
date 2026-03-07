@@ -94,7 +94,7 @@ class JMFinancialDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -130,7 +130,7 @@ class JMFinancialDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("JM_FINANCIAL", year, month, files_downloaded=file_count, duration=duration)
-                logger.success(f"✅ JM_FINANCIAL download completed. Total files: {file_count}")
+                logger.success(f"[SUCCESS] JM_FINANCIAL download completed. Total files: {file_count}")
                 return {"status": "success", "files_downloaded": file_count, "duration": duration}
 
             except Exception as e:
@@ -168,7 +168,7 @@ class JMFinancialDownloader(BaseDownloader):
                 logger.warning("  ⚠ Navigation timed out, proceeding anyway...")
             
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Scan through pages to find target month
             all_links = []
@@ -229,7 +229,7 @@ class JMFinancialDownloader(BaseDownloader):
                     break
 
             if not all_links:
-                logger.warning(f"  ✗ No files found for {month_name} {target_year}")
+                logger.warning(f"  [FAIL] No files found for {month_name} {target_year}")
                 return 0
 
             # Deduplicate
@@ -268,9 +268,9 @@ class JMFinancialDownloader(BaseDownloader):
                                 f.write(chunk)
                         count += 1
                     else:
-                        logger.warning(f"    ✗ Failed (HTTP {response.status_code})")
+                        logger.warning(f"    [FAIL] Failed (HTTP {response.status_code})")
                 except Exception as e:
-                    logger.error(f"    ✗ Error: {str(e)[:50]}")
+                    logger.error(f"    [FAIL] Error: {str(e)[:50]}")
 
             return count
 
@@ -291,11 +291,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -95,7 +95,7 @@ class DSPDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -131,7 +131,7 @@ class DSPDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("DSP", year, month, files_downloaded=files_extracted, duration=duration)
-                logger.success(f"✅ DSP download completed: {files_extracted} files extracted")
+                logger.success(f"[SUCCESS] DSP download completed: {files_extracted} files extracted")
                 return {"status": "success", "files_downloaded": files_extracted, "duration": duration}
 
             except Exception as e:
@@ -165,7 +165,7 @@ class DSPDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Click "Month End Portfolio" section if it exists
             logger.info("Opening 'Month End Portfolio' section...")
@@ -177,7 +177,7 @@ class DSPDownloader(BaseDownloader):
                 if month_end_btn.count() > 0:
                     month_end_btn.click()
                     time.sleep(3)
-                    logger.info("  ✓ Section opened")
+                    logger.info("  [OK] Section opened")
             except:
                 logger.info("  → Section toggle not found, continuing...")
 
@@ -200,11 +200,11 @@ class DSPDownloader(BaseDownloader):
                     download_link = page.locator("a").filter(has_text="Portfolio Details").filter(has_text=short_month).filter(has_text=str(target_year))
 
             if download_link.count() == 0:
-                logger.warning(f"  ✗ Link not found for {month_name} {target_year}")
+                logger.warning(f"  [FAIL] Link not found for {month_name} {target_year}")
                 return 0
 
             actual_text = download_link.first.text_content().strip()
-            logger.info(f"  ✓ Found: '{actual_text}'")
+            logger.info(f"  [OK] Found: '{actual_text}'")
             
             # Download the ZIP file
             logger.info("Downloading ZIP file...")
@@ -216,7 +216,7 @@ class DSPDownloader(BaseDownloader):
             zip_name = download.suggested_filename or "portfolio.zip"
             zip_path = download_folder / zip_name
             download.save_as(zip_path)
-            logger.info(f"  ✓ Downloaded: {zip_name}")
+            logger.info(f"  [OK] Downloaded: {zip_name}")
 
             # Extract ZIP contents
             logger.info("Extracting ZIP contents...")
@@ -225,16 +225,16 @@ class DSPDownloader(BaseDownloader):
                     zip_ref.extractall(download_folder)
                     file_count = len(zip_ref.namelist())
                 
-                logger.info(f"  ✓ Extracted {file_count} files")
+                logger.info(f"  [OK] Extracted {file_count} files")
                 
                 # Remove the ZIP file
                 zip_path.unlink()
-                logger.info("  ✓ Cleaned up ZIP file")
+                logger.info("  [OK] Cleaned up ZIP file")
                 
                 return file_count
                 
             except Exception as e:
-                logger.error(f"  ✗ Extraction failed: {e}")
+                logger.error(f"  [FAIL] Extraction failed: {e}")
                 return 0
 
         finally:
@@ -254,11 +254,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

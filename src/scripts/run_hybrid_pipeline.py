@@ -49,7 +49,7 @@ def run_hybrid(amc_slug: str, year: int, month: int, dry_run: bool = False, redo
     status = result.get("status")
     
     if status == "success":
-        logger.success(f"✅ Hybrid Pipeline completed successfully for {amc_slug}")
+        logger.success(f"[SUCCESS] Hybrid Pipeline completed successfully for {amc_slug}")
         # Show extraction stats if available
         ext_res = result.get("steps", {}).get("extract", {})
         if ext_res:
@@ -57,7 +57,7 @@ def run_hybrid(amc_slug: str, year: int, month: int, dry_run: bool = False, redo
              
     elif status == "stopped":
         reason = result.get("reason", "Internal stop")
-        logger.info(f"ℹ️  Pipeline stopped gracefully: {reason}")
+        logger.info(f"[INFO]  Pipeline stopped gracefully: {reason}")
         
     elif status == "failed":
         # Check for specific step failures
@@ -65,9 +65,9 @@ def run_hybrid(amc_slug: str, year: int, month: int, dry_run: bool = False, redo
         if failed_step:
             step_res = result["steps"][failed_step]
             step_reason = step_res.get("reason") or step_res.get("error") or "Unknown error"
-            logger.error(f"❌ Hybrid Pipeline failed at '{failed_step}' step: {step_reason}")
+            logger.error(f"[ERROR] Hybrid Pipeline failed at '{failed_step}' step: {step_reason}")
         else:
-            logger.error(f"❌ Hybrid Pipeline failed: {result.get('reason') or 'Unknown error'}")
+            logger.error(f"[ERROR] Hybrid Pipeline failed: {result.get('reason') or 'Unknown error'}")
             
     else:
         logger.warning(f"⚠️ Pipeline finished with status: {status}")

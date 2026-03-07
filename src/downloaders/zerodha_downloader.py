@@ -96,7 +96,7 @@ class ZerodhaDownloader(BaseDownloader):
 
                 duration = time.time() - start_time
                 self.notifier.notify_success("ZERODHA", year, month, files_downloaded=len(downloaded_files), duration=duration)
-                logger.success(f"✅ ZERODHA download completed: {len(downloaded_files)} files")
+                logger.success(f"[SUCCESS] ZERODHA download completed: {len(downloaded_files)} files")
                 return {"status": "success", "files_count": len(downloaded_files), "duration": duration}
 
             except Exception as e:
@@ -135,7 +135,7 @@ class ZerodhaDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(3)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Expand Portfolio Disclosures
             logger.info("Expanding Portfolio Disclosures...")
@@ -193,7 +193,7 @@ class ZerodhaDownloader(BaseDownloader):
             # Apply
             page.get_by_role("button", name="Apply").click()
             time.sleep(2)
-            logger.info(f"  ✓ Period set to {month_name} {target_year}")
+            logger.info(f"  [OK] Period set to {month_name} {target_year}")
 
             # Download Report
             logger.info("Triggering download...")
@@ -213,7 +213,7 @@ class ZerodhaDownloader(BaseDownloader):
                 save_path = download_folder / filename
                 download.save_as(str(save_path))
                 downloaded_paths.append(save_path)
-                logger.info(f"  ✓ Saved: {filename}")
+                logger.info(f"  [OK] Saved: {filename}")
                 
                 # Check if more downloads are happening?
                 # For Zerodha "All Schemes", it usually triggers 3-5 files.
@@ -236,7 +236,7 @@ class ZerodhaDownloader(BaseDownloader):
                 # If the user wants "All Schemes" to work, I should probably detect if multiple downloads happen.
                 
             except Exception as e:
-                logger.error(f"  ✗ Download failed: {str(e)[:100]}")
+                logger.error(f"  [FAIL] Download failed: {str(e)[:100]}")
                 raise
 
             return downloaded_paths
@@ -260,11 +260,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_count')} files")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_count')} files")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete")
+        logger.success(f"[SUCCESS] Success: Month already complete")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

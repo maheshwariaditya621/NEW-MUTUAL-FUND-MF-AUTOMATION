@@ -95,7 +95,7 @@ class CanaraDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -131,7 +131,7 @@ class CanaraDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("CANARA", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ CANARA download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] CANARA download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -166,7 +166,7 @@ class CanaraDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Handle cookie/disclaimer banners
             try:
@@ -192,7 +192,7 @@ class CanaraDownloader(BaseDownloader):
             
             submit_btn.click()
             time.sleep(10)
-            logger.info("  ✓ Search submitted")
+            logger.info("  [OK] Search submitted")
 
             # Download files from all pages
             total_downloaded = 0
@@ -238,14 +238,14 @@ class CanaraDownloader(BaseDownloader):
                         
                         save_path = download_folder / f"{clean_name}{ext}"
                         download.save_as(save_path)
-                        logger.info(f"    ✓ Saved: {save_path.name}")
+                        logger.info(f"    [OK] Saved: {save_path.name}")
                         
                         popup_page.close()
                         total_downloaded += 1
                         time.sleep(1)
                         
                     except Exception as e:
-                        logger.warning(f"    ✗ Download error: {str(e)[:100]}")
+                        logger.warning(f"    [FAIL] Download error: {str(e)[:100]}")
                         try:
                             popup_page.close()
                         except:
@@ -263,7 +263,7 @@ class CanaraDownloader(BaseDownloader):
                     time.sleep(5)
                     page_num = next_page_num
                 else:
-                    logger.info(f"  ✓ End reached at page {page_num}")
+                    logger.info(f"  [OK] End reached at page {page_num}")
                     break
 
             return total_downloaded
@@ -285,11 +285,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

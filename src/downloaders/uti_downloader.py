@@ -93,7 +93,7 @@ class UTIDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -129,7 +129,7 @@ class UTIDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("UTI", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ UTI download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] UTI download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -163,7 +163,7 @@ class UTIDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, timeout=60000)
             time.sleep(3)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # 1) Select Year
             logger.info(f"Selecting year: {target_year}...")
@@ -171,7 +171,7 @@ class UTIDownloader(BaseDownloader):
             time.sleep(1)
             page.get_by_text(str(target_year), exact=True).click()
             time.sleep(2)
-            logger.info(f"  ✓ Year {target_year} selected")
+            logger.info(f"  [OK] Year {target_year} selected")
 
             # 2) Select Month (with virtual scroll support)
             logger.info(f"Selecting month: {month_name}...")
@@ -182,7 +182,7 @@ class UTIDownloader(BaseDownloader):
             try:
                 month_element = page.get_by_text(month_name, exact=True)
                 month_element.click(timeout=2000)
-                logger.info(f"  ✓ Month {month_name} selected (no scroll needed)")
+                logger.info(f"  [OK] Month {month_name} selected (no scroll needed)")
             except:
                 # Month not visible, need to scroll within dropdown
                 logger.info(f"  → Scrolling to find {month_name}...")
@@ -194,7 +194,7 @@ class UTIDownloader(BaseDownloader):
                     
                     # Now click the month
                     page.get_by_text(month_name, exact=True).click()
-                    logger.info(f"  ✓ Month {month_name} selected (after scroll)")
+                    logger.info(f"  [OK] Month {month_name} selected (after scroll)")
                 except Exception as e:
                     raise Exception(f"Could not select month: {str(e)[:100]}")
             
@@ -204,7 +204,7 @@ class UTIDownloader(BaseDownloader):
             logger.info("Clicking 'Get Portfolio' button...")
             page.get_by_role("button", name="Get Portfolio").click()
             time.sleep(5)
-            logger.info("  ✓ Button clicked")
+            logger.info("  [OK] Button clicked")
 
             # 4) Download ZIP file
             logger.info("Downloading ZIP file...")
@@ -222,7 +222,7 @@ class UTIDownloader(BaseDownloader):
             # Save ZIP to temp location
             temp_zip = download_folder / f"temp_{month_name}_{target_year}.zip"
             download.save_as(temp_zip)
-            logger.info(f"  ✓ ZIP downloaded")
+            logger.info(f"  [OK] ZIP downloaded")
 
             # 5) Extract SEBI Exposure file from ZIP
             logger.info("Extracting SEBI Exposure file...")
@@ -270,10 +270,10 @@ class UTIDownloader(BaseDownloader):
                     final_path = target_folder / f"{month_name}_{year}_{original_name}"
                     
                 shutil.move(found_file, final_path)
-                logger.info(f"  ✓ Extracted: {final_path.name}")
+                logger.info(f"  [OK] Extracted: {final_path.name}")
                 return final_path
             else:
-                logger.warning("  ✗ SEBI Exposure file not found in ZIP")
+                logger.warning("  [FAIL] SEBI Exposure file not found in ZIP")
                 return None
                 
         finally:
@@ -294,11 +294,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

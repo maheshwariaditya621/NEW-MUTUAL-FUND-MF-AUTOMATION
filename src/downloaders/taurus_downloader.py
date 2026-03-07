@@ -102,7 +102,7 @@ class TaurusDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -265,11 +265,11 @@ class TaurusDownloader(BaseDownloader):
                             fname = f"TAURUS_{safe_name}_{month_short}_{target_year}_{fname}"
                             
                         dl.save_as(download_folder / fname)
-                        logger.info(f"    ✓ Saved: {fname}")
+                        logger.info(f"    [OK] Saved: {fname}")
                         success_count += 1
                         time.sleep(2)
                     except Exception as e:
-                        logger.error(f"    ✗ {str(e)[:50]}")
+                        logger.error(f"    [FAIL] {str(e)[:50]}")
                         if "closed" in str(e).lower(): raise e
                 except Exception as e:
                      if "closed" in str(e).lower(): raise e
@@ -292,11 +292,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

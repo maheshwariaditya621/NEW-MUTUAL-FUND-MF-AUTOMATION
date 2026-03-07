@@ -9,6 +9,7 @@ from src.db import (
     create_corporate_entity, log_resolution_audit,
     find_potential_scheme_renames, record_pending_merge, record_notification, get_cursor
 )
+from src.corporate_actions.reprocessing_worker import ReprocessingWorker
 
 class PortfolioLoader:
     """
@@ -104,9 +105,15 @@ class PortfolioLoader:
         """
         Loads a list of holdings into the database.
         Returns metadata about the load (rows inserted, etc).
+
+        After loading, enqueues all ingested ISINs into the reprocessing_queue
+        so that adj_quantity is recalculated for any ISIN with a corporate action.
         """
         if not holdings:
             return {"rows_inserted": 0, "schemes_count": 0}
+
+        # Track all ISINs loaded in this batch for the post-load hook
+        loaded_isins: set = set()
 
         # Group holdings by scheme
         schemes_data = {}
@@ -235,14 +242,12 @@ class PortfolioLoader:
                         raw_sector = isin_meta['sector'] if isin_meta else h.get('sector', 'Unknown')
                         canonical_sector = get_canonical_sector(raw_sector)
 
-                        # Use upsert_company with entity_id link
                         company_id = upsert_company(
                             isin=isin,
                             company_name=canonical_name,
                             sector=canonical_sector,
                             industry=isin_meta.get('industry') if isin_meta else h.get('industry'),
-                            # We should ideally pass entity_id here too if upsert_company supports it
-                             # nse_symbol/bse_code can be passed if we had them
+                            entity_id=entity_id
                         )
                         # Ensure companies table has parity with entity_id (optional if upsert_company doesn't have it yet)
                         # For now, company_id is our internal record ID.
@@ -258,6 +263,8 @@ class PortfolioLoader:
                         "market_value_inr": h['market_value_inr'],
                         "percent_of_nav": h['percent_of_nav']
                     })
+                    # Collect ISINs for corporate actions post-load hook
+                    loaded_isins.add(isin)
 
                 # 4. Atomic Load per Scheme
                 # ALL FUNDS RULE: Even if no equity (db_holdings empty), we proceed if total_net_assets exists
@@ -298,6 +305,24 @@ class PortfolioLoader:
                 # Log and re-raise to trigger transaction rollback
                 logger.error(f"Critical failure loading scheme {s_key}: {e}")
                 raise
+
+        # ── Corporate Actions Post-Load Hook ──────────────────────────────
+        # After all schemes are loaded, enqueue any ISIN that has a known
+        # confirmed corporate action so adj_quantity stays current.
+        # This is a no-op for ISINs with no corporate actions.
+        if loaded_isins:
+            try:
+                worker = ReprocessingWorker()
+                enqueued = worker.enqueue_batch(list(loaded_isins), reason="NEW_HOLDINGS")
+                if enqueued:
+                    logger.info(
+                        f"[PortfolioLoader] Enqueued {enqueued} ISIN(s) for corporate "
+                        f"action adjustment after load (period_id={period_id})."
+                    )
+            except Exception as hook_err:
+                # Hook failure must NOT break the load — log and continue
+                logger.warning(f"[PortfolioLoader] Corporate actions hook failed: {hook_err}")
+        # ─────────────────────────────────────────────────────────────────
 
         return {
             "rows_inserted": total_inserted,

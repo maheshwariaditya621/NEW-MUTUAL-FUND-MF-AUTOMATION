@@ -367,7 +367,7 @@ class AxisDownloader(BaseDownloader):
             
             duration = time.time() - start_time
             
-            logger.success("✅ AXIS download completed")
+            logger.success("[SUCCESS] AXIS download completed")
             logger.info("=" * 60)
             logger.info(f"[SUMMARY]")
             logger.info(f"AMC: Axis")
@@ -454,11 +454,11 @@ if __name__ == "__main__":
     
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         exit(1)

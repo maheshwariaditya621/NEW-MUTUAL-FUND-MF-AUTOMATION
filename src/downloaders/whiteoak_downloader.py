@@ -96,7 +96,7 @@ class WhiteOakDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -132,7 +132,7 @@ class WhiteOakDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("WHITEOAK", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ WHITEOAK download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] WHITEOAK download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -181,7 +181,7 @@ class WhiteOakDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # 1. Selection of 'Monthly' filter
             logger.info("Selecting 'Monthly' filter...")
@@ -190,14 +190,14 @@ class WhiteOakDownloader(BaseDownloader):
                 monthly_filter.click()
                 # Wait for results to refresh (look for the results total updating if possible, or just sleep)
                 time.sleep(10) 
-                logger.info("  ✓ 'Monthly' filter clicked and waited for refresh")
+                logger.info("  [OK] 'Monthly' filter clicked and waited for refresh")
             else:
                 # Fallback to finding label by text
                 monthly_filter = page.locator('label').filter(has_text=re.compile("^Monthly$", re.I)).first
                 if monthly_filter.count() > 0:
                     monthly_filter.click()
                     time.sleep(10)
-                    logger.info("  ✓ 'Monthly' filter clicked (fallback)")
+                    logger.info("  [OK] 'Monthly' filter clicked (fallback)")
                 else:
                     logger.warning("  ⚠ 'Monthly' filter button (label[for='monthly']) not found. Using default 'All Type' view...")
 
@@ -280,17 +280,17 @@ class WhiteOakDownloader(BaseDownloader):
                                         continue
 
                                     download.save_as(str(save_path))
-                                    logger.info(f"    ✓ Saved: {original_filename}")
+                                    logger.info(f"    [OK] Saved: {original_filename}")
                                     success_count += 1
                                     matches_on_page += 1
                                     processed_items.add(txt)
                                 except Exception as inner_e:
-                                    logger.error(f"    ✗ Download capture failed: {str(inner_e)[:100]}")
+                                    logger.error(f"    [FAIL] Download capture failed: {str(inner_e)[:100]}")
                             else:
-                                logger.warning(f"    ✗ Download button not found in row container.")
+                                logger.warning(f"    [FAIL] Download button not found in row container.")
                             
                         except Exception as e:
-                            logger.error(f"    ✗ Row processing error: {str(e)[:100]}")
+                            logger.error(f"    [FAIL] Row processing error: {str(e)[:100]}")
                     
                     # Check if this row is strictly OLDER than our target period to help decide when to stop
                     is_older = False
@@ -349,11 +349,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

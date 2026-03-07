@@ -101,7 +101,7 @@ class MotilalDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -137,7 +137,7 @@ class MotilalDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("MOTILAL", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ MOTILAL download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] MOTILAL download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -177,7 +177,7 @@ class MotilalDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=60000)
             time.sleep(3)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Close any popup/ad that may appear (e.g. NFO video popup)
             logger.info("Checking for popups/ads...")
@@ -201,7 +201,7 @@ class MotilalDownloader(BaseDownloader):
                         btn = page.locator(sel).first
                         if btn.is_visible(timeout=1000):
                             btn.click()
-                            logger.info(f"  ✓ Closed popup via selector: {sel}")
+                            logger.info(f"  [OK] Closed popup via selector: {sel}")
                             time.sleep(1)
                             break
                     except Exception:
@@ -210,7 +210,7 @@ class MotilalDownloader(BaseDownloader):
                 # Last resort: click outside the modal/popup
                 page.mouse.click(50, 50)
                 time.sleep(1)
-                logger.info("  ✓ Popup handling done")
+                logger.info("  [OK] Popup handling done")
             except Exception as e:
                 logger.debug(f"Popup handling skipped: {e}")
 
@@ -220,7 +220,7 @@ class MotilalDownloader(BaseDownloader):
             time.sleep(1)
             page.get_by_role("option", name=str(selection_year)).click()
             time.sleep(2)
-            logger.info(f"  ✓ Year {selection_year} selected")
+            logger.info(f"  [OK] Year {selection_year} selected")
 
             # Select Month
             logger.info(f"Selecting month: {selection_month_name}...")
@@ -228,7 +228,7 @@ class MotilalDownloader(BaseDownloader):
             time.sleep(1)
             page.get_by_role("option", name=selection_month_name).click()
             time.sleep(2)
-            logger.info(f"  ✓ Month {selection_month_name} selected")
+            logger.info(f"  [OK] Month {selection_month_name} selected")
 
             # Click document icon for Scheme Portfolio
             # IMPORTANT: Use a precise row-level locator to avoid hitting the Fortnightly Report
@@ -246,7 +246,7 @@ class MotilalDownloader(BaseDownloader):
                 # Find the ancestor list item or card wrapper
                 card = row.locator("xpath=ancestor::*[self::li or self::tr or self::div][1]")
                 card.locator("img[src*='xls']").first.click()
-                logger.info("  ✓ XLS icon clicked via text-exact match")
+                logger.info("  [OK] XLS icon clicked via text-exact match")
             except Exception:
                 # Fallback: iterate all matching rows and pick the one whose text exactly contains
                 # 'Scheme Portfolio Details' but NOT 'Fortnightly'
@@ -260,7 +260,7 @@ class MotilalDownloader(BaseDownloader):
                             xls_icon = row.locator("img[src*='xls']")
                             if xls_icon.count() > 0:
                                 xls_icon.first.click()
-                                logger.info(f"  ✓ XLS clicked in row: {txt[:80]}")
+                                logger.info(f"  [OK] XLS clicked in row: {txt[:80]}")
                                 clicked = True
                                 break
                     except Exception:
@@ -269,7 +269,7 @@ class MotilalDownloader(BaseDownloader):
                     raise Exception(f"Could not locate 'Scheme Portfolio Details {month_name}' row")
             
             time.sleep(2)
-            logger.info("  ✓ XLS icon clicked, waiting for popup")
+            logger.info("  [OK] XLS icon clicked, waiting for popup")
 
             # Download file from popup
             logger.info("Downloading file from popup...")
@@ -284,7 +284,7 @@ class MotilalDownloader(BaseDownloader):
             # Save to temp location first
             temp_path = download_folder / f"temp_{suggested}"
             download.save_as(temp_path)
-            logger.info(f"  ✓ Downloaded: {suggested}")
+            logger.info(f"  [OK] Downloaded: {suggested}")
 
             # Process the file (extract if ZIP, rename)
             final_path = self._process_downloaded_file(temp_path, month_name, target_year, download_folder, suggested)
@@ -321,7 +321,7 @@ class MotilalDownloader(BaseDownloader):
                     shutil.move(str(found_file), str(final_path))
                     temp_path.unlink()
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    logger.info(f"  ✓ Saved: {final_path.name}")
+                    logger.info(f"  [OK] Saved: {final_path.name}")
                     return final_path
                 else:
                     temp_path.unlink()
@@ -330,7 +330,7 @@ class MotilalDownloader(BaseDownloader):
             else:
                 final_path = download_folder / original_suggested_name
                 shutil.move(str(temp_path), str(final_path))
-                logger.info(f"  ✓ Saved: {final_path.name}")
+                logger.info(f"  [OK] Saved: {final_path.name}")
                 return final_path
                 
         except Exception as e:
@@ -352,11 +352,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

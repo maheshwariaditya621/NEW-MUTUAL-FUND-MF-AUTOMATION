@@ -100,7 +100,7 @@ class EdelweissDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -136,7 +136,7 @@ class EdelweissDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("EDELWEISS", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ EDELWEISS download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] EDELWEISS download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -190,7 +190,7 @@ class EdelweissDownloader(BaseDownloader):
                 tab = page.get_by_text("Monthly Portfolio and Risk-o-", exact=False)
                 if tab.is_visible(timeout=5000):
                     tab.click()
-                    logger.info("  ✓ Clicked the tab.")
+                    logger.info("  [OK] Clicked the tab.")
                     time.sleep(2)
             except:
                 logger.info("  ⚠ Tab not found or already active.")
@@ -210,7 +210,7 @@ class EdelweissDownloader(BaseDownloader):
                 time.sleep(1)
                 page.get_by_role("option", name=str(target_year), exact=True).click(force=True)
             
-            logger.info(f"  ✓ Selected Year: {target_year}")
+            logger.info(f"  [OK] Selected Year: {target_year}")
             time.sleep(3)  # Wait for links to update/load
 
             # 3) Find and download the portfolio link for the specific month
@@ -259,7 +259,7 @@ class EdelweissDownloader(BaseDownloader):
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {final_filename}")
+            logger.info(f"  [OK] Saved: {final_filename}")
             
             return save_path
 
@@ -280,11 +280,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

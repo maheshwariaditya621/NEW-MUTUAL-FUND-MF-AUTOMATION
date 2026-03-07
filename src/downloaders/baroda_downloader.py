@@ -94,7 +94,7 @@ class BarodaDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -130,7 +130,7 @@ class BarodaDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("BARODA", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ BARODA download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] BARODA download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -197,7 +197,7 @@ class BarodaDownloader(BaseDownloader):
         logger.info(f"Navigating to {url}...")
         page.goto(url, wait_until="load", timeout=90000)
         time.sleep(5)
-        logger.info("  ✓ Page loaded")
+        logger.info("  [OK] Page loaded")
 
         # Expand year accordion if needed
         logger.info(f"Selecting year heading: {sel_year}...")
@@ -214,7 +214,7 @@ class BarodaDownloader(BaseDownloader):
             year_btn = page.locator(f"li:has-text('{sel_year}')").filter(has_text=sel_year).first
             if year_btn.count() > 0:
                 year_btn.evaluate("el => el.click()")
-                logger.info(f"  ✓ Switched to year {sel_year}")
+                logger.info(f"  [OK] Switched to year {sel_year}")
                 time.sleep(4)
         except:
             logger.info(f"  → Year {sel_year} category not explicitly found; searching current view")
@@ -231,7 +231,7 @@ class BarodaDownloader(BaseDownloader):
             found = page.locator("li").filter(has_text=search_regex).first
             if found.count() > 0 and found.is_visible():
                 txt = found.text_content().strip().replace('\n', ' ')
-                logger.info(f"  ✓ Found: {txt[:120]}...")
+                logger.info(f"  [OK] Found: {txt[:120]}...")
 
                 # Download the file
                 logger.info("Starting download...")
@@ -245,7 +245,7 @@ class BarodaDownloader(BaseDownloader):
                 save_path = download_folder / final_filename
 
                 download.save_as(save_path)
-                logger.info(f"  ✓ Saved: {final_filename}")
+                logger.info(f"  [OK] Saved: {final_filename}")
 
                 return save_path
 
@@ -260,7 +260,7 @@ class BarodaDownloader(BaseDownloader):
                 logger.info(f"  → No more items to load")
                 break
 
-        logger.warning(f"  ✗ Not found in year {sel_year}")
+        logger.warning(f"  [FAIL] Not found in year {sel_year}")
         return None
 
 
@@ -276,11 +276,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

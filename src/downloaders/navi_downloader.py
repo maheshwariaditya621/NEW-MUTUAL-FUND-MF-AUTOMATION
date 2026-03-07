@@ -118,7 +118,7 @@ class NaviDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -153,7 +153,7 @@ class NaviDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("Navi", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ {self.AMC_NAME} download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] {self.AMC_NAME} download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -307,7 +307,7 @@ class NaviDownloader(BaseDownloader):
                             with open(save_path, "wb") as f:
                                 f.write(response.body())
                                 
-                            logger.info(f"      ✓ Saved: {original_filename}")
+                            logger.info(f"      [OK] Saved: {original_filename}")
                             success_count += 1
                             time.sleep(0.5)
                         else:
@@ -338,11 +338,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -80,10 +80,11 @@ async def search_stocks(
             f"""
             SELECT DISTINCT ON (relevance_score, COALESCE(c.entity_id::text, c.company_id::text))
                 c.isin,
-                c.company_name,
+                COALESCE(ce.canonical_name, c.company_name) as company_name,
                 c.sector,
                 c.nse_symbol,
                 c.bse_code,
+                c.entity_id,
                 CASE 
                     WHEN UPPER(c.company_name) = UPPER(%s) THEN 100
                     WHEN c.isin = UPPER(%s) THEN 95
@@ -92,11 +93,12 @@ async def search_stocks(
                     ELSE (similarity(c.company_name, %s) * 80)::int
                 END as relevance_score
             FROM companies c
+            LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
             WHERE ({conditions_str}) OR (c.company_name %% %s OR c.isin ILIKE %s OR c.nse_symbol ILIKE %s)
             ORDER BY 
                 relevance_score DESC,
                 COALESCE(c.entity_id::text, c.company_id::text),
-                c.company_name
+                c.updated_at DESC
             LIMIT %s
             """,
             query_placeholders
@@ -116,7 +118,8 @@ async def search_stocks(
                     company_name=row[1].upper(),
                     sector=row[2],
                     nse_symbol=row[3],
-                    bse_code=row[4]
+                    bse_code=row[4],
+                    entity_id=row[5]
                 ))
 
         return StockSearchResponse(
@@ -134,34 +137,37 @@ async def search_stocks(
 
 
 
-def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optional[str], Optional[Decimal], Optional[str], Optional[str]]:
+def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optional[str], Optional[Decimal], Optional[str], Optional[str], Optional[int], Optional[int], Optional[datetime]]:
     """
-    Resolve a company identifier (ISIN, name, or symbol) to ISIN.
+    Resolve a company identifier (ISIN, name, or symbol) to ISIN and metadata.
     
-    Args:
-        identifier: ISIN, company name, or NSE symbol
-        cur: Database cursor
-        
     Returns:
-        Tuple of (isin, company_name, sector, market_cap, mcap_type, mcap_updated_at)
-        
-    Raises:
-        HTTPException: If company not found or multiple matches found
+        Tuple of (isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at, entity_id)
     """
+    # Use a common query structure to fetch metadata and entity_id
+    query_base = """
+        SELECT 
+            c.isin, 
+            COALESCE(ce.canonical_name, c.company_name) as company_name, 
+            c.sector, 
+            c.market_cap, 
+            c.mcap_type, 
+            c.mcap_updated_at, 
+            c.shares_outstanding, 
+            c.shares_last_updated_at,
+            c.entity_id
+        FROM companies c
+        LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
+    """
+
     # Try exact ISIN match first
-    cur.execute(
-        "SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at FROM companies WHERE isin = %s",
-        (identifier.upper(),)
-    )
+    cur.execute(query_base + " WHERE c.isin = %s", (identifier.upper(),))
     result = cur.fetchone()
     if result:
         return result
     
     # Try exact NSE symbol match
-    cur.execute(
-        "SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at FROM companies WHERE nse_symbol = %s",
-        (identifier.upper(),)
-    )
+    cur.execute(query_base + " WHERE c.nse_symbol = %s", (identifier.upper(),))
     result = cur.fetchone()
     if result:
         return result
@@ -170,19 +176,31 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
     search_pattern = f"%{identifier}%"
     cur.execute(
         """
-        SELECT isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at 
-        FROM companies 
-        WHERE company_name ILIKE %s
-        ORDER BY 
+        SELECT DISTINCT ON (relevance_score, COALESCE(c.entity_id::text, c.company_id::text))
+            c.isin, 
+            COALESCE(ce.canonical_name, c.company_name) as company_name, 
+            c.sector, 
+            c.market_cap, 
+            c.mcap_type, 
+            c.mcap_updated_at, 
+            c.shares_outstanding, 
+            c.shares_last_updated_at,
+            c.entity_id,
             CASE 
-                WHEN UPPER(company_name) = UPPER(%s) THEN 1
-                WHEN company_name ILIKE %s THEN 2
+                WHEN UPPER(c.company_name) = UPPER(%s) THEN 1
+                WHEN c.company_name ILIKE %s THEN 2
                 ELSE 3
-            END,
-            company_name
+            END as relevance_score
+        FROM companies c
+        LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
+        WHERE c.company_name ILIKE %s
+        ORDER BY 
+            relevance_score,
+            COALESCE(c.entity_id::text, c.company_id::text),
+            c.updated_at DESC
         LIMIT 2
         """,
-        (search_pattern, identifier, identifier + '%')
+        (identifier, identifier + '%', search_pattern)
     )
     results = cur.fetchall()
     
@@ -301,13 +319,8 @@ async def get_holdings_by_identifier(
         - /api/v1/stocks/holdings?q=reliance industries
     """
     try:
-        # 1. Resolve identifier to ISIN and metadata
-        isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated = _resolve_company_isin(q, cur)
-        
-        # 2. Check if this ISIN belongs to an Entity (fetch directly from companies table to avoid desyncs)
-        cur.execute("SELECT entity_id FROM companies WHERE isin = %s LIMIT 1", (isin,))
-        entity_row = cur.fetchone()
-        entity_id = entity_row[0] if entity_row else None
+        # 1. Resolve identifier to ISIN and metadata (already includes entity_id)
+        isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated, entity_id = _resolve_company_isin(q, cur)
         
         # 3. Get holdings (aggregated by entity if available)
         return await _get_stock_holdings_aggregated(
@@ -344,13 +357,8 @@ async def get_stock_holdings(
         Detailed holdings summary with scheme-wise breakdown
     """
     try:
-        # Resolve company metadata using the helper function
-        res_isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated = _resolve_company_isin(isin, cur)
-        
-        # Check if this ISIN belongs to an Entity (use companies table to prevent desyncs)
-        cur.execute("SELECT entity_id FROM companies WHERE isin = %s LIMIT 1", (res_isin,))
-        entity_row = cur.fetchone()
-        entity_id = entity_row[0] if entity_row else None
+        # Resolve company metadata using the helper function (already includes entity_id)
+        res_isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated, entity_id = _resolve_company_isin(isin, cur)
         
         return await _get_stock_holdings_aggregated(
             res_isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated,
@@ -496,7 +504,7 @@ async def _get_stock_holdings_aggregated(
         f"""
         SELECT 
             p.period_id,
-            SUM(eh.quantity) as total_shares,
+            SUM(COALESCE(eh.adj_quantity, eh.quantity)) as total_shares,
             COUNT(DISTINCT ss.scheme_id) as num_funds
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
@@ -591,13 +599,12 @@ async def _get_stock_holdings_aggregated(
             a.amc_name,
             s.plan_type,
             s.option_type,
-            ss.total_value_inr / 10000000.0 as equity_aum_cr,
-            ss.total_net_assets_inr / 10000000.0 as total_aum_cr,
-            SUM(eh.percent_of_nav) as percent_of_nav,
-            SUM(eh.quantity) as quantity,
-            p.period_id,
             p.year,
-            p.month
+            p.month,
+            COALESCE(eh.adj_quantity, eh.quantity) as quantity,
+            eh.percent_of_nav,
+            ss.total_net_assets_inr as sn_total_aum,
+            ss.total_value_inr as sn_equity_aum
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
         JOIN schemes s ON ss.scheme_id = s.scheme_id
@@ -605,7 +612,6 @@ async def _get_stock_holdings_aggregated(
         JOIN periods p ON ss.period_id = p.period_id
         JOIN companies c ON eh.company_id = c.company_id
         WHERE {filter_clause} AND p.period_id IN ({','.join(['%s']*len(all_period_ids))})
-        GROUP BY s.scheme_id, s.scheme_name, a.amc_name, s.plan_type, s.option_type, ss.total_value_inr, ss.total_net_assets_inr, p.period_id, p.year, p.month
         ORDER BY s.scheme_id, p.year DESC, p.month DESC
         """,
         (filter_val, *all_period_ids)

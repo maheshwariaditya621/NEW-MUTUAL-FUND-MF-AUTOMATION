@@ -92,7 +92,7 @@ class ITIDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -128,7 +128,7 @@ class ITIDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("ITI", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ ITI download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] ITI download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -162,7 +162,7 @@ class ITIDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(3)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # 1) Collapse Half Yearly and Fortnightly sections
             logger.info("Managing accordion sections...")
@@ -175,7 +175,7 @@ class ITIDownloader(BaseDownloader):
                     if half_yearly.count() > 0 and half_yearly.is_visible(timeout=2000):
                         half_yearly.click()
                         time.sleep(1)
-                        logger.info("  ✓ Collapsed Half Yearly")
+                        logger.info("  [OK] Collapsed Half Yearly")
                         break
                 except: pass
             
@@ -185,7 +185,7 @@ class ITIDownloader(BaseDownloader):
                 if fortnightly.count() > 0 and fortnightly.is_visible(timeout=2000):
                     fortnightly.click()
                     time.sleep(1)
-                    logger.info("  ✓ Collapsed Fortnightly")
+                    logger.info("  [OK] Collapsed Fortnightly")
             except: pass
 
             # 2) Ensure Monthly section is expanded
@@ -198,7 +198,7 @@ class ITIDownloader(BaseDownloader):
                     if monthly_heading.is_visible(timeout=2000):
                         monthly_heading.click()
                         time.sleep(2)
-                        logger.info("  ✓ Expanded Monthly")
+                        logger.info("  [OK] Expanded Monthly")
                 except:
                     raise Exception("Could not expand Monthly section")
 
@@ -215,10 +215,10 @@ class ITIDownloader(BaseDownloader):
             month_heading = page.get_by_text(target_text, exact=True)
             
             if month_heading.count() == 0:
-                logger.warning(f"  ✗ Not found: {target_text}")
+                logger.warning(f"  [FAIL] Not found: {target_text}")
                 return None
             
-            logger.info("  ✓ Found heading")
+            logger.info("  [OK] Found heading")
             
             # 5) Click to expand this specific month
             month_heading.scroll_into_view_if_needed()
@@ -238,7 +238,7 @@ class ITIDownloader(BaseDownloader):
                     download_in_sibling = next_sibling.locator(".file-download-link")
                     if download_in_sibling.count() > 0:
                         download_button = download_in_sibling.first
-                        logger.info("  ✓ Found in next sibling")
+                        logger.info("  [OK] Found in next sibling")
             except: pass
             
             # Try parent's next sibling
@@ -250,7 +250,7 @@ class ITIDownloader(BaseDownloader):
                         download_in_parent = parent_next_sibling.locator(".file-download-link")
                         if download_in_parent.count() > 0:
                             download_button = download_in_parent.first
-                            logger.info("  ✓ Found in parent's sibling")
+                            logger.info("  [OK] Found in parent's sibling")
                 except: pass
             
             if not download_button:
@@ -266,7 +266,7 @@ class ITIDownloader(BaseDownloader):
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {final_filename}")
+            logger.info(f"  [OK] Saved: {final_filename}")
             
             return save_path
 
@@ -287,11 +287,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

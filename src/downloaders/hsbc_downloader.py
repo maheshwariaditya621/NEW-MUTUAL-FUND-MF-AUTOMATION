@@ -297,7 +297,7 @@ class HSBCDownloader(BaseDownloader):
             logger.info("Verifying consolidation/merged files...")
             self.consolidate_downloads(year, month)
             duration = time.time() - start_time
-            logger.info("✅ Month already complete — UPDATED")
+            logger.info("[SUCCESS] Month already complete — UPDATED")
             return {
                 "amc": self.AMC_NAME, "year": year, "month": month,
                 "status": "skipped", "reason": "already_downloaded", "duration": duration
@@ -350,7 +350,7 @@ class HSBCDownloader(BaseDownloader):
             self.notifier.notify_success("HSBC", year, month, files_downloaded=files_downloaded, duration=duration)
             
             logger.info("=" * 70)
-            logger.success(f"✅ Downloaded {files_downloaded} files in {duration:.2f}s")
+            logger.success(f"[SUCCESS] Downloaded {files_downloaded} files in {duration:.2f}s")
             logger.info("=" * 70)
             
             return {
@@ -385,13 +385,13 @@ if __name__ == "__main__":
     result = downloader.download(year=args.year, month=args.month)
 
     if result["status"] == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif result["status"] == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif result["status"] == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
 
     # Print JSON result for Orchestrator
     print(json.dumps(result))

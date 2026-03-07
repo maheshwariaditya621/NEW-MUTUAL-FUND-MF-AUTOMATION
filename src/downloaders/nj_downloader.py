@@ -100,7 +100,7 @@ class NJDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -136,7 +136,7 @@ class NJDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("NJ", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ NJ download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] NJ download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -268,11 +268,11 @@ class NJDownloader(BaseDownloader):
                         dl = dinfo.value
                         fname = dl.suggested_filename
                         dl.save_as(download_folder / fname)
-                        logger.info(f"    ✓ Saved: {fname}")
+                        logger.info(f"    [OK] Saved: {fname}")
                         success_count += 1
                         time.sleep(1)
                     except Exception as e:
-                        logger.error(f"    ✗ {str(e)[:100]}")
+                        logger.error(f"    [FAIL] {str(e)[:100]}")
             else:
                 # Single-file mode
                 logger.info(f"Searching for single consolidated link for {month_name}...")
@@ -298,10 +298,10 @@ class NJDownloader(BaseDownloader):
                     dl = dinfo.value
                     fname = dl.suggested_filename
                     dl.save_as(download_folder / fname)
-                    logger.info(f"    ✓ Saved: {fname}")
+                    logger.info(f"    [OK] Saved: {fname}")
                     success_count = 1
                 except Exception as e:
-                    logger.error(f"    ✗ Download failed: {str(e)[:100]}")
+                    logger.error(f"    [FAIL] Download failed: {str(e)[:100]}")
 
             return success_count
 
@@ -322,11 +322,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

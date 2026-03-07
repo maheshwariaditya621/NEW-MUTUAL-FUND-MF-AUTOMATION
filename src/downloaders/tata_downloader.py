@@ -93,7 +93,7 @@ class TataDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -129,7 +129,7 @@ class TataDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("TATA", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ TATA download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] TATA download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -164,11 +164,11 @@ class TataDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, timeout=60000, wait_until="domcontentloaded")
             time.sleep(10)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Check for 403 error
             if "403 ERROR" in page.content():
-                logger.error("  ✗ Detected 403 ERROR page")
+                logger.error("  [FAIL] Detected 403 ERROR page")
                 return None
 
             # Handle declaration modal
@@ -177,7 +177,7 @@ class TataDownloader(BaseDownloader):
             if continue_btn.count() > 0:
                 continue_btn.click()
                 time.sleep(3)
-                logger.info("  ✓ Clicked 'Continue'")
+                logger.info("  [OK] Clicked 'Continue'")
 
             # Select 'Monthly' frequency
             logger.info("Selecting 'Monthly' frequency...")
@@ -185,7 +185,7 @@ class TataDownloader(BaseDownloader):
             if monthly_tab.count() > 0:
                 monthly_tab.click()
                 time.sleep(5)
-                logger.info("  ✓ Selected 'Monthly'")
+                logger.info("  [OK] Selected 'Monthly'")
 
             # Open the year accordion using JavaScript for more reliable clicking
             logger.info(f"Opening accordion for year {target_year}...")
@@ -216,11 +216,11 @@ class TataDownloader(BaseDownloader):
             
             result = page.evaluate(js_code)
             if not result.get("success"):
-                logger.warning(f"  ✗ Year accordion not found for {target_year}")
+                logger.warning(f"  [FAIL] Year accordion not found for {target_year}")
                 return None
             
             time.sleep(3)  # Additional wait for accordion to fully expand
-            logger.info(f"  ✓ Opened year {target_year} accordion")
+            logger.info(f"  [OK] Opened year {target_year} accordion")
 
             # Find the download link
             logger.info(f"Searching for portfolio link for {month_name}...")
@@ -243,7 +243,7 @@ class TataDownloader(BaseDownloader):
                         break
             
             if not target_link:
-                logger.warning(f"  ✗ Link not found for {month_name} {target_year}")
+                logger.warning(f"  [FAIL] Link not found for {month_name} {target_year}")
                 logger.info("  Available visible links:")
                 for link in links:
                     if link.is_visible():
@@ -251,7 +251,7 @@ class TataDownloader(BaseDownloader):
                 return None
 
             link_text = target_link.text_content().strip()
-            logger.info(f"  ✓ Found: {link_text}")
+            logger.info(f"  [OK] Found: {link_text}")
             target_link.scroll_into_view_if_needed()
             time.sleep(1)
 
@@ -265,7 +265,7 @@ class TataDownloader(BaseDownloader):
             save_path = download_folder / filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {filename}")
+            logger.info(f"  [OK] Saved: {filename}")
             
             return save_path
 
@@ -286,11 +286,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -95,7 +95,7 @@ class SamcoDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -131,7 +131,7 @@ class SamcoDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("SAMCO", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ SAMCO download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] SAMCO download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -166,7 +166,7 @@ class SamcoDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # 1. Select "Portfolio Disclosures"
             logger.info("Navigating to 'Portfolio Disclosures'...")
@@ -178,7 +178,7 @@ class SamcoDownloader(BaseDownloader):
                 pf_link.first.click(force=True)
                 time.sleep(3)
             else:
-                logger.error("  ✗ Portfolio Disclosures tab not found")
+                logger.error("  [FAIL] Portfolio Disclosures tab not found")
                 return 0
 
             # 2. Select "Monthly"
@@ -191,7 +191,7 @@ class SamcoDownloader(BaseDownloader):
                 m_link.first.click(force=True)
                 time.sleep(5)
             else:
-                logger.error("  ✗ Monthly sub-tab not found")
+                logger.error("  [FAIL] Monthly sub-tab not found")
                 return 0
 
             # 3. Find matching rows
@@ -206,7 +206,7 @@ class SamcoDownloader(BaseDownloader):
                     if "FORTNIGHTLY" not in txt.upper():
                         matching_rows_info.append(row)
             
-            logger.info(f"  ✓ Found {len(matching_rows_info)} potential rows")
+            logger.info(f"  [OK] Found {len(matching_rows_info)} potential rows")
             
             success_count = 0
             downloaded_schemes = set()
@@ -240,12 +240,12 @@ class SamcoDownloader(BaseDownloader):
                     filename = download.suggested_filename
                     
                     download.save_as(download_folder / filename)
-                    logger.info(f"    ✓ Saved: {filename}")
+                    logger.info(f"    [OK] Saved: {filename}")
                     success_count += 1
                     downloaded_schemes.add(scheme_name)
                     
                 except Exception as e:
-                    logger.error(f"    ✗ Download failed for {scheme_name}: {str(e)[:100]}")
+                    logger.error(f"    [FAIL] Download failed for {scheme_name}: {str(e)[:100]}")
 
             return success_count
 
@@ -266,11 +266,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

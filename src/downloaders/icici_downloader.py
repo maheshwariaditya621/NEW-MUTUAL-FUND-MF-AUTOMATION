@@ -52,7 +52,7 @@ class ICICIDownloader(BaseDownloader):
                 f"expected {expected}, got {file_count}"
             )
         else:
-            logger.info(f"✅ File count OK ({file_count})")
+            logger.info(f"[SUCCESS] File count OK ({file_count})")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -127,7 +127,7 @@ class ICICIDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
 
@@ -215,7 +215,7 @@ class ICICIDownloader(BaseDownloader):
                     "matched_year": dt.year,
                     "matched_month": dt.month
                 })
-                logger.info(f"✓ Matched (Timestamp): {original_name} (timestamp: {dt.year}-{dt.month:02d})")
+                logger.info(f"[OK] Matched (Timestamp): {original_name} (timestamp: {dt.year}-{dt.month:02d})")
 
         # 2. SECONDARY MATCH: Fallback to filename/title parsing ONLY if timestamp match failed
         # (Handles cases where API metadata is wrong but file is correct)
@@ -242,7 +242,7 @@ class ICICIDownloader(BaseDownloader):
                         break
                 
                 if is_match:
-                    logger.info(f"ℹ️ Using filename-based fallback for ICICI {year}-{month:02d}")
+                    logger.info(f"[INFO] Using filename-based fallback for ICICI {year}-{month:02d}")
                     
                     # Construct matching entry
                     final_name = item.get("title", {}).get("text", "")
@@ -258,7 +258,7 @@ class ICICIDownloader(BaseDownloader):
                         "matched_year": year,   # Explicitly set to requested year
                         "matched_month": month  # Explicitly set to requested month
                     })
-                    logger.info(f"✓ Matched (Fallback): {final_name}")
+                    logger.info(f"[OK] Matched (Fallback): {final_name}")
 
         if not matched:
             logger.warning(f"Month not yet published: {month_name} {year}")
@@ -307,7 +307,7 @@ class ICICIDownloader(BaseDownloader):
                 out.write(r.content)
 
             saved_files.append(str(path))
-            logger.info(f"✅ Saved: {path.name} → {actual_year}_{actual_month:02d}/")
+            logger.info(f"[SUCCESS] Saved: {path.name} → {actual_year}_{actual_month:02d}/")
 
 
         # -------------------- FINALIZE -------------------- #
@@ -378,11 +378,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -92,7 +92,7 @@ class QuantDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -128,7 +128,7 @@ class QuantDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("QUANT", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ QUANT download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] QUANT download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -162,7 +162,7 @@ class QuantDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # 1) Find and click "MONTHLY PORTFOLIO" accordion header (excluding "FUND - WISE")
             logger.info("Finding 'MONTHLY PORTFOLIO' section...")
@@ -181,13 +181,13 @@ class QuantDownloader(BaseDownloader):
             if not target_header:
                 raise Exception("Could not find 'MONTHLY PORTFOLIO' section")
             
-            logger.info("  ✓ Found 'MONTHLY PORTFOLIO' section")
+            logger.info("  [OK] Found 'MONTHLY PORTFOLIO' section")
             logger.info("Expanding accordion...")
             target_header.scroll_into_view_if_needed()
             # Use JS click for reliability with animations
             page.evaluate("(el) => el.click()", target_header.element_handle())
             time.sleep(5)
-            logger.info("  ✓ Accordion expanded")
+            logger.info("  [OK] Accordion expanded")
 
             # 2) Select the Year
             logger.info(f"Selecting year: {target_year}...")
@@ -197,7 +197,7 @@ class QuantDownloader(BaseDownloader):
             if year_li.count() > 0:
                 page.evaluate("(el) => el.click()", year_li.element_handle())
                 time.sleep(7)  # Wait for AJAX load
-                logger.info(f"  ✓ Year {target_year} selected")
+                logger.info(f"  [OK] Year {target_year} selected")
             else:
                 # Fallback global search
                 year_li = page.locator(f"li.yearurl:has-text('{target_year}')").filter(
@@ -207,7 +207,7 @@ class QuantDownloader(BaseDownloader):
                 if year_li.count() > 0:
                     page.evaluate("(el) => el.click()", year_li.element_handle())
                     time.sleep(7)
-                    logger.info(f"  ✓ Year {target_year} selected (fallback)")
+                    logger.info(f"  [OK] Year {target_year} selected (fallback)")
                 else:
                     raise Exception(f"Year '{target_year}' not found in Monthly Portfolio section")
 
@@ -223,10 +223,10 @@ class QuantDownloader(BaseDownloader):
                 month_link = page.locator(f'{container_sel} a:has-text("{month_name}"):has-text("{target_year}")').first
 
             if month_link.count() == 0:
-                logger.warning(f"  ✗ Month link for '{month_name} {target_year}' not found")
+                logger.warning(f"  [FAIL] Month link for '{month_name} {target_year}' not found")
                 return None
             
-            logger.info(f"  ✓ Found download link")
+            logger.info(f"  [OK] Found download link")
             logger.info("Starting download...")
             month_link.scroll_into_view_if_needed()
             
@@ -242,7 +242,7 @@ class QuantDownloader(BaseDownloader):
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {final_filename}")
+            logger.info(f"  [OK] Saved: {final_filename}")
             
             return save_path
 
@@ -263,11 +263,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

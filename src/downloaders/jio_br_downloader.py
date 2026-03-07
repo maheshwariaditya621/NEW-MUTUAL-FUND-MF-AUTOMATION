@@ -109,7 +109,7 @@ class JioBRDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -145,7 +145,7 @@ class JioBRDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("JIO_BR", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ JIO_BR download completed: {file_path.name}")
+                logger.success(f"[SUCCESS] JIO_BR download completed: {file_path.name}")
                 return {"status": "success", "file": str(file_path), "duration": duration}
 
             except Exception as e:
@@ -181,12 +181,12 @@ class JioBRDownloader(BaseDownloader):
             page.goto(url, wait_until="load", timeout=90000)
             # Extra sleep to let JS components (Ant Design) hydrate
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Selection logic
             selectors = page.locator(".ant-select-selector")
             if selectors.count() < 2:
-                logger.error("  ✗ Selectors for Year/Month not found. Page might not have loaded correctly.")
+                logger.error("  [FAIL] Selectors for Year/Month not found. Page might not have loaded correctly.")
                 return None
 
             # 1. Select Year
@@ -200,7 +200,7 @@ class JioBRDownloader(BaseDownloader):
                 # Fallback to get_by_text
                 page.get_by_text(fy_str, exact=True).last.click(force=True)
             time.sleep(2)
-            logger.info("  ✓ Year selected")
+            logger.info("  [OK] Year selected")
 
             # 2. Select Month
             logger.info(f"Selecting Month: {month_name}...")
@@ -237,10 +237,10 @@ class JioBRDownloader(BaseDownloader):
                     time.sleep(0.3)
                 
                 if not found_month:
-                    logger.error(f"  ✗ Failed to find {month_name} in dropdown")
+                    logger.error(f"  [FAIL] Failed to find {month_name} in dropdown")
                     return None
 
-            logger.info(f"  ✓ Month selected: {month_name}")
+            logger.info(f"  [OK] Month selected: {month_name}")
             time.sleep(5) # Wait for results grid to refresh
 
             # 3. Find Consolidated Link
@@ -291,11 +291,11 @@ class JioBRDownloader(BaseDownloader):
                         continue
 
             if not target_link:
-                logger.warning(f"  ✗ No consolidated link found for {month_name} {target_year}")
+                logger.warning(f"  [FAIL] No consolidated link found for {month_name} {target_year}")
                 return None
 
             link_text = target_link.inner_text().strip()
-            logger.info(f"  ✓ Found link: {link_text}")
+            logger.info(f"  [OK] Found link: {link_text}")
             target_link.scroll_into_view_if_needed()
             time.sleep(1)
 
@@ -310,11 +310,11 @@ class JioBRDownloader(BaseDownloader):
                 save_path = download_folder / filename
                 
                 download.save_as(save_path)
-                logger.info(f"  ✓ Saved: {filename}")
+                logger.info(f"  [OK] Saved: {filename}")
                 return save_path
                 
             except Exception as e:
-                logger.error(f"  ✗ Download interaction failed: {str(e)[:100]}")
+                logger.error(f"  [FAIL] Download interaction failed: {str(e)[:100]}")
                 return None
 
         finally:
@@ -342,11 +342,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

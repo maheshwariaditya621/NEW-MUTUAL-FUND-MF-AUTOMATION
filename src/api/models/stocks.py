@@ -12,6 +12,7 @@ class CompanySearchResult(BaseModel):
     """Company search result model."""
     isin: str = Field(..., description="12-character ISIN code")
     company_name: str = Field(..., description="Company name")
+    entity_id: Optional[int] = Field(None, description="Logical corporate entity ID")
     sector: Optional[str] = Field(None, description="Sector classification")
     nse_symbol: Optional[str] = Field(None, description="NSE trading symbol")
     bse_code: Optional[str] = Field(None, description="BSE code")

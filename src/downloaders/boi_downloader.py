@@ -93,7 +93,7 @@ class BOIDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -129,7 +129,7 @@ class BOIDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("BOI", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ BOI download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] BOI download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -163,14 +163,14 @@ class BOIDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="networkidle", timeout=60000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # 1) Ensure Monthly Portfolio tab is active
             logger.info("Ensuring 'Monthly Portfolio' tab is active...")
             try:
                 page.get_by_role("link", name="Monthly Portfolio").click()
                 time.sleep(2)
-                logger.info("  ✓ Tab activated")
+                logger.info("  [OK] Tab activated")
             except:
                 logger.info("  → Tab already active")
 
@@ -195,7 +195,7 @@ class BOIDownloader(BaseDownloader):
                         
                         # Verify year is in the link text if possible
                         if str(target_year) in link_text or not re.search(r'\d{4}', link_text):
-                            logger.info(f"  ✓ Found: {link_text}")
+                            logger.info(f"  [OK] Found: {link_text}")
                             
                             # Download the file
                             logger.info("Starting download...")
@@ -209,12 +209,12 @@ class BOIDownloader(BaseDownloader):
                                 save_path = download_folder / final_filename
                                 
                                 download.save_as(save_path)
-                                logger.info(f"  ✓ Saved: {final_filename}")
+                                logger.info(f"  [OK] Saved: {final_filename}")
                                 
                                 found = True
                                 return save_path
                             except Exception as e:
-                                logger.warning(f"  ✗ Download error: {str(e)[:100]}")
+                                logger.warning(f"  [FAIL] Download error: {str(e)[:100]}")
                                 continue
                 
                 if found:
@@ -237,11 +237,11 @@ class BOIDownloader(BaseDownloader):
                         time.sleep(3)
                         page_num += 1
                     else:
-                        logger.warning(f"  ✗ No more pages to search")
+                        logger.warning(f"  [FAIL] No more pages to search")
                         break
             
             if not found:
-                logger.warning(f"  ✗ Portfolio not found after searching {page_num} pages")
+                logger.warning(f"  [FAIL] Portfolio not found after searching {page_num} pages")
                 return None
 
         finally:
@@ -261,11 +261,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

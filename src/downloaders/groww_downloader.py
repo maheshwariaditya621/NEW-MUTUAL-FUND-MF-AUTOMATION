@@ -112,7 +112,7 @@ class GrowwDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -148,7 +148,7 @@ class GrowwDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("GROWW", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ GROWW download completed: {downloaded_path.name}")
+                logger.success(f"[SUCCESS] GROWW download completed: {downloaded_path.name}")
                 return {"status": "success", "files_downloaded": 1, "duration": duration}
 
             except Exception as e:
@@ -182,7 +182,7 @@ class GrowwDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="networkidle", timeout=60000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Calculate and select Financial Year
             fy_text = self._calculate_fy(target_year, target_month)
@@ -209,20 +209,20 @@ class GrowwDownloader(BaseDownloader):
                             clean_fy = re.sub(r"\s+", "", fy_text)
                             if clean_opt == clean_fy:
                                 year_options.nth(i).click()
-                                logger.info(f"  ✓ Selected FY: {opt_text}")
+                                logger.info(f"  [OK] Selected FY: {opt_text}")
                                 found = True
                                 break
                         
                         if not found:
-                             logger.warning(f"  ✗ FY {fy_text} matched by regex but no precise text match found")
+                             logger.warning(f"  [FAIL] FY {fy_text} matched by regex but no precise text match found")
                              return None
                         
                         time.sleep(2)
                     else:
-                        logger.warning(f"  ✗ FY regex '{fy_regex}' not found")
+                        logger.warning(f"  [FAIL] FY regex '{fy_regex}' not found")
                         return None
             except Exception as e:
-                logger.warning(f"  ✗ Error selecting FY: {e}")
+                logger.warning(f"  [FAIL] Error selecting FY: {e}")
                 return None
 
             # Find and download the portfolio link
@@ -235,11 +235,11 @@ class GrowwDownloader(BaseDownloader):
                 download_link = page.locator("a").filter(has_text=re.compile(rf"Portfolio.*{month_short}", re.I))
 
             if download_link.count() == 0:
-                logger.warning(f"  ✗ Link not found for {month_short} {target_year}")
+                logger.warning(f"  [FAIL] Link not found for {month_short} {target_year}")
                 return None
 
             link_text = download_link.first.inner_text().strip()
-            logger.info(f"  ✓ Found: '{link_text}'")
+            logger.info(f"  [OK] Found: '{link_text}'")
 
             # Download the file
             logger.info("Downloading file...")
@@ -251,7 +251,7 @@ class GrowwDownloader(BaseDownloader):
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {final_filename}")
+            logger.info(f"  [OK] Saved: {final_filename}")
             
             return save_path
 
@@ -272,11 +272,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

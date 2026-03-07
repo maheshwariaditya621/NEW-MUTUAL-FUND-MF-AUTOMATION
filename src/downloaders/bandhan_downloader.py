@@ -94,7 +94,7 @@ class BandhanDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -130,7 +130,7 @@ class BandhanDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("BANDHAN", year, month, files_downloaded=total_downloaded, duration=duration)
-                logger.success(f"✅ BANDHAN download completed. Total files: {total_downloaded}")
+                logger.success(f"[SUCCESS] BANDHAN download completed. Total files: {total_downloaded}")
                 return {"status": "success", "files_downloaded": total_downloaded, "duration": duration}
 
             except Exception as e:
@@ -255,7 +255,7 @@ class BandhanDownloader(BaseDownloader):
                     download.save_as(save_path)
                     total_downloaded += 1
                 except Exception as e:
-                    logger.error(f"    ✗ Download failed for {scheme_text}: {str(e)[:100]}")
+                    logger.error(f"    [FAIL] Download failed for {scheme_text}: {str(e)[:100]}")
             
             return total_downloaded
 
@@ -285,11 +285,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

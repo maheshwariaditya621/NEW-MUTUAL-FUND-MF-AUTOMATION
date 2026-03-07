@@ -95,7 +95,7 @@ class HeliosDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -131,7 +131,7 @@ class HeliosDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("HELIOS", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ HELIOS download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] HELIOS download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -165,7 +165,7 @@ class HeliosDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="networkidle", timeout=60000)
             time.sleep(2)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Open 'Monthly Portfolio' main accordion
             logger.info("Opening 'Monthly Portfolio' section...")
@@ -177,7 +177,7 @@ class HeliosDownloader(BaseDownloader):
             time.sleep(1)
             page.locator(".fas.fa-caret-right").first.click()
             time.sleep(2)
-            logger.info("  ✓ Section opened and expanded")
+            logger.info("  [OK] Section opened and expanded")
 
             # Dynamically discover all scheme headings
             logger.info("Discovering available schemes...")
@@ -202,7 +202,7 @@ class HeliosDownloader(BaseDownloader):
                 except:
                     continue
             
-            logger.info(f"  ✓ Found {len(schemes_info)} unique schemes")
+            logger.info(f"  [OK] Found {len(schemes_info)} unique schemes")
             
             total_downloaded = 0
             
@@ -260,12 +260,12 @@ class HeliosDownloader(BaseDownloader):
                                     save_path = download_folder / save_filename
 
                                 download.save_as(save_path)
-                                logger.info(f"    ✓ Downloaded: {save_filename}")
+                                logger.info(f"    [OK] Downloaded: {save_filename}")
                                 total_downloaded += 1
                                 time.sleep(1)
                                 
                             except Exception as dl_err:
-                                logger.warning(f"    ✗ Download failed: {str(dl_err)[:80]}")
+                                logger.warning(f"    [FAIL] Download failed: {str(dl_err)[:80]}")
                         
                         # Close the year accordion
                         year_locator.click()
@@ -276,7 +276,7 @@ class HeliosDownloader(BaseDownloader):
                     time.sleep(1)
                     
                 except Exception as scheme_err:
-                    logger.warning(f"    ✗ Error: {str(scheme_err)[:100]}")
+                    logger.warning(f"    [FAIL] Error: {str(scheme_err)[:100]}")
                     continue
 
             return total_downloaded
@@ -298,11 +298,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

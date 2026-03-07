@@ -62,61 +62,47 @@ async def get_stock_activity(
         month_label = date(y1, m1, 1).strftime("%b-%y").upper()
         prev_month_label = date(y0, m0, 1).strftime("%b-%y").upper()
 
-        # 2. Build the query to calculate net buying/selling
-        # We aggregate by isin (or entity_id if available)
-        # Using LEFT JOIN to handle new entrants vs exits
-        
+        # 2. Build the query to calculate net buying/selling (Entity-Centric)
         order_direction = "DESC" if activity_type == "buying" else "ASC"
         
         where_conditions = []
-        params = [p0_id, p1_id, p1_id, p0_id]
-        
         if mcap_category:
             where_conditions.append("c.mcap_type = %s")
-            params.append(mcap_category)
             
         where_clause = "AND " + " AND ".join(where_conditions) if where_conditions else ""
         
-        # We calculate buy_value_crore using the latest weighted average price (mval / qty)
-        # This is the industry heuristic for approximate buying pressure
-        
-        final_params = params + [limit]
-        
         cur.execute(
             f"""
-            WITH splits AS (
-                SELECT entity_id, ratio_factor 
-                FROM corporate_actions 
-                WHERE effective_date > (SELECT period_end_date FROM periods WHERE period_id = %s)
-                AND effective_date <= (SELECT period_end_date FROM periods WHERE period_id = %s)
-                AND status = 'CONFIRMED'
-            ),
-            curr_h AS (
+            WITH curr_h AS (
                 SELECT 
-                    eh.company_id,
+                    COALESCE(c.entity_id, c.company_id + 10000000) as uid,
                     ss.scheme_id,
-                    eh.quantity as qty,
+                    eh.quantity,
+                    COALESCE(eh.adj_quantity, eh.quantity) as adj_qty,
                     eh.market_value_inr as mval
                 FROM equity_holdings eh
                 JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
+                JOIN companies c ON eh.company_id = c.company_id
                 WHERE ss.period_id = %s
             ),
             prev_h AS (
                 SELECT 
-                    eh.company_id,
+                    COALESCE(c.entity_id, c.company_id + 10000000) as uid,
                     ss.scheme_id,
-                    eh.quantity as qty
+                    eh.quantity,
+                    COALESCE(eh.adj_quantity, eh.quantity) as adj_qty
                 FROM equity_holdings eh
                 JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
+                JOIN companies c ON eh.company_id = c.company_id
                 WHERE ss.period_id = %s
             ),
             h_agg AS (
                 SELECT 
-                    coalesce(curr.company_id, prev.company_id) as comp_id,
+                    coalesce(curr.uid, prev.uid) as uid,
                     COUNT(DISTINCT curr.scheme_id) as num_funds_curr,
                     COUNT(DISTINCT prev.scheme_id) as num_funds_prev,
-                    SUM(COALESCE(curr.qty, 0)) as qty_curr,
-                    SUM(COALESCE(prev.qty, 0)) as qty_prev,
+                    SUM(COALESCE(curr.adj_qty, 0)) as qty_curr,
+                    SUM(COALESCE(prev.adj_qty, 0)) as qty_prev,
                     SUM(COALESCE(curr.mval, 0)) as mval_curr,
                     -- Entrant: held now, NOT held before, but was uploaded before
                     COUNT(DISTINCT curr.scheme_id) FILTER (
@@ -131,30 +117,33 @@ async def get_stock_activity(
                         AND EXISTS (SELECT 1 FROM scheme_snapshots ss WHERE ss.scheme_id = prev.scheme_id AND ss.period_id = %s)
                     ) as exits
                 FROM curr_h curr
-                FULL OUTER JOIN prev_h prev ON curr.company_id = prev.company_id AND curr.scheme_id = prev.scheme_id
-                GROUP BY coalesce(curr.company_id, prev.company_id)
+                FULL OUTER JOIN prev_h prev ON curr.uid = prev.uid AND curr.scheme_id = prev.scheme_id
+                GROUP BY coalesce(curr.uid, prev.uid)
             )
-            SELECT 
-                c.isin, c.company_name, c.sector, c.mcap_type, c.market_cap, c.nse_symbol,
+            SELECT DISTINCT ON (net_qty, uid)
+                c.isin, 
+                COALESCE(ce.canonical_name, c.company_name) as company_name, 
+                c.sector, c.mcap_type, c.market_cap, c.nse_symbol,
                 qty_curr, 
-                qty_prev * COALESCE(s.ratio_factor, 1.0) as qty_prev_adj,
-                (qty_curr - (qty_prev * COALESCE(s.ratio_factor, 1.0))) as net_qty,
+                qty_prev,
+                (qty_curr - qty_prev) as net_qty,
                 num_funds_curr, 
                 num_funds_prev,
                 CASE 
-                    WHEN qty_curr > 0 THEN ((qty_curr - (qty_prev * COALESCE(s.ratio_factor, 1.0))) * (mval_curr / qty_curr)) / 10000000.0
+                    WHEN qty_curr > 0 THEN ((qty_curr - qty_prev) * (mval_curr / qty_curr)) / 10000000.0
                     ELSE 0 
                 END as buy_value_cr,
                 c.shares_outstanding,
-                (entrants - exits) as net_entrants
-            FROM companies c
-            JOIN h_agg ON c.company_id = h_agg.comp_id
-            LEFT JOIN splits s ON c.entity_id = s.entity_id
-            WHERE (qty_curr > 0 OR (qty_prev * COALESCE(s.ratio_factor, 1.0)) > 0) {where_clause}
-            ORDER BY net_qty {order_direction}
+                (entrants - exits) as net_entrants,
+                h_agg.uid
+            FROM h_agg
+            JOIN companies c ON (CASE WHEN h_agg.uid > 10000000 THEN h_agg.uid - 10000000 = c.company_id ELSE h_agg.uid = c.entity_id END)
+            LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
+            WHERE (qty_curr > 0 OR qty_prev > 0) {where_clause}
+            ORDER BY net_qty {order_direction}, h_agg.uid, c.updated_at DESC
             LIMIT %s
             """,
-            [p0_id, p1_id, p1_id, p0_id, p0_id, p1_id] + (params[4:] if len(params) > 4 else []) + [limit]
+            [p1_id, p0_id, p0_id, p1_id] + ([mcap_category] if mcap_category else []) + [limit]
         )
         
         rows = cur.fetchall()

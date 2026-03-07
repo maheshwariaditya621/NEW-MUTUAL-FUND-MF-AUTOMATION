@@ -94,7 +94,7 @@ class MahindraDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -130,7 +130,7 @@ class MahindraDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("MAHINDRA", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ MAHINDRA download completed: {file_path.name}")
+                logger.success(f"[SUCCESS] MAHINDRA download completed: {file_path.name}")
                 return {"status": "success", "file": str(file_path), "duration": duration}
 
             except Exception as e:
@@ -166,7 +166,7 @@ class MahindraDownloader(BaseDownloader):
             # Increase timeout to 120s as the site is very slow
             page.goto(url, wait_until="load", timeout=120000)
             time.sleep(10) # Give extra time for components to initialize
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Handle Declaration Modal
             logger.info("Handling declaration modal...")
@@ -177,10 +177,10 @@ class MahindraDownloader(BaseDownloader):
 
             if declaration_link.is_visible():
                 declaration_link.click()
-                logger.info("  ✓ Clicked declaration link")
+                logger.info("  [OK] Clicked declaration link")
                 time.sleep(5)
             else:
-                logger.info("  ✓ Declaration modal not visible, proceeding...")
+                logger.info("  [OK] Declaration modal not visible, proceeding...")
 
             # Select Year
             logger.info(f"Selecting Year: {target_year}...")
@@ -188,7 +188,7 @@ class MahindraDownloader(BaseDownloader):
             count = year_locators.count()
             
             if count == 0:
-                logger.warning(f"  ✗ Year {target_year} not found on page")
+                logger.warning(f"  [FAIL] Year {target_year} not found on page")
                 return None
                 
             success_year = False
@@ -200,14 +200,14 @@ class MahindraDownloader(BaseDownloader):
                     try:
                         loc.scroll_into_view_if_needed()
                         loc.click()
-                        logger.info(f"  ✓ Selected year at index {i}")
+                        logger.info(f"  [OK] Selected year at index {i}")
                         success_year = True
                         break
                     except:
                         continue
             
             if not success_year:
-                logger.error(f"  ✗ Failed to click year {target_year}")
+                logger.error(f"  [FAIL] Failed to click year {target_year}")
                 return None
             
             time.sleep(3) # Wait for accordion to expand
@@ -229,12 +229,12 @@ class MahindraDownloader(BaseDownloader):
                 if generic_link.is_visible():
                      download_links = generic_link
                 else:
-                    logger.warning(f"  ✗ No download link found for {month_name} {target_year}")
+                    logger.warning(f"  [FAIL] No download link found for {month_name} {target_year}")
                     return None
 
             target_link = download_links.first
             link_text = target_link.inner_text().strip()
-            logger.info(f"  ✓ Found link: {link_text}")
+            logger.info(f"  [OK] Found link: {link_text}")
             target_link.scroll_into_view_if_needed()
 
             # Download
@@ -247,7 +247,7 @@ class MahindraDownloader(BaseDownloader):
             save_path = download_folder / final_filename
             
             download.save_as(save_path)
-            logger.info(f"  ✓ Saved: {final_filename}")
+            logger.info(f"  [OK] Saved: {final_filename}")
             
             return save_path
 
@@ -268,11 +268,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

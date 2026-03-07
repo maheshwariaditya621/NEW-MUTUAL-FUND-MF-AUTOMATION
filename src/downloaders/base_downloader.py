@@ -101,7 +101,7 @@ class BaseDownloader(ABC):
         logger.success(f"File downloaded successfully")
         logger.success(f"Saved as: {file_path}")
         logger.info("=" * 60)
-        logger.success(f"✅ {self.amc_name} download completed")
+        logger.success(f"[SUCCESS] {self.amc_name} download completed")
         logger.info("=" * 60)
     
     def log_failure(self, reason: str) -> None:
@@ -114,7 +114,7 @@ class BaseDownloader(ABC):
         logger.error("Download failed")
         logger.error(f"Reason: {reason}")
         logger.info("=" * 60)
-        logger.error(f"❌ {self.amc_name} download failed")
+        logger.error(f"[ERROR] {self.amc_name} download failed")
         logger.info("=" * 60)
     
     def get_target_folder(self, amc_slug: str, year: int, month: int) -> str:

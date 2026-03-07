@@ -100,7 +100,7 @@ class MiraeAssetDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -136,7 +136,7 @@ class MiraeAssetDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("MIRAE_ASSET", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ MIRAE_ASSET download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] MIRAE_ASSET download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -312,7 +312,7 @@ class MiraeAssetDownloader(BaseDownloader):
                                 save_path = download_folder / filename
                                 
                                 download.save_as(save_path)
-                                logger.info(f"    ✓ Saved: {filename}")
+                                logger.info(f"    [OK] Saved: {filename}")
                                 downloaded_funds.add(fund_name)
                                 time.sleep(1)
                             except Exception as dl_inner:
@@ -327,7 +327,7 @@ class MiraeAssetDownloader(BaseDownloader):
                                 download_count += 1
 
                         except Exception as e:
-                            logger.error(f"    ✗ Download failed for {fund_name}: {str(e)[:100]}")
+                            logger.error(f"    [FAIL] Download failed for {fund_name}: {str(e)[:100]}")
                 # Decide if we can stop
                 if older_records_on_page >= 3:
                      # We've reached the end of the target period records
@@ -396,11 +396,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

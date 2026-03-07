@@ -94,7 +94,7 @@ class ChoiceDownloader(BaseDownloader):
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -130,7 +130,7 @@ class ChoiceDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("CHOICE", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"✅ CHOICE download completed: {files_downloaded} files")
+                logger.success(f"[SUCCESS] CHOICE download completed: {files_downloaded} files")
                 return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
 
             except Exception as e:
@@ -164,7 +164,7 @@ class ChoiceDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="networkidle", timeout=60000)
             time.sleep(2)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Open year accordion section - check if it exists first
             logger.info(f"Looking for year section: {target_year}...")
@@ -176,15 +176,15 @@ class ChoiceDownloader(BaseDownloader):
             # Check if year section exists with a short timeout
             try:
                 if not year_button.is_visible(timeout=5000):
-                    logger.warning(f"  ✗ Year section {target_year} not found - data not published")
+                    logger.warning(f"  [FAIL] Year section {target_year} not found - data not published")
                     return 0
             except:
-                logger.warning(f"  ✗ Year section {target_year} not found - data not published")
+                logger.warning(f"  [FAIL] Year section {target_year} not found - data not published")
                 return 0
             
             year_button.click()
             time.sleep(3)
-            logger.info(f"  ✓ Year section opened")
+            logger.info(f"  [OK] Year section opened")
 
             # Open month accordion - check if it exists first
             logger.info(f"Looking for month: {month_name}...")
@@ -195,15 +195,15 @@ class ChoiceDownloader(BaseDownloader):
             # Check if month section exists with a short timeout
             try:
                 if not month_button.is_visible(timeout=5000):
-                    logger.warning(f"  ✗ Month {month_name} not found - data not published")
+                    logger.warning(f"  [FAIL] Month {month_name} not found - data not published")
                     return 0
             except:
-                logger.warning(f"  ✗ Month {month_name} not found - data not published")
+                logger.warning(f"  [FAIL] Month {month_name} not found - data not published")
                 return 0
             
             month_button.click()
             time.sleep(3)
-            logger.info(f"  ✓ Month {month_name} opened")
+            logger.info(f"  [OK] Month {month_name} opened")
 
             # Find all scheme files for this month
             search_text = f"{month_name} {target_year}"
@@ -212,10 +212,10 @@ class ChoiceDownloader(BaseDownloader):
             scheme_count = scheme_element_locator.count()
             
             if scheme_count == 0:
-                logger.warning(f"  ✗ No schemes found for {month_name} {target_year}")
+                logger.warning(f"  [FAIL] No schemes found for {month_name} {target_year}")
                 return 0
             
-            logger.info(f"  ✓ Found {scheme_count} scheme(s)")
+            logger.info(f"  [OK] Found {scheme_count} scheme(s)")
 
             downloaded_count = 0
             
@@ -240,7 +240,7 @@ class ChoiceDownloader(BaseDownloader):
                     
                     save_path = download_folder / suggested
                     download.save_as(save_path)
-                    logger.info(f"    ✓ Saved: {suggested}")
+                    logger.info(f"    [OK] Saved: {suggested}")
                     
                     downloaded_count += 1
                     time.sleep(1)
@@ -248,7 +248,7 @@ class ChoiceDownloader(BaseDownloader):
                 except PlaywrightTimeout:
                     logger.warning(f"    ⊘ Timeout: Download did not start")
                 except Exception as e:
-                    logger.warning(f"    ✗ Error: {str(e)[:100]}")
+                    logger.warning(f"    [FAIL] Error: {str(e)[:100]}")
                     continue
 
             return downloaded_count
@@ -270,11 +270,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

@@ -15,10 +15,10 @@ def fix_constraints():
         cur.execute("ALTER TABLE companies ADD CONSTRAINT chk_isin_format CHECK (isin ~ '^INE[A-Z0-9]{5}10[A-Z0-9]{2}$')")
         
         conn.commit()
-        print("✓ Database ISIN constraints updated to match 9th-10th char '10' rule.")
+        print("[OK] Database ISIN constraints updated to match 9th-10th char '10' rule.")
     except Exception as e:
         conn.rollback()
-        print(f"✗ Failed to update constraints: {e}")
+        print(f"[FAIL] Failed to update constraints: {e}")
     finally:
         cur.close()
         close_connection()

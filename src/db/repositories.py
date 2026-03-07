@@ -412,17 +412,18 @@ def upsert_company(
     sector: Optional[str] = None,
     industry: Optional[str] = None,
     nse_symbol: Optional[str] = None,
-    bse_code: Optional[str] = None
+    bse_code: Optional[str] = None,
+    entity_id: Optional[int] = None
 ) -> int:
     """
-    Insert or update company with support for exchange symbols and sectors.
+    Insert or update company with support for exchange symbols, sectors, and entity linking.
     """
     cursor = get_cursor()
     
     cursor.execute(
         """
-        INSERT INTO companies (isin, company_name, exchange_symbol, sector, industry, nse_symbol, bse_code)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO companies (isin, company_name, exchange_symbol, sector, industry, nse_symbol, bse_code, entity_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (isin) DO UPDATE SET 
             company_name = EXCLUDED.company_name,
             exchange_symbol = COALESCE(EXCLUDED.exchange_symbol, companies.exchange_symbol),
@@ -430,10 +431,11 @@ def upsert_company(
             industry = COALESCE(EXCLUDED.industry, companies.industry),
             nse_symbol = COALESCE(EXCLUDED.nse_symbol, companies.nse_symbol),
             bse_code = COALESCE(EXCLUDED.bse_code, companies.bse_code),
+            entity_id = COALESCE(EXCLUDED.entity_id, companies.entity_id),
             updated_at = CURRENT_TIMESTAMP
         RETURNING company_id
         """,
-        (isin, company_name, exchange_symbol, sector, industry, nse_symbol, bse_code)
+        (isin, company_name, exchange_symbol, sector, industry, nse_symbol, bse_code, entity_id)
     )
     
     company_id = cursor.fetchone()[0]

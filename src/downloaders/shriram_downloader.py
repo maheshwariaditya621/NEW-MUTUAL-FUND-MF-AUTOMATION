@@ -115,7 +115,7 @@ class ShriramDownloader(BaseDownloader):
             if (target_dir / "_SUCCESS.json").exists():
                 logger.info(f"SHRIRAM: {year}-{month:02d} files already downloaded.")
                 duration = time.time() - start_time
-                logger.info("✅ Month already complete — UPDATED")
+                logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
@@ -150,7 +150,7 @@ class ShriramDownloader(BaseDownloader):
 
                 duration = time.time() - start_time
                 self.notifier.notify_success("SHRIRAM", year, month, files_downloaded=1, duration=duration)
-                logger.success(f"✅ SHRIRAM download completed: {file_path.name}")
+                logger.success(f"[SUCCESS] SHRIRAM download completed: {file_path.name}")
                 return {"status": "success", "file": str(file_path), "duration": duration}
 
             except Exception as e:
@@ -195,7 +195,7 @@ class ShriramDownloader(BaseDownloader):
             logger.info(f"Navigating to {url}...")
             page.goto(url, wait_until="load", timeout=90000)
             time.sleep(5)
-            logger.info("  ✓ Page loaded")
+            logger.info("  [OK] Page loaded")
 
             # Step 1: Click the accordion header (div.cursor-pointer containing the heading text)
             # Confirmed via DOM inspection: the clickable element is a DIV with class "cursor-pointer"
@@ -319,7 +319,7 @@ class ShriramDownloader(BaseDownloader):
                 try:
                     item_text = item.inner_text()
                     if search_label in item_text:
-                        logger.info(f"  ✓ Found card for: {search_label}")
+                        logger.info(f"  [OK] Found card for: {search_label}")
                         # The download element is a link with text "Download" inside the card
                         dl_link = item.get_by_text("Download", exact=False).first
                         if dl_link.count() > 0:
@@ -334,7 +334,7 @@ class ShriramDownloader(BaseDownloader):
                     continue
 
             if target_download_link is None:
-                logger.warning(f"  ✗ No download link found for {search_label}")
+                logger.warning(f"  [FAIL] No download link found for {search_label}")
                 return None
 
             # Step 6: Trigger download (with popup handling as per codegen)
@@ -347,7 +347,7 @@ class ShriramDownloader(BaseDownloader):
                         popup_page = popup_info.value
                         if popup_page:
                             popup_page.close()
-                            logger.info("  ✓ Popup handled and closed")
+                            logger.info("  [OK] Popup handled and closed")
                     except PlaywrightTimeout:
                         # No popup created — direct download
                         logger.info("  ℹ No popup detected, proceeding with direct download")
@@ -360,11 +360,11 @@ class ShriramDownloader(BaseDownloader):
 
                 save_path = download_folder / suggested_name
                 download.save_as(save_path)
-                logger.info(f"  ✓ Saved: {suggested_name}")
+                logger.info(f"  [OK] Saved: {suggested_name}")
                 return save_path
 
             except Exception as e:
-                logger.error(f"  ✗ Download failed: {str(e)[:150]}")
+                logger.error(f"  [FAIL] Download failed: {str(e)[:150]}")
                 raise
 
         finally:
@@ -386,11 +386,11 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"✅ Success: Downloaded file")
+        logger.success(f"[SUCCESS] Success: Downloaded file")
     elif status == "skipped":
-        logger.success(f"✅ Success: Month already complete")
+        logger.success(f"[SUCCESS] Success: Month already complete")
     elif status == "not_published":
-        logger.info(f"ℹ️  Info: Month not yet published")
+        logger.info(f"[INFO]  Info: Month not yet published")
     else:
-        logger.error(f"❌ Failed: {result.get('reason', 'Unknown error')}")
+        logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)
