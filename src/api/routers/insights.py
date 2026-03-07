@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.get("/stock-activity", response_model=StockActivityResponse)
 async def get_stock_activity(
-    activity_type: str = Query("buying", regex="^(buying|selling)$", description="Type of activity to fetch"),
+    activity_type: str = Query("buying", pattern="^(buying|selling)$", description="Type of activity to fetch"),
     mcap_category: Optional[str] = Query(None, description="Filter by market cap (Large Cap, Mid Cap, Small Cap)"),
     limit: int = Query(50, ge=1, le=100, description="Number of top stocks to return"),
     cur: cursor = Depends(get_db_cursor),

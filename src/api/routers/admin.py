@@ -331,7 +331,7 @@ async def delete_file(
     amc_slug: str = Query(...),
     year: int = Query(...),
     month: int = Query(...),
-    category: str = Query(..., regex="^(raw|merged)$"),
+    category: str = Query(..., pattern="^(raw|merged)$"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """Delete a specific raw data folder or merged Excel file."""
@@ -352,7 +352,7 @@ async def delete_file(
 async def bulk_delete_files(
     year: int = Query(...),
     month: int = Query(...),
-    category: str = Query(..., regex="^(raw|merged)$"),
+    category: str = Query(..., pattern="^(raw|merged)$"),
     cur: cursor = Depends(get_db_cursor)
 ):
     """Delete ALL files for a specific month/year across all AMCs."""
