@@ -25,3 +25,7 @@ urllib3
 logzero
 websocket-client
 python-multipart
+email-validator
+python-jose[cryptography]
+passlib
+bcrypt==4.0.1
