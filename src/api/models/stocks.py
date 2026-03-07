@@ -78,6 +78,9 @@ class StockHoldingsSummary(BaseModel):
     # Detailed holdings
     holdings: List[SchemeHolding] = Field(..., description="Detailed scheme-wise holdings")
 
+    # Data completeness warning (present when latest month has incomplete AMC data)
+    data_warning: Optional[dict] = Field(None, description="Warning when latest period has partial AMC data")
+
 
 class StockSearchResponse(BaseModel):
     """Response for stock search endpoint."""

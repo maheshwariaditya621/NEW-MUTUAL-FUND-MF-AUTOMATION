@@ -36,3 +36,4 @@ class StockActivityResponse(BaseModel):
     results: List[StockActivityItem] = Field(..., description="List of stocks with highest activity")
     total_results: int = Field(..., description="Total count of results")
     activity_type: str = Field(..., description="'buying' or 'selling'")
+    data_warning: Optional[dict] = Field(None, description="Warning when data is based on a partial/incomplete period")

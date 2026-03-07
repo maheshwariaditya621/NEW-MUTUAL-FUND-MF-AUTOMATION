@@ -24,6 +24,7 @@ from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
 from src.services.pricing_service import pricing_service
 from src.services.symbol_mapper import symbol_mapper
+from src.api.utils.data_coverage import get_period_coverage, get_data_warning
 
 router = APIRouter()
 
@@ -409,8 +410,12 @@ async def _get_stock_holdings_aggregated(
     Supports multi-month history for each scheme.
     """
     # Always use exactly 4 months window as requested by user
-    # 1. Determine the anchor (latest) period
+    # 1. Determine the anchor (latest) period, with partial data detection
     latest_yr, latest_mo = None, None
+    user_specified_period = bool(end_month)  # track if user explicitly chose a month
+    coverage = {"is_partial": False, "coverage_pct": 100.0}  # default
+    data_warning = None
+
     if end_month:
         try:
             # Parse 'MMM-YY' like 'NOV-25' -> year 2025, month 11
@@ -421,11 +426,29 @@ async def _get_stock_holdings_aggregated(
             pass
             
     if not latest_yr:
-        cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
-        latest_row = cur.fetchone()
-        if not latest_row:
-            raise HTTPException(status_code=404, detail="No portfolio data available")
-        latest_yr, latest_mo = latest_row
+        # Check coverage to decide if we should use latest or fall back to prev
+        coverage = get_period_coverage(cur)
+        data_warning = get_data_warning(coverage)
+
+        if coverage.get("is_partial") and coverage.get("prev"):
+            # Use the previous complete period as the anchor for summary stats
+            # but still show the partial latest month as a column (just with a warning)
+            latest_yr = coverage["prev"]["year"]
+            latest_mo = coverage["prev"]["month"]
+            # We still want to show the partial latest month in the columns,
+            # so we restore the actual latest as the first display period later
+            actual_latest_yr = coverage["latest"]["year"]
+            actual_latest_mo = coverage["latest"]["month"]
+        else:
+            actual_latest_yr = None
+            cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
+            latest_row = cur.fetchone()
+            if not latest_row:
+                raise HTTPException(status_code=404, detail="No portfolio data available")
+            latest_yr, latest_mo = latest_row
+            actual_latest_yr = None  # no override needed
+    else:
+        actual_latest_yr = None
 
     current_month_label = date(latest_yr, latest_mo, 1).strftime("%b-%y").upper()
     
@@ -440,6 +463,11 @@ async def _get_stock_holdings_aggregated(
         if curr_mo == 0:
             curr_mo = 12
             curr_yr -= 1
+
+    # If data is partial, prepend the actual latest month so it shows as a column
+    # (with warning) while summary stats use the previous complete period
+    if actual_latest_yr and (actual_latest_yr, actual_latest_mo) not in all_target_periods:
+        all_target_periods.insert(0, (actual_latest_yr, actual_latest_mo))
 
     # display_periods are the first `months` (newest to oldest)
     display_periods = all_target_periods[:months]
@@ -508,7 +536,11 @@ async def _get_stock_holdings_aggregated(
         if pid and pid in summary_data_map:
             funds = summary_data_map[pid][2]
         
-        if idx == 0:
+        # NOTE: Do NOT use idx==0 for summary stats when data is partial,
+        # because idx==0 is the partial month (e.g. FEB-26).
+        # We set summary stats from the anchor period (latest_yr, latest_mo)
+        # which is the last COMPLETE month (e.g. JAN-26).
+        if (yr, mo) == (latest_yr, latest_mo):
             total_shares_current = adj_shares
             num_funds_current = int(funds)
         
@@ -738,5 +770,6 @@ async def _get_stock_holdings_aggregated(
         monthly_trend=monthly_trend,
         holdings=final_holdings,
         shares_outstanding=shares_outstanding,
-        shares_last_updated_at=shares_last_updated_at
+        shares_last_updated_at=shares_last_updated_at,
+        data_warning=data_warning
     )

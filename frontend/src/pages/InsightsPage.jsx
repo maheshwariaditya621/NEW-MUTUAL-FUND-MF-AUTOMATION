@@ -154,6 +154,31 @@ export default function InsightsPage() {
                             />
                         </div>
                     </div>
+
+                    {/* ── Partial Data Warning ── */}
+                    {data?.data_warning && (
+                        <div style={{
+                            display: 'flex', alignItems: 'flex-start', gap: '10px',
+                            background: 'rgba(234, 179, 8, 0.08)',
+                            border: '1px solid rgba(234, 179, 8, 0.35)',
+                            borderRadius: '8px', padding: '10px 14px',
+                            marginTop: '12px', fontSize: '12px',
+                            color: 'var(--text-primary)', lineHeight: '1.5'
+                        }}>
+                            <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+                            <div>
+                                <strong style={{ color: '#eab308' }}>Showing {data.data_warning.complete_label} vs Previous</strong>
+                                <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                                    Only <strong style={{ color: 'var(--text-primary)' }}>{data.data_warning.amcs_uploaded} of {data.data_warning.amcs_expected} AMCs</strong> have
+                                    submitted {data.data_warning.latest_label} data
+                                    {data.data_warning.amcs_pending > 0 && (
+                                        <span style={{ color: '#f87171' }}> ({data.data_warning.amcs_pending} pending)</span>
+                                    )}.
+                                    {' '}Activity signals use <strong>{data.data_warning.complete_label}</strong> (last complete month) to avoid misleading insights.
+                                </span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 

@@ -29,8 +29,12 @@ async def get_stock_activity(
     Compares the latest available period with the previous month's data.
     """
     try:
-        # 1. Get the latest two periods
-        cur.execute("SELECT period_id, year, month FROM periods ORDER BY year DESC, month DESC LIMIT 2")
+        # 1. Get the latest periods and check coverage
+        from src.api.utils.data_coverage import get_period_coverage, get_data_warning
+        coverage = get_period_coverage(cur)
+        data_warning = get_data_warning(coverage)
+
+        cur.execute("SELECT period_id, year, month FROM periods ORDER BY year DESC, month DESC LIMIT 3")
         periods = cur.fetchall()
         
         if len(periods) < 2:
@@ -38,9 +42,22 @@ async def get_stock_activity(
                 status_code=404, 
                 detail="Insufficient historical data to calculate activity (need at least 2 months)."
             )
-            
-        p1_id, y1, m1 = periods[0] # Latest
-        p0_id, y0, m0 = periods[1] # Previous
+
+        # If the latest period is partial, skip it and use the two previous complete months.
+        # This prevents misleading insights based on only a few AMC uploads.
+        if coverage.get("is_partial") and len(periods) >= 3:
+            # Use periods[1] and periods[2] — the 2 most recent COMPLETE months
+            p1_id, y1, m1 = periods[1]  # Previous complete month (e.g., Jan-26)
+            p0_id, y0, m0 = periods[2]  # Month before that (e.g., Dec-25)
+            logger.info(
+                f"[Insights] Latest period {coverage['latest']['label']} is partial ({coverage['coverage_pct']}%). "
+                f"Using {coverage['prev']['label']} vs previous for stock activity."
+            )
+        else:
+            # Normal case: use the latest two periods
+            p1_id, y1, m1 = periods[0]  # Latest
+            p0_id, y0, m0 = periods[1]  # Previous
+            data_warning = None  # No need to warn if data is complete
         
         month_label = date(y1, m1, 1).strftime("%b-%y").upper()
         prev_month_label = date(y0, m0, 1).strftime("%b-%y").upper()
@@ -179,7 +196,8 @@ async def get_stock_activity(
             prev_month=prev_month_label,
             results=results,
             total_results=len(results),
-            activity_type=activity_type
+            activity_type=activity_type,
+            data_warning=data_warning
         )
 
     except Exception as e:

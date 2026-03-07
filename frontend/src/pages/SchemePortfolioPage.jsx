@@ -226,6 +226,51 @@ export default function SchemePortfolioPage() {
 
                         <div className="portfolio-table-section">
                             <div className="shp-table-wrap" style={{ borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
+                                {/* ── Pending Month Pill ── */}
+                                {portfolio.pending_month && (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: '8px',
+                                        background: 'rgba(99, 102, 241, 0.08)',
+                                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                                        borderRadius: '8px', padding: '10px 14px',
+                                        marginBottom: '10px', fontSize: '12px',
+                                        color: 'var(--text-primary)'
+                                    }}>
+                                        <span style={{ fontSize: '16px' }}>🕐</span>
+                                        <div>
+                                            <strong style={{ color: '#818cf8' }}>{portfolio.pending_month.month} — Data Pending</strong>
+                                            <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                                                {portfolio.pending_month.message}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── Industry Partial Warning ── */}
+                                {portfolio.data_warning && !portfolio.pending_month && (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: '8px',
+                                        background: 'rgba(234, 179, 8, 0.08)',
+                                        border: '1px solid rgba(234, 179, 8, 0.3)',
+                                        borderRadius: '8px', padding: '10px 14px',
+                                        marginBottom: '10px', fontSize: '12px',
+                                        color: 'var(--text-primary)'
+                                    }}>
+                                        <span style={{ fontSize: '16px' }}>⚠️</span>
+                                        <div>
+                                            <strong style={{ color: '#eab308' }}>Partial Industry Data — {portfolio.data_warning.latest_label}</strong>
+                                            <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                                                <strong style={{ color: 'var(--text-primary)' }}>
+                                                    {portfolio.data_warning.amcs_uploaded} of {portfolio.data_warning.amcs_expected} AMCs
+                                                </strong> have uploaded. This scheme's data is available.
+                                                {portfolio.data_warning.amcs_pending > 0 && (
+                                                    <span style={{ color: '#f87171' }}> ({portfolio.data_warning.amcs_pending} still pending)</span>
+                                                )}.
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* ── Controls Header ── */}
                                 <div className="shp-controls-header shp-controls-row">
                                     <div className="shp-section-title" style={{ margin: 0, color: 'var(--shp-header-color)' }}>Equity Holdings</div>

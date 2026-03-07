@@ -55,6 +55,11 @@ class SchemePortfolioSummary(BaseModel):
     holdings: List[PortfolioHolding] = Field(..., description="Stock holdings with monthly comparison")
     total_holdings: int = Field(..., description="Total number of unique stocks")
 
+    # Partial data info (when the AMC hasn't uploaded the latest month yet)
+    pending_month: Optional[dict] = Field(None, description="Info about a month where data is not yet available")
+    # Data completeness cross-AMC warning
+    data_warning: Optional[dict] = Field(None, description="Warning when latest period has partial AMC data across the industry")
+
 
 class SchemeSearchResponse(BaseModel):
     """Response for scheme search endpoint."""

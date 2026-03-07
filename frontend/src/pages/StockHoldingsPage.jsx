@@ -74,6 +74,7 @@ export default function StockHoldingsPage() {
     const [selectedMonth, setSelectedMonth] = useState(null);
     const [aumViewMode, setAumViewMode] = useState('total'); // 'total' or 'equity'
     const [allAvailableMonths, setAllAvailableMonths] = useState([]);
+    const [showAmcStatus, setShowAmcStatus] = useState(false);
 
     useEffect(() => {
         if (!summary?.holdings?.[0]?.history) return;
@@ -376,11 +377,106 @@ export default function StockHoldingsPage() {
                             </div>
                         </div>
 
+                        {/* ── Partial Data Warning Banner ── */}
+                        {summary.data_warning && (
+                            <div style={{
+                                background: 'rgba(234, 179, 8, 0.08)',
+                                border: '1px solid rgba(234, 179, 8, 0.35)',
+                                borderRadius: '8px', padding: '10px 14px',
+                                marginBottom: '16px', fontSize: '12px',
+                                color: 'var(--text-primary)', lineHeight: '1.5'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                                    <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+                                    <div style={{ flex: 1 }}>
+                                        <strong style={{ color: '#eab308' }}>Partial Data — {summary.data_warning.latest_label}</strong>
+                                        <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                                            <strong style={{ color: 'var(--text-primary)' }}>
+                                                {summary.data_warning.amcs_uploaded} of {summary.data_warning.amcs_expected} AMCs
+                                            </strong> have submitted {summary.data_warning.latest_label} data
+                                            {summary.data_warning.amcs_pending > 0 && (
+                                                <span style={{ color: '#f87171' }}> ({summary.data_warning.amcs_pending} still pending)</span>
+                                            )}.
+                                            {' '}Summary figures (Ownership%, Funds, Total Shares) reflect
+                                            {' '}<strong>{summary.data_warning.complete_label}</strong> — the last complete month.
+                                            Banner disappears automatically once all AMCs upload.
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowAmcStatus(s => !s)}
+                                        style={{
+                                            flexShrink: 0, fontSize: '11px', fontWeight: '600',
+                                            padding: '3px 10px', borderRadius: '4px', cursor: 'pointer',
+                                            background: 'rgba(234,179,8,0.15)',
+                                            border: '1px solid rgba(234,179,8,0.4)',
+                                            color: '#eab308', whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {showAmcStatus ? 'Hide' : 'View AMC Status'}
+                                    </button>
+                                </div>
+
+                                {/* ── Expandable AMC Status Panel ── */}
+                                {showAmcStatus && (
+                                    <div style={{
+                                        display: 'grid', gridTemplateColumns: '1fr 1fr',
+                                        gap: '12px', marginTop: '12px', paddingTop: '12px',
+                                        borderTop: '1px solid rgba(234,179,8,0.2)'
+                                    }}>
+                                        {/* Pending AMCs */}
+                                        <div>
+                                            <div style={{ fontSize: '11px', fontWeight: '700', color: '#f87171', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                ⏳ Pending ({summary.data_warning.amcs_pending})
+                                            </div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                                {(summary.data_warning.pending_amc_names || []).map(amc => (
+                                                    <span key={amc} style={{
+                                                        fontSize: '10px', padding: '2px 7px',
+                                                        borderRadius: '3px', fontWeight: '500',
+                                                        background: 'rgba(248,113,113,0.1)',
+                                                        border: '1px solid rgba(248,113,113,0.3)',
+                                                        color: '#f87171'
+                                                    }}>{amc}</span>
+                                                ))}
+                                                {(!summary.data_warning.pending_amc_names?.length) && (
+                                                    <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>None — all uploaded!</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {/* Uploaded AMCs */}
+                                        <div>
+                                            <div style={{ fontSize: '11px', fontWeight: '700', color: '#10b981', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                ✅ Uploaded ({summary.data_warning.amcs_uploaded})
+                                            </div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                                {(summary.data_warning.uploaded_amc_names || []).map(amc => (
+                                                    <span key={amc} style={{
+                                                        fontSize: '10px', padding: '2px 7px',
+                                                        borderRadius: '3px', fontWeight: '500',
+                                                        background: 'rgba(16,185,129,0.08)',
+                                                        border: '1px solid rgba(16,185,129,0.25)',
+                                                        color: '#10b981'
+                                                    }}>{amc}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <div className="shp-summary-table-wrap" style={{ marginBottom: '24px' }}>
                             <table className="shp-table shp-summary-table">
                                 <thead>
                                     <tr><th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>Industry Holding</th></tr>
-                                    <tr>{displayMonths.map((m, i) => <th key={m} className={`shp-th shp-th-sub shp-month-${i}`} style={{ textAlign: 'center' }}>{m}</th>)}</tr>
+                                    <tr>{displayMonths.map((m, i) => {
+                                        const isPartialMonth = summary.data_warning && m === summary.data_warning.latest_label;
+                                        return (
+                                            <th key={m} className={`shp-th shp-th-sub shp-month-${i}`} style={{ textAlign: 'center' }}>
+                                                {m}{isPartialMonth && <span title="Partial data — not all AMCs have uploaded yet" style={{ marginLeft: '4px', color: '#eab308', fontSize: '10px' }}>⚠️ Partial</span>}
+                                            </th>
+                                        );
+                                    })}</tr>
                                 </thead>
                                 <tbody>
                                     <tr className="shp-row">

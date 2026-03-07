@@ -21,6 +21,7 @@ from src.api.models.schemes import (
 )
 from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
+from src.api.utils.data_coverage import get_period_coverage, get_data_warning
 
 print("LOADING SCHEMES ROUTER WITH FIX v2 (ISIN_MASTER JOIN) ...")
 logger.info("LOADING SCHEMES ROUTER WITH FIX v2 (ISIN_MASTER JOIN) ...")
@@ -356,8 +357,11 @@ async def _get_scheme_portfolio_by_id(
         SchemePortfolioSummary
     """
     # Always return exactly 4 months window as requested by user
-    # 1. Determine the anchor (latest) period
+    # 1. Determine the anchor (latest) period, with partial data detection
     latest_yr, latest_mo = None, None
+    pending_month_info = None
+    data_warning = None
+
     if end_month:
         try:
             # Parse 'MMM-YY' like 'NOV-25' -> year 2025, month 11
@@ -368,11 +372,42 @@ async def _get_scheme_portfolio_by_id(
             pass
             
     if not latest_yr:
-        cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
-        latest_row = cur.fetchone()
-        if not latest_row:
-            raise HTTPException(status_code=404, detail="No portfolio data available")
-        latest_yr, latest_mo = latest_row
+        # Check coverage to detect partial months
+        coverage = get_period_coverage(cur)
+        data_warning = get_data_warning(coverage)
+
+        if coverage.get("is_partial") and coverage.get("prev") and coverage.get("latest"):
+            # Latest month is partial globally — check if THIS scheme has data for it
+            latest_period_id = coverage["latest"]["period_id"]
+            cur.execute(
+                "SELECT 1 FROM scheme_snapshots WHERE scheme_id = %s AND period_id = %s LIMIT 1",
+                (scheme_id, latest_period_id)
+            )
+            scheme_has_latest = cur.fetchone() is not None
+
+            if not scheme_has_latest:
+                # This scheme has NO data for the latest partial month
+                # Mark it as pending and anchor from the previous complete period
+                pending_month_info = {
+                    "month": coverage["latest"]["label"],
+                    "message": f"{coverage['latest']['label']} data has not yet been released by this AMC. Showing last 4 available months."
+                }
+                latest_yr = coverage["prev"]["year"]
+                latest_mo = coverage["prev"]["month"]
+            else:
+                # Scheme HAS data for the latest partial month - show it normally
+                latest_yr = coverage["latest"]["year"]
+                latest_mo = coverage["latest"]["month"]
+        else:
+            latest_yr = coverage["latest"]["year"] if coverage.get("latest") else None
+            if not latest_yr:
+                cur.execute("SELECT year, month FROM periods ORDER BY year DESC, month DESC LIMIT 1")
+                latest_row = cur.fetchone()
+                if not latest_row:
+                    raise HTTPException(status_code=404, detail="No portfolio data available")
+                latest_yr, latest_mo = latest_row
+            else:
+                latest_mo = coverage["latest"]["month"]
     
     # 2. Generate exactly 4 months ending at latest_yr, latest_mo
     target_months = [] # list of (year, month)
@@ -632,6 +667,8 @@ async def _get_scheme_portfolio_by_id(
         category=category_str, # Use the dynamic category string
         monthly_aum=monthly_aum,
         holdings=final_holdings,
-        total_holdings=len(final_holdings)
+        total_holdings=len(final_holdings),
+        pending_month=pending_month_info,
+        data_warning=data_warning
     )
 
