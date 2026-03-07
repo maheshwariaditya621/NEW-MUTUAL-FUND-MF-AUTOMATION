@@ -19,7 +19,7 @@ from src.api.models.schemes import (
     PortfolioHolding,
     MonthlyHoldingSnapshot
 )
-from src.api.dependencies import get_db_cursor
+from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
 
 print("LOADING SCHEMES ROUTER WITH FIX v2 (ISIN_MASTER JOIN) ...")
@@ -32,7 +32,9 @@ router = APIRouter()
 async def search_schemes(
     q: str = Query(..., min_length=2, description="Search query (scheme name or AMC name)"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
+
 ):
     """
     Search for mutual fund schemes by name or AMC.
@@ -208,7 +210,8 @@ async def get_portfolio_by_identifier(
     months: int = Query(4, ge=1, le=12, description="Number of months to show"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     background_tasks: BackgroundTasks = None,
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get portfolio holdings by scheme name or ID (flexible identifier).
@@ -251,7 +254,8 @@ async def get_scheme_portfolio(
     months: int = Query(4, ge=1, le=12, description="Number of months to show"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     background_tasks: BackgroundTasks = None,
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get portfolio holdings for a specific scheme by ID with monthly comparison.
@@ -615,7 +619,7 @@ async def _get_scheme_portfolio_by_id(
     
     # Sort by latest month's % to AUM (descending)
     final_holdings.sort(
-        key=lambda h: h.monthly_data[-1].percent_to_aum if h.monthly_data else 0,
+        key=lambda h: h.monthly_data[-1].percent_to_aum or Decimal('0'),
         reverse=True
     )
     

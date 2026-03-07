@@ -20,7 +20,7 @@ from src.api.models.stocks import (
 )
 from datetime import date, datetime
 import calendar
-from src.api.dependencies import get_db_cursor
+from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
 from src.services.pricing_service import pricing_service
 from src.services.symbol_mapper import symbol_mapper
@@ -32,7 +32,8 @@ router = APIRouter()
 async def search_stocks(
     q: str = Query(..., min_length=2, description="Search query (company name, ISIN, or NSE symbol)"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Search for stocks by company name, ISIN, or NSE symbol.
@@ -204,7 +205,8 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
 @router.get("/{isin}/price")
 async def get_stock_price(
     isin: str = Path(..., description="12-character ISIN code"),
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get the latest live price (LTP) for a specific stock by ISIN.
@@ -236,7 +238,8 @@ async def get_stock_price(
 async def get_bulk_prices(
     request: BulkPriceRequest,
     background_tasks: BackgroundTasks = None,
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Fetch live prices for a list of ISINs in bulk.
@@ -274,7 +277,8 @@ async def get_holdings_by_identifier(
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     background_tasks: BackgroundTasks = None,
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get detailed holdings information for a stock by any identifier.
@@ -323,7 +327,8 @@ async def get_stock_holdings(
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     background_tasks: BackgroundTasks = None,
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get detailed holdings information for a specific stock by ISIN.
@@ -688,7 +693,7 @@ async def _get_stock_holdings_aggregated(
             )))
 
     # Sort holdings by latest percent_to_nav desc
-    holdings.sort(key=lambda x: x[0], reverse=True)
+    holdings.sort(key=lambda x: x[0] or Decimal('0'), reverse=True)
     final_holdings = [h[1] for h in holdings]
 
     # Dynamic Market Cap Calculation
