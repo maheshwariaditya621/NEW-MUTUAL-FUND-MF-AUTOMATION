@@ -21,6 +21,7 @@ from datetime import datetime
 
 from src.config import logger
 from src.corporate_actions.nse_fetcher import NSEFetcher
+from src.corporate_actions.bse_fetcher import BSEFetcher
 from src.corporate_actions.reprocessing_worker import ReprocessingWorker
 
 # Daily schedule times in HH:MM (24h IST)
@@ -35,18 +36,30 @@ def run_ca_fetch() -> dict:
     """Single run of the CA fetch + drain cycle."""
     logger.info("[CA Scheduler] === Starting Corporate Actions Fetch ===")
 
-    fetcher = NSEFetcher()
-    fetch_result = fetcher.run(lookback_days=LOOKBACK_DAYS)
+    # 1. NSE Fetch
+    nse_fetcher = NSEFetcher()
+    nse_res = nse_fetcher.run(lookback_days=LOOKBACK_DAYS)
+
+    # 2. BSE Fetch
+    bse_fetcher = BSEFetcher()
+    bse_res = bse_fetcher.run()
+
+    # Combine stats
+    combined = {
+        "fetched_nse": nse_res.get("fetched_nse", 0),
+        "fetched_bse": bse_res.get("inserted", 0) + bse_res.get("updated", 0),
+        "inserted": nse_res.get("inserted", 0) + bse_res.get("inserted", 0),
+        "updated": nse_res.get("updated", 0) + bse_res.get("updated", 0),
+        "enqueued": nse_res.get("enqueued_for_reprocessing", 0) + bse_res.get("enqueued_for_reprocessing", 0),
+        "errors": nse_res.get("errors", 0) + bse_res.get("errors", 0)
+    }
 
     logger.info(
         f"[CA Scheduler] Fetch complete: "
-        f"fetched={fetch_result.get('fetched_nse', 0)}, "
-        f"inserted={fetch_result.get('inserted', 0)}, "
-        f"updated={fetch_result.get('updated', 0)}, "
-        f"enqueued={fetch_result.get('enqueued_for_reprocessing', 0)}, "
-        f"errors={fetch_result.get('errors', 0)}"
+        f"NSE={combined['fetched_nse']}, BSE_valid={combined['fetched_bse']}, "
+        f"new_inserts={combined['inserted']}, enqueued={combined['enqueued']}"
     )
-    return fetch_result
+    return combined
 
 
 def run_ca_reprocess() -> dict:
