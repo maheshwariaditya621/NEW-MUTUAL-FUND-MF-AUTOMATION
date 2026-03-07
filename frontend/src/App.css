@@ -44,6 +44,25 @@
   gap: 16px;
 }
 
+/* Logout Button */
+.logout-btn {
+  background: transparent;
+  color: #ef4444;
+  /* Red-500 */
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.logout-btn:hover {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: #ef4444;
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -117,6 +136,12 @@
 .app-main {
   flex: 1;
   padding: 32px 0;
+}
+
+.app-main-auth {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 /* ===== FOOTER ===== */

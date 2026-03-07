@@ -9,7 +9,7 @@ from decimal import Decimal
 from datetime import date
 
 from src.api.models.insights import StockActivityResponse, StockActivityItem
-from src.api.dependencies import get_db_cursor
+from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
 
 router = APIRouter()
@@ -20,7 +20,8 @@ async def get_stock_activity(
     activity_type: str = Query("buying", regex="^(buying|selling)$", description="Type of activity to fetch"),
     mcap_category: Optional[str] = Query(None, description="Filter by market cap (Large Cap, Mid Cap, Small Cap)"),
     limit: int = Query(50, ge=1, le=100, description="Number of top stocks to return"),
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get stocks with the highest net mutual fund buying or selling in the latest month.

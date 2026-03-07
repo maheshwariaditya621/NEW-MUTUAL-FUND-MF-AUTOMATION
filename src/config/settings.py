@@ -36,6 +36,11 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # Admin Console Configuration
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "admin123")
 
+# JWT Authentication Configuration
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "7e46c70a889f6edfcff0480fac5847ea8415a08f8d3feda3b3d2b700a61b922e")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+
 # ============================================================
 # ANGEL ONE SMARTAPI CONFIGURATION
 # ============================================================

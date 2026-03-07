@@ -9,6 +9,9 @@ from .settings import (
     DB_PASSWORD,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
+    JWT_SECRET_KEY,
+    JWT_ALGORITHM,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from .logging import logger
 
@@ -21,5 +24,8 @@ __all__ = [
     "DB_PASSWORD",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
+    "JWT_SECRET_KEY",
+    "JWT_ALGORITHM",
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
     "logger",
 ]

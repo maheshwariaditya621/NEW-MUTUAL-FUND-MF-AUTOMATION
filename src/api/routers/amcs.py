@@ -17,7 +17,7 @@ from src.api.models.amcs import (
     AMCDetail,
     AMCSchemeItem
 )
-from src.api.dependencies import get_db_cursor
+from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
 
 router = APIRouter()
@@ -25,7 +25,8 @@ router = APIRouter()
 
 @router.get("", response_model=AMCListResponse)
 async def list_amcs(
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     List all AMCs with aggregated AUM, scheme counts, and top holdings.
@@ -160,7 +161,8 @@ async def list_amcs(
 @router.get("/{amc_id}", response_model=AMCDetail)
 async def get_amc_detail(
     amc_id: int = Path(..., description="Internal AMC ID"),
-    cur: cursor = Depends(get_db_cursor)
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get detailed profile for an AMC, including list of all its schemes.

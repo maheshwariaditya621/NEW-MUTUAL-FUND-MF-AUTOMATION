@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from psycopg2.extensions import cursor
 from groq import Groq
 
-from src.api.dependencies import get_db_cursor
+from src.api.dependencies import get_db_cursor, get_current_user
 from src.config import logger
 
 router = APIRouter()
@@ -568,7 +568,11 @@ DO NOT use XML tags or special function-calling syntax in your response content.
 # ──────────────────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, cur: cursor = Depends(get_db_cursor)):
+async def chat(
+    request: ChatRequest, 
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
+):
     """
     AI Chatbot endpoint powered by Groq (free tier).
     Uses Llama-3.3-70b with tool calling to query live DB data.
