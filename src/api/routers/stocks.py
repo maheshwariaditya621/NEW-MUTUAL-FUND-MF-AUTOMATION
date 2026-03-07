@@ -599,12 +599,13 @@ async def _get_stock_holdings_aggregated(
             a.amc_name,
             s.plan_type,
             s.option_type,
+            ss.total_value_inr / 10000000.0 as equity_aum_cr,
+            ss.total_net_assets_inr / 10000000.0 as total_aum_cr,
+            SUM(eh.percent_of_nav) as percent_of_nav,
+            SUM(COALESCE(eh.adj_quantity, eh.quantity)) as quantity,
+            p.period_id,
             p.year,
-            p.month,
-            COALESCE(eh.adj_quantity, eh.quantity) as quantity,
-            eh.percent_of_nav,
-            ss.total_net_assets_inr as sn_total_aum,
-            ss.total_value_inr as sn_equity_aum
+            p.month
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
         JOIN schemes s ON ss.scheme_id = s.scheme_id
@@ -612,6 +613,7 @@ async def _get_stock_holdings_aggregated(
         JOIN periods p ON ss.period_id = p.period_id
         JOIN companies c ON eh.company_id = c.company_id
         WHERE {filter_clause} AND p.period_id IN ({','.join(['%s']*len(all_period_ids))})
+        GROUP BY s.scheme_id, s.scheme_name, a.amc_name, s.plan_type, s.option_type, ss.total_value_inr, ss.total_net_assets_inr, p.period_id, p.year, p.month
         ORDER BY s.scheme_id, p.year DESC, p.month DESC
         """,
         (filter_val, *all_period_ids)
