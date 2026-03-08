@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { apiPostForm } from '../api/client';
+import { apiPostForm, API_BASE_URL } from '../api/client';
 import './LoginPage.css';
 
 const LoginPage = () => {
@@ -32,7 +32,7 @@ const LoginPage = () => {
 
             // response contains { access_token, token_type }
             // Now fetch user details
-            const userResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/v1/auth/me`, {
+            const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
                 headers: {
                     'Authorization': `Bearer ${response.access_token}`
                 }

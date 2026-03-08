@@ -20,10 +20,18 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS configuration: Allow all for dev LAN access
+# CORS configuration
+origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins + ["*"], # "*" is safe for non-credentialed, but origins list helps for dev
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
