@@ -15,6 +15,8 @@ class SchemeSearchResult(BaseModel):
     plan_type: str = Field(..., description="Direct or Regular")
     option_type: str = Field(..., description="Growth, Dividend, or IDCW")
     category: Optional[str] = Field(None, description="Scheme category (e.g., Equity: Multi Cap)")
+    website_category: Optional[str] = Field(None, description="Top-level website category")
+    website_sub_category: Optional[str] = Field(None, description="Granular website sub-category")
 
 
 class MonthlyHoldingSnapshot(BaseModel):
@@ -47,6 +49,8 @@ class SchemePortfolioSummary(BaseModel):
     plan_type: str = Field(..., description="Direct or Regular")
     option_type: str = Field(..., description="Growth, Dividend, or IDCW")
     category: Optional[str] = Field(None, description="Scheme category")
+    website_category: Optional[str] = Field(None, description="Top-level website category")
+    website_sub_category: Optional[str] = Field(None, description="Granular website sub-category")
     
     # Monthly AUM data
     monthly_aum: List[dict] = Field(..., description="Monthly AUM data")

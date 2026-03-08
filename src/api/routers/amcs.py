@@ -23,6 +23,27 @@ from src.config import logger
 router = APIRouter()
 
 
+@router.get("/search")
+async def search_amcs(
+    q: str = Query("", description="Search query for AMC name"),
+    cur: cursor = Depends(get_db_cursor),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Search for AMCs by name.
+    """
+    q = q.strip()
+    if not q:
+        cur.execute("SELECT amc_id, amc_name FROM amcs ORDER BY amc_name LIMIT 50")
+    else:
+        cur.execute(
+            "SELECT amc_id, amc_name FROM amcs WHERE amc_name ILIKE %s ORDER BY amc_name LIMIT 50",
+            (f"%{q}%",)
+        )
+    
+    rows = cur.fetchall()
+    return [{"amc_id": r[0], "amc_name": r[1]} for r in rows]
+
 @router.get("", response_model=AMCListResponse)
 async def list_amcs(
     cur: cursor = Depends(get_db_cursor),

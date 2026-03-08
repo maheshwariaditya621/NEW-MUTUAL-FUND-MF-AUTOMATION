@@ -31,74 +31,96 @@ router = APIRouter()
 
 @router.get("/search", response_model=SchemeSearchResponse)
 async def search_schemes(
-    q: str = Query(..., min_length=2, description="Search query (scheme name or AMC name)"),
+    q: str = Query(None, description="Search query (scheme name or AMC name)"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     cur: cursor = Depends(get_db_cursor),
     current_user: dict = Depends(get_current_user)
-
 ):
     """
     Search for mutual fund schemes by name or AMC.
     
     Supports ultra-fuzzy multi-word matching on scheme names and AMC names with similarity ranking.
+    If query is empty or short, returns the top schemes (by ID/Alphabetic) up to limit.
     """
     try:
         # Clean query
-        q = q.strip()
+        q = q.strip() if q else ""
         logger.info(f"🔍 Searching for Scheme: '{q}' (limit={limit})")
+        
         words = [w.strip() for w in q.split() if w.strip()]
+        
+        # If no words or search too small, just return a batch of schemes
         if not words:
-            return SchemeSearchResponse(query=q, results=[], total_results=0)
+            cur.execute(
+                f"""
+                SELECT 
+                    s.scheme_id,
+                    s.scheme_name,
+                    a.amc_name,
+                    s.plan_type,
+                    s.option_type,
+                    s.website_category,
+                    s.website_sub_category,
+                    100 as relevance_score
+                FROM schemes s
+                JOIN amcs a ON s.amc_id = a.amc_id
+                ORDER BY s.scheme_name
+                LIMIT %s
+                """,
+                (limit,)
+            )
+        else:
+            # Build conditions: Each word must match via ILIKE on scheme or AMC
+            placeholders = []
+            conditions = []
+            for word in words:
+                pattern = f"%{word}%"
+                conditions.append("(s.scheme_name ILIKE %s OR a.amc_name ILIKE %s)")
+                placeholders.extend([pattern, pattern])
+            
+            conditions_str = " AND ".join(conditions)
+            
+            # query_placeholders contains 2 * len(words) entries
+            # query_placeholders order:
+            # 1. CASE ranking (3 %s)
+            # 2. WHERE word conditions (len(placeholders) %s)
+            # 3. WHERE OR condition (2 %s)
+            # 4. LIMIT (1 %s)
+            query_placeholders = [
+                q, q + '%', q  # CASE ranking
+            ] + placeholders + [
+                q, f'%{q}%',   # WHERE OR
+                limit          # LIMIT
+            ]
 
-        # Build conditions: Each word must match via ILIKE on scheme or AMC
-        placeholders = []
-        conditions = []
-        for word in words:
-            pattern = f"%{word}%"
-            conditions.append("(s.scheme_name ILIKE %s OR a.amc_name ILIKE %s)")
-            placeholders.extend([pattern, pattern])
-        
-        conditions_str = " AND ".join(conditions)
-        
-        # word_placeholders contains 2 * len(words) entries
-        # query_placeholders order:
-        # 1. CASE ranking (3 %s)
-        # 2. WHERE word conditions (len(placeholders) %s)
-        # 3. WHERE OR condition (2 %s)
-        # 4. LIMIT (1 %s)
-        query_placeholders = [
-            q, q + '%', q  # CASE ranking
-        ] + placeholders + [
-            q, f'%{q}%',   # WHERE OR
-            limit          # LIMIT
-        ]
-
-        # Original query placeholders for CASE relevance + similarity
-        cur.execute(
-            f"""
-            SELECT 
-                s.scheme_id,
-                s.scheme_name,
-                a.amc_name,
-                s.plan_type,
-                s.option_type,
-                CASE 
-                    WHEN UPPER(s.scheme_name) = UPPER(%s) THEN 100
-                    WHEN s.scheme_name ILIKE %s THEN 85
-                    ELSE (similarity(s.scheme_name, %s) * 80)::int
-                END as relevance_score
-            FROM schemes s
-            JOIN amcs a ON s.amc_id = a.amc_id
-            WHERE ({conditions_str}) OR (s.scheme_name %% %s OR s.scheme_name ILIKE %s)
-            ORDER BY 
-                relevance_score DESC,
-                s.scheme_name,
-                s.plan_type,
-                s.option_type
-            LIMIT %s
-            """,
-            query_placeholders
-        )
+            # Original query placeholders for CASE relevance + similarity
+            cur.execute(
+                f"""
+                SELECT 
+                    s.scheme_id,
+                    s.scheme_name,
+                    a.amc_name,
+                    s.plan_type,
+                    s.option_type,
+                    s.website_category,
+                    s.website_sub_category,
+                    CASE 
+                        WHEN UPPER(s.scheme_name) = UPPER(%s) THEN 100
+                        WHEN s.scheme_name ILIKE %s THEN 85
+                        ELSE (similarity(s.scheme_name, %s) * 80)::int
+                    END as relevance_score
+                FROM schemes s
+                JOIN amcs a ON s.amc_id = a.amc_id
+                WHERE ({conditions_str}) OR (s.scheme_name %% %s OR s.scheme_name ILIKE %s)
+                ORDER BY 
+                    relevance_score DESC,
+                    s.scheme_name,
+                    s.plan_type,
+                    s.option_type
+                LIMIT %s
+                """,
+                query_placeholders
+            )
         
         results = []
         for row in cur.fetchall():
@@ -108,7 +130,9 @@ async def search_schemes(
                 amc_name=row[2],
                 plan_type=row[3],
                 option_type=row[4],
-                category=None
+                category=None,
+                website_category=row[5],
+                website_sub_category=row[6]
             ))
         
         return SchemeSearchResponse(
@@ -482,11 +506,13 @@ async def _get_scheme_portfolio_by_id(
     
     # Get scheme metadata (category)
     cur.execute(
-        "SELECT scheme_category FROM schemes WHERE scheme_id = %s",
+        "SELECT scheme_category, website_category, website_sub_category FROM schemes WHERE scheme_id = %s",
         (scheme_id,)
     )
     meta_row = cur.fetchone()
     category_str = meta_row[0] if meta_row and meta_row[0] else None
+    website_cat = meta_row[1] if meta_row else None
+    website_sub = meta_row[2] if meta_row else None
 
     # Get all holdings across all periods
     # We use COALESCE(c.entity_id, -c.company_id) to group by a logical stable identity
@@ -665,6 +691,8 @@ async def _get_scheme_portfolio_by_id(
         plan_type=plan_type.upper(),
         option_type=option_type.upper(),
         category=category_str, # Use the dynamic category string
+        website_category=website_cat,
+        website_sub_category=website_sub,
         monthly_aum=monthly_aum,
         holdings=final_holdings,
         total_holdings=len(final_holdings),

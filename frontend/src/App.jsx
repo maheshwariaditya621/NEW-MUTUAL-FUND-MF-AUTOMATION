@@ -10,6 +10,9 @@ import StockHoldingsPage from './pages/StockHoldingsPage';
 import SchemePortfolioPage from './pages/SchemePortfolioPage';
 import InsightsPage from './pages/InsightsPage';
 import AMCExplorerPage from './pages/AMCExplorerPage';
+import FundsExplorerPage from './pages/FundsExplorerPage';
+import SectorExposurePage from './pages/SectorExposurePage';
+import AMCSectorExposurePage from './pages/AMCSectorExposurePage';
 import AdminVault from './pages/AdminVault';
 import LoginPage from './pages/LoginPage';
 import HeaderSearch from './components/common/HeaderSearch';
@@ -52,8 +55,16 @@ const Header = () => {
               <nav className="nav">
                 <Link to="/stocks" className="nav-link">Stock Holdings</Link>
                 <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
-                <Link to="/amcs" className="nav-link">Funds Explorer</Link>
                 <Link to="/insights" className="nav-link">Insights</Link>
+                <div className="nav-dropdown">
+                  <span className="nav-link dropdown-toggle">Tools ▾</span>
+                  <div className="dropdown-menu">
+                    <Link to="/funds-explorer" className="dropdown-item">Funds Explorer</Link>
+                    <Link to="/sector-exposure" className="dropdown-item">Fund Sector Exposure</Link>
+                    <Link to="/amc-sector-exposure" className="dropdown-item">AMC Sector Exposure</Link>
+                    <Link to="/amcs" className="dropdown-item">AMC Analytics</Link>
+                  </div>
+                </div>
               </nav>
             )}
           </div>
@@ -105,9 +116,24 @@ function AppContent() {
                 <AMCExplorerPage />
               </ProtectedRoute>
             } />
+            <Route path="/funds-explorer" element={
+              <ProtectedRoute>
+                <FundsExplorerPage />
+              </ProtectedRoute>
+            } />
             <Route path="/insights" element={
               <ProtectedRoute>
                 <InsightsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/sector-exposure" element={
+              <ProtectedRoute>
+                <SectorExposurePage />
+              </ProtectedRoute>
+            } />
+            <Route path="/amc-sector-exposure" element={
+              <ProtectedRoute>
+                <AMCSectorExposurePage />
               </ProtectedRoute>
             } />
             <Route path="/admin-vault" element={
