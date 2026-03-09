@@ -183,16 +183,24 @@ class TrustDownloader(BaseDownloader):
             
             # 1. Open 'Monthly Disclosure' section
             logger.info("Opening 'Monthly Disclosure' section...")
-            # User script: page.get_by_text("Monthly Disclosure").nth(1)
-            monthly_disclosure = page.get_by_text("Monthly Disclosure").nth(1)
             
-            if monthly_disclosure.count() > 0:
-                monthly_disclosure.click()
+            # Use a more robust selector for the sidebar Monthly Disclosure
+            sidebar_link = page.locator("div.cursor-pointer").get_by_text("Monthly Disclosure", exact=True)
+            
+            if sidebar_link.count() > 0:
+                sidebar_link.first.click()
                 time.sleep(3)
-                logger.info("Section opened")
+                logger.info("Section opened via sidebar")
             else:
-                logger.error("Monthly Disclosure section not found")
-                return 0
+                # Fallback to general text match
+                monthly_disclosure = page.get_by_text("Monthly Disclosure").nth(1)
+                if monthly_disclosure.count() > 0:
+                    monthly_disclosure.click()
+                    time.sleep(3)
+                    logger.info("Section opened via fallback")
+                else:
+                    logger.error("Monthly Disclosure section not found")
+                    return 0
             
             # 2. Search for portfolio report
             # Construct link text: "TRUSTMF Monthly Portfolio Report as on {dd}.{mm}.{yyyy}"
@@ -202,15 +210,15 @@ class TrustDownloader(BaseDownloader):
             
             logger.info(f"Searching for link: '{target_link_text}'")
             
-            # Use strict text matching for the link
-            report_link = page.locator("a").filter(has_text=target_link_text)
+            # Use a more general locator that handles both <a> and <button>
+            report_link = page.get_by_text(target_link_text)
             
             if report_link.count() == 0:
                 logger.warning(f"Report not found for {target_link_text}")
                 
                 # Debug: log available links
                 logger.info("Checking available reports:")
-                all_reports = page.locator("a").filter(has_text="TRUSTMF Monthly Portfolio Report")
+                all_reports = page.get_by_text("TRUSTMF Monthly Portfolio Report")
                 for i in range(min(5, all_reports.count())):
                     try:
                         text = all_reports.nth(i).text_content()
