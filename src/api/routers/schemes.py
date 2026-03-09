@@ -530,7 +530,7 @@ async def _get_scheme_portfolio_by_id(
             ss.total_value_inr / 10000000.0 as equity_aum_cr_val,
             ss.total_net_assets_inr / 10000000.0 as total_aum_cr_val,
             eh.percent_of_nav,
-            eh.quantity,
+            COALESCE(eh.adj_quantity, eh.quantity) as quantity,
             c.market_cap,
             c.mcap_type,
             c.shares_outstanding
@@ -623,7 +623,7 @@ async def _get_scheme_portfolio_by_id(
             if month_str in entity_data["monthly_data"]:
                 data = entity_data["monthly_data"][month_str]
                 multiplier = multipliers.get(month_str, 1.0)
-                adjusted_qty = int(data["quantity"] * multiplier)
+                adjusted_qty = int(data["quantity"])
                 
                 monthly_snapshots.append(MonthlyHoldingSnapshot(
                     month=month_str,

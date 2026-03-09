@@ -521,8 +521,9 @@ async def _get_stock_holdings_aggregated(
     total_shares_current = 0
     num_funds_current = 0
     
-    # Pre-calculate adjusted shares for ALL 5 target periods to compute trends
+    # Pre-calculate adjusted shares and multipliers for ALL 5 target periods
     adj_shares_map = {}
+    period_multipliers_local = {} # to be used for is_adjusted flag
     for yr, mo in all_target_periods:
         pid = period_ids_map.get((yr, mo))
         shares = 0
@@ -533,7 +534,8 @@ async def _get_stock_holdings_aggregated(
         if entity_id:
             mult = await _get_cumulative_multiplier(entity_id, yr, mo, cur)
         
-        adj_shares_map[(yr, mo)] = int(shares * mult)
+        period_multipliers_local[(yr, mo)] = mult
+        adj_shares_map[(yr, mo)] = int(shares) # Rely on DB-side adj_quantity
 
     for idx, (yr, mo) in enumerate(display_periods):
         month_str = date(yr, mo, 1).strftime("%b-%y").upper()
@@ -584,7 +586,7 @@ async def _get_stock_holdings_aggregated(
             total_shares=adj_shares,
             num_funds=int(funds),
             trend=trend,
-            is_adjusted=mult > 1.001 or mult < 0.999,
+            is_adjusted=period_multipliers_local.get((yr, mo), 1.0) > 1.001 or period_multipliers_local.get((yr, mo), 1.0) < 0.999,
             ownership_percent=ownership_pct,
             month_change=month_change,
             percent_change=percent_change
@@ -641,8 +643,8 @@ async def _get_stock_holdings_aggregated(
     schemes_data = {}
     for row in raw_holdings:
         sid, sname, amc, plan, opt, eq_aum, tot_aum, pnav, qty, pid, yr, mo = row
-        mult = period_multipliers.get((yr, mo), 1.0)
-        adj_qty = int(qty * mult)
+        # mult = period_multipliers.get((yr, mo), 1.0) # Redundant
+        adj_qty = int(qty)
 
         eq_val = Decimal(str(eq_aum or 0)).quantize(Decimal('0.01'))
         tot_val = Decimal(str(tot_aum or 0)).quantize(Decimal('0.01'))
