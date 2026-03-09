@@ -1,0 +1,243 @@
+/* ExportButton.css — Premium export dropdown component */
+
+.eb-wrapper {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+/* ── Trigger Button ── */
+.eb-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--accent-primary, #6366f1);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    outline: none;
+    letter-spacing: 0.01em;
+}
+
+.eb-trigger:hover:not(:disabled) {
+    background: rgba(99, 102, 241, 0.18);
+    border-color: rgba(99, 102, 241, 0.7);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+    transform: translateY(-1px);
+}
+
+.eb-trigger:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.eb-trigger--open {
+    background: rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.7);
+}
+
+.eb-trigger--loading {
+    opacity: 0.75;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.eb-trigger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.eb-chevron {
+    transition: transform 0.2s ease;
+    margin-left: 1px;
+}
+
+.eb-chevron--open {
+    transform: rotate(180deg);
+}
+
+/* Spinning loader icon */
+@keyframes eb-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.eb-spinner {
+    animation: eb-spin 0.8s linear infinite;
+}
+
+/* ── Dropdown Panel ── */
+.eb-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 999;
+    min-width: 240px;
+    background: var(--bg-card, #13151f);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 12px;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.35),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+    backdrop-filter: blur(16px);
+    overflow: hidden;
+    animation: eb-fade-in 0.15s ease;
+}
+
+@keyframes eb-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.eb-dropdown-header {
+    padding: 10px 14px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary, #6b7280);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Option Rows ── */
+.eb-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+    color: var(--text-primary, #e2e8f0);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.eb-option:last-child {
+    border-bottom: none;
+}
+
+.eb-option:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.eb-option:active {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.eb-option-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    padding: 6px;
+}
+
+.eb-option-icon--excel {
+    background: rgba(22, 163, 74, 0.15);
+    color: #22c55e;
+}
+
+.eb-option-icon--pdf {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.eb-option-icon--csv {
+    background: rgba(234, 179, 8, 0.15);
+    color: #eab308;
+}
+
+.eb-option-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.eb-option-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #e2e8f0);
+}
+
+.eb-option-sub {
+    font-size: 10px;
+    color: var(--text-secondary, #6b7280);
+    font-weight: 400;
+}
+
+.eb-option-count {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 5px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Error Toast ── */
+.eb-error {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 1000;
+    max-width: 320px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    animation: eb-fade-in 0.2s ease;
+    line-height: 1.5;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.eb-error-dismiss {
+    flex-shrink: 0;
+    font-size: 12px;
+    opacity: 0.6;
+    margin-left: auto;
+    margin-top: 1px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+    .eb-dropdown {
+        right: -8px;
+        min-width: 200px;
+    }
+
+    .eb-trigger span:last-of-type {
+        display: none;
+    }
+}

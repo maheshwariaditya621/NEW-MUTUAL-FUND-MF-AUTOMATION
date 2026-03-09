@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { apiGet, handleApiError } from '../api/client';
 import MissingData from '../components/common/MissingData';
+import ExportButton from '../components/common/ExportButton';
 import './AMCExplorerPage.css';
 
 const AMCExplorerPage = () => {
@@ -101,8 +102,31 @@ const AMCExplorerPage = () => {
                         <button className="clear-search" onClick={() => setSearchTerm('')}>✕</button>
                     )}
                 </div>
-                <div className="stats-summary">
-                    Showing <strong>{filteredAMCs.length}</strong> Fund Houses
+                <div className="stats-summary" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span>Showing <strong>{filteredAMCs.length}</strong> Fund Houses</span>
+                    <ExportButton
+                        getData={() => filteredAMCs.map(amc => ({
+                            amc_name: amc.amc_name,
+                            total_aum_cr: amc.total_aum_cr,
+                            scheme_count: amc.scheme_count,
+                        }))}
+                        columns={[
+                            { key: 'amc_name', label: 'AMC Name', exportFormat: 'string' },
+                            { key: 'total_aum_cr', label: 'Total AUM (Cr)', exportFormat: 'numeric' },
+                            { key: 'scheme_count', label: 'Schemes', exportFormat: 'numeric' },
+                        ]}
+                        fileNameConfig={{
+                            page: 'amc-explorer',
+                            filters: { search: searchTerm || undefined },
+                        }}
+                        metadata={{
+                            title: 'AMC Explorer — Fund Houses',
+                            filters: {
+                                'Data As Of': lastUpdated,
+                                Search: searchTerm || undefined,
+                            },
+                        }}
+                    />
                 </div>
             </div>
 

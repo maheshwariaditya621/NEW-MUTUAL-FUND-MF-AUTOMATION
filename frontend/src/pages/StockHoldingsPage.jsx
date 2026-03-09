@@ -4,6 +4,7 @@ import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
 import PageEmptyState from '../components/common/PageEmptyState';
+import ExportButton from '../components/common/ExportButton';
 import { getStockHoldings, getStockPrice } from '../api/stocks';
 import { handleApiError } from '../api/client';
 import { formatNumber } from '../utils/helpers';
@@ -536,6 +537,143 @@ export default function StockHoldingsPage() {
                                         {allAvailableMonths.map(m => <option key={m} value={m}>{m}</option>)}
                                     </select>
                                     <input type="text" className="shp-search-input" placeholder="Filter..." value={filterText} onChange={(e) => setFilterText(e.target.value)} />
+                                    <ExportButton
+                                        getData={() => {
+                                            if (viewMode === 'scheme') {
+                                                // Scheme-wise: mirrors UI table exactly
+                                                return schemesToRender.map(item => {
+                                                    const row = {
+                                                        scheme_name: item.scheme_name,
+                                                        amc_name: item.amc_name,
+                                                        plan_type: item.plan_type ?? '',
+                                                        option_type: item.option_type ?? '',
+                                                        // AUM column respects the Total/Equity toggle
+                                                        aum_cr: aumViewMode === 'equity'
+                                                            ? (item.equity_aum_cr ?? null)
+                                                            : (item.total_aum_cr ?? null),
+                                                    };
+                                                    displayMonths.forEach((m, idx) => {
+                                                        const h = (item.history || []).find(x => x.month === m);
+                                                        // % AUM only for the first (latest) month, matching the UI
+                                                        if (idx === 0) row[`pct_aum_${m}`] = h?.percent_to_aum ?? null;
+                                                        row[`own_pct_${m}`] = h?.ownership_percent ?? null;
+                                                        row[`qty_${m}`] = h?.num_shares ?? null;
+                                                        row[`change_${m}`] = h?.month_change ?? null;
+                                                        // Change % only for latest month
+                                                        if (idx === 0) {
+                                                            const prev = h?.num_shares != null && h?.month_change != null
+                                                                ? (h.num_shares - h.month_change) : null;
+                                                            row[`change_pct_${m}`] = prev && prev !== 0
+                                                                ? (h.month_change / prev) * 100 : null;
+                                                        }
+                                                    });
+                                                    return row;
+                                                });
+                                            } else {
+                                                // AMC-wise: mirrors UI table exactly
+                                                return amcToRender.map(item => {
+                                                    const row = {
+                                                        amc_name: item.amc_name,
+                                                        scheme_count: item.scheme_count,
+                                                        aum_cr: aumViewMode === 'equity'
+                                                            ? (item.equity_aum_cr ?? null)
+                                                            : (item.total_aum_cr ?? null),
+                                                    };
+                                                    displayMonths.forEach((m, idx) => {
+                                                        const h = (item.history || []).find(x => x.month === m);
+                                                        row[`own_pct_${m}`] = h?.ownership_percent ?? null;
+                                                        row[`qty_${m}`] = h?.num_shares ?? null;
+                                                        row[`change_${m}`] = h?.month_change ?? null;
+                                                    });
+                                                    return row;
+                                                });
+                                            }
+                                        }}
+                                        columns={viewMode === 'scheme'
+                                            ? [
+                                                { key: 'scheme_name', label: 'Scheme Name', exportFormat: 'string' },
+                                                { key: 'amc_name', label: 'AMC', exportFormat: 'string' },
+                                                { key: 'plan_type', label: 'Plan', exportFormat: 'string' },
+                                                { key: 'option_type', label: 'Option', exportFormat: 'string' },
+                                                { key: 'aum_cr', label: aumViewMode === 'equity' ? 'Equity AUM (Cr)' : 'Total AUM (Cr)', exportFormat: 'numeric' },
+                                                // Latest month has % AUM + Own% + Qty + Change + Change%
+                                                ...(displayMonths[0] ? [
+                                                    { key: `pct_aum_${displayMonths[0]}`, label: `% AUM (${displayMonths[0]})`, exportFormat: 'numeric' },
+                                                    { key: `own_pct_${displayMonths[0]}`, label: `Ownership % (${displayMonths[0]})`, exportFormat: 'numeric' },
+                                                    { key: `qty_${displayMonths[0]}`, label: `Qty / Shares (${displayMonths[0]})`, exportFormat: 'numeric' },
+                                                    { key: `change_${displayMonths[0]}`, label: `Change in Qty (${displayMonths[0]})`, exportFormat: 'numeric' },
+                                                    { key: `change_pct_${displayMonths[0]}`, label: `Change % (${displayMonths[0]})`, exportFormat: 'numeric' },
+                                                ] : []),
+                                                // Older months: Own%, Qty, Change only (matches UI)
+                                                ...displayMonths.slice(1).flatMap(m => [
+                                                    { key: `own_pct_${m}`, label: `Ownership % (${m})`, exportFormat: 'numeric' },
+                                                    { key: `qty_${m}`, label: `Qty / Shares (${m})`, exportFormat: 'numeric' },
+                                                    { key: `change_${m}`, label: `Change in Qty (${m})`, exportFormat: 'numeric' },
+                                                ]),
+                                            ]
+                                            : [
+                                                { key: 'amc_name', label: 'AMC Name', exportFormat: 'string' },
+                                                { key: 'scheme_count', label: 'Schemes', exportFormat: 'numeric' },
+                                                { key: 'aum_cr', label: aumViewMode === 'equity' ? 'Equity AUM (Cr)' : 'Total AUM (Cr)', exportFormat: 'numeric' },
+                                                ...displayMonths.flatMap(m => [
+                                                    { key: `own_pct_${m}`, label: `Ownership % (${m})`, exportFormat: 'numeric' },
+                                                    { key: `qty_${m}`, label: `Qty / Shares (${m})`, exportFormat: 'numeric' },
+                                                    { key: `change_${m}`, label: `Change in Qty (${m})`, exportFormat: 'numeric' },
+                                                ]),
+                                            ]
+                                        }
+                                        pdfColumns={viewMode === 'scheme'
+                                            ? [
+                                                { key: 'scheme_name', label: 'Scheme Name', exportFormat: 'string' },
+                                                { key: 'amc_name', label: 'AMC', exportFormat: 'string' },
+                                                { key: 'plan_type', label: 'Plan', exportFormat: 'string' },
+                                                { key: 'aum_cr', label: aumViewMode === 'equity' ? 'Eq.AUM(Cr)' : 'Tot.AUM(Cr)', exportFormat: 'numeric' },
+                                                ...displayMonths.flatMap((m, idx) => [
+                                                    ...(idx === 0 ? [{ key: `pct_aum_${m}`, label: `%AUM(${m})`, exportFormat: 'numeric' }] : []),
+                                                    { key: `own_pct_${m}`, label: `Own%(${m})`, exportFormat: 'numeric' },
+                                                    { key: `qty_${m}`, label: `Qty(${m})`, exportFormat: 'numeric' },
+                                                    { key: `change_${m}`, label: `Chg(${m})`, exportFormat: 'numeric' },
+                                                ]),
+                                            ]
+                                            : [
+                                                { key: 'amc_name', label: 'AMC', exportFormat: 'string' },
+                                                { key: 'scheme_count', label: 'Schemes', exportFormat: 'numeric' },
+                                                { key: 'aum_cr', label: aumViewMode === 'equity' ? 'Eq.AUM(Cr)' : 'Tot.AUM(Cr)', exportFormat: 'numeric' },
+                                                ...displayMonths.flatMap(m => [
+                                                    { key: `own_pct_${m}`, label: `Own%(${m})`, exportFormat: 'numeric' },
+                                                    { key: `qty_${m}`, label: `Qty(${m})`, exportFormat: 'numeric' },
+                                                    { key: `change_${m}`, label: `Chg(${m})`, exportFormat: 'numeric' },
+                                                ]),
+                                            ]
+                                        }
+                                        fileNameConfig={{
+                                            page: 'stock-holdings',
+                                            filters: {
+                                                stock: summary?.company_name,
+                                                period: displayMonths[0],
+                                                view: viewMode,
+                                            },
+                                        }}
+                                        metadata={{
+                                            title: `Stock Holdings \u2014 ${summary?.company_name || ''}`,
+                                            filters: {
+                                                'Stock': summary?.company_name,
+                                                'ISIN': summary?.isin,
+                                                'Sector': summary?.sector,
+                                                'LTP (\u20b9)': livePrice ? `\u20b9${livePrice}` : undefined,
+                                                'Market Cap': summary?.market_cap ? `\u20b9${Number(summary.market_cap).toLocaleString('en-IN', { maximumFractionDigits: 2 })} Cr (${summary.mcap_type || ''})` : undefined,
+                                                'Total Shares (Company)': summary?.shares_outstanding ? Number(summary.shares_outstanding).toLocaleString('en-IN') : undefined,
+                                                'MF Ownership %': summary?.ownership_percent ? `${summary.ownership_percent.toFixed(2)}%` : undefined,
+                                                'Total MF Funds': summary?.total_funds,
+                                                'Total MF Shares': summary?.total_shares ? Number(summary.total_shares).toLocaleString('en-IN') : undefined,
+                                                'Displayed Periods': displayMonths.join(', '),
+                                                'View': viewMode === 'scheme' ? 'Scheme-wise' : 'AMC-wise',
+                                                'AUM Mode': aumViewMode === 'total' ? 'Total AUM' : 'Equity AUM',
+                                                'Fund Filter': filterParam === 'entrants' ? 'New Entrants Only' : filterParam === 'exits' ? 'Exits Only' : undefined,
+                                                'Search': filterText || undefined,
+                                            },
+                                        }}
+                                    />
                                 </div>
                             </div>
 

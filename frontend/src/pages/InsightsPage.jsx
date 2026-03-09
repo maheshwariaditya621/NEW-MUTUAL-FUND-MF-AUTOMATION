@@ -4,6 +4,7 @@ import { getStockActivity } from '../api/insights';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
+import ExportButton from '../components/common/ExportButton';
 import './InsightsPage.css';
 
 // ── Helpers ──
@@ -177,6 +178,74 @@ export default function InsightsPage() {
                                     {' '}Activity signals use <strong>{data.data_warning.complete_label}</strong> (last complete month) to avoid misleading insights.
                                 </span>
                             </div>
+                        </div>
+                    )}
+
+                    {/* ── Export Button ── */}
+                    {data && !loading && filteredResults.length > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+                            <ExportButton
+                                getData={() => filteredResults.map(item => ({
+                                    company_name: item.company_name,
+                                    isin: item.isin,
+                                    sector: item.sector,
+                                    // market_cap is already in Crores from the API (Pydantic field: "Market Cap in INR Crores")
+                                    market_cap_cr: item.market_cap != null ? Number(item.market_cap) : null,
+                                    classification: item.classification,
+                                    period: data.month,
+                                    prev_period: data.prev_month,
+                                    total_qty_curr: item.total_qty_curr,
+                                    total_qty_prev: item.total_qty_prev,
+                                    // net_qty_bought is negative for selling stocks
+                                    net_qty: Math.abs(item.net_qty_bought),
+                                    num_funds: item.num_funds_curr,
+                                    num_funds_prev: item.num_funds_prev,
+                                    net_fund_change: item.net_fund_entrants,
+                                    // buy_value_crore may come as Decimal string from Python
+                                    value_crore: Math.abs(Number(item.buy_value_crore)),
+                                }))}
+                                columns={[
+                                    { key: 'company_name', label: 'Stock', exportFormat: 'string' },
+                                    { key: 'isin', label: 'ISIN', exportFormat: 'string' },
+                                    { key: 'sector', label: 'Sector', exportFormat: 'string' },
+                                    { key: 'market_cap_cr', label: 'Market Cap (Cr)', exportFormat: 'numeric' },
+                                    { key: 'classification', label: 'Category', exportFormat: 'string' },
+                                    { key: 'period', label: 'Period', exportFormat: 'string' },
+                                    { key: 'total_qty_curr', label: 'Total Shares (Curr)', exportFormat: 'numeric' },
+                                    { key: 'total_qty_prev', label: 'Total Shares (Prev)', exportFormat: 'numeric' },
+                                    { key: 'net_qty', label: activityType === 'buying' ? 'Net Qty Bought' : 'Net Qty Sold', exportFormat: 'numeric' },
+                                    { key: 'num_funds', label: 'Funds (Curr)', exportFormat: 'numeric' },
+                                    { key: 'num_funds_prev', label: 'Funds (Prev)', exportFormat: 'numeric' },
+                                    { key: 'net_fund_change', label: 'Net Fund Change', exportFormat: 'numeric' },
+                                    { key: 'value_crore', label: activityType === 'buying' ? 'Buy Value (Cr)' : 'Sell Value (Cr)', exportFormat: 'numeric' },
+                                ]}
+                                pdfColumns={[
+                                    { key: 'company_name', label: 'Stock', exportFormat: 'string' },
+                                    { key: 'sector', label: 'Sector', exportFormat: 'string' },
+                                    { key: 'market_cap_cr', label: 'Mkt Cap (Cr)', exportFormat: 'numeric' },
+                                    { key: 'net_qty', label: activityType === 'buying' ? 'Qty Bought' : 'Qty Sold', exportFormat: 'numeric' },
+                                    { key: 'num_funds', label: 'Funds', exportFormat: 'numeric' },
+                                    { key: 'value_crore', label: 'Value (Cr)', exportFormat: 'numeric' },
+                                ]}
+                                fileNameConfig={{
+                                    page: activityType === 'buying' ? 'mf-buying-activity' : 'mf-selling-activity',
+                                    filters: {
+                                        period: data?.month,
+                                        mcap: mcapCategory !== 'All' ? mcapCategory : undefined,
+                                    },
+                                }}
+                                metadata={{
+                                    title: activityType === 'buying'
+                                        ? `MF Buying Activity \u2014 ${data?.month}`
+                                        : `MF Selling Activity \u2014 ${data?.month}`,
+                                    filters: {
+                                        Period: `${data?.month} vs ${data?.prev_month}`,
+                                        'Market Cap': mcapCategory,
+                                        'Activity Type': activityType === 'buying' ? 'Stocks Attracting Funds' : 'Stocks Under Selling Pressure',
+                                        Search: filterText || undefined,
+                                    },
+                                }}
+                            />
                         </div>
                     )}
                 </div>

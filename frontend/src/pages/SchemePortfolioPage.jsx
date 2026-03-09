@@ -4,6 +4,7 @@ import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
 import PageEmptyState from '../components/common/PageEmptyState';
+import ExportButton from '../components/common/ExportButton';
 import { searchSchemes, getSchemePortfolio } from '../api/schemes';
 import { getBulkPrices } from '../api/stocks';
 import { handleApiError } from '../api/client';
@@ -308,6 +309,62 @@ export default function SchemePortfolioPage() {
                                             placeholder="Filter by Name, ISIN, Sector..."
                                             value={filterText}
                                             onChange={(e) => setFilterText(e.target.value)}
+                                        />
+                                        <ExportButton
+                                            getData={() => {
+                                                const holdings = getHoldingsToRender();
+                                                return holdings.map(h => {
+                                                    const histMap = h.monthly_data.reduce((acc, m) => { acc[m.month] = m; return acc; }, {});
+                                                    const row = {
+                                                        company_name: h.company_name,
+                                                        isin: h.isin,
+                                                        sector: h.sector,
+                                                        live_price: h.live_price || livePrices[h.isin] || null,
+                                                    };
+                                                    displayMonths.forEach(m => {
+                                                        const md = histMap[m];
+                                                        row[`pct_aum_${m}`] = md?.percent_to_aum ?? null;
+                                                        row[`shares_${m}`] = md?.num_shares ?? null;
+                                                    });
+                                                    return row;
+                                                });
+                                            }}
+                                            columns={[
+                                                { key: 'company_name', label: 'Company', exportFormat: 'string' },
+                                                { key: 'isin', label: 'ISIN', exportFormat: 'string' },
+                                                { key: 'sector', label: 'Sector', exportFormat: 'string' },
+                                                { key: 'live_price', label: 'LTP (₹)', exportFormat: 'numeric' },
+                                                ...displayMonths.flatMap(m => [
+                                                    { key: `pct_aum_${m}`, label: `% of AUM (${m})`, exportFormat: 'numeric' },
+                                                    { key: `shares_${m}`, label: `Shares Held (${m})`, exportFormat: 'numeric' },
+                                                ]),
+                                            ]}
+                                            pdfColumns={[
+                                                { key: 'company_name', label: 'Company', exportFormat: 'string' },
+                                                { key: 'sector', label: 'Sector', exportFormat: 'string' },
+                                                ...displayMonths.flatMap(m => [
+                                                    { key: `pct_aum_${m}`, label: `% AUM (${m})`, exportFormat: 'numeric' },
+                                                    { key: `shares_${m}`, label: `Shares (${m})`, exportFormat: 'numeric' },
+                                                ]),
+                                            ]}
+                                            fileNameConfig={{
+                                                page: 'scheme-portfolio',
+                                                filters: {
+                                                    scheme: portfolio?.scheme_name,
+                                                    period: displayMonths[0],
+                                                },
+                                            }}
+                                            metadata={{
+                                                title: `Scheme Portfolio — ${portfolio?.scheme_name || ''}`,
+                                                filters: {
+                                                    Scheme: portfolio?.scheme_name,
+                                                    AMC: portfolio?.amc_name,
+                                                    Plan: portfolio?.plan_type,
+                                                    Option: portfolio?.option_type,
+                                                    Period: displayMonths[0],
+                                                    Search: filterText || undefined,
+                                                },
+                                            }}
                                         />
                                     </div>
                                 </div>

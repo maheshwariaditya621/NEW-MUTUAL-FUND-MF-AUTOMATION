@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { apiGet, handleApiError } from '../api/client';
+import ExportButton from '../components/common/ExportButton';
 import './FundsExplorerPage.css';
 
 const Categories = [
@@ -152,10 +153,46 @@ const FundsExplorerPage = () => {
                 </header>
 
                 <div className="explorer-results">
-                    <div className="results-meta">
-                        Found <strong>{filteredSchemes.length}</strong> funds in
-                        <span>{Categories.find(c => c.id === activeCategory)?.label}</span>
-                        {activeSubCategory !== 'All' && <span> › {activeSubCategory}</span>}
+                    <div className="results-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>
+                            Found <strong>{filteredSchemes.length}</strong> funds in
+                            <span> {Categories.find(c => c.id === activeCategory)?.label}</span>
+                            {activeSubCategory !== 'All' && <span> › {activeSubCategory}</span>}
+                        </span>
+                        <ExportButton
+                            getData={() => filteredSchemes.map(s => ({
+                                scheme_name: s.scheme_name,
+                                amc_name: s.amc_name,
+                                plan_type: s.plan_type,
+                                option_type: s.option_type,
+                                category: s.website_category,
+                                sub_category: s.website_sub_category,
+                            }))}
+                            columns={[
+                                { key: 'scheme_name', label: 'Scheme Name', exportFormat: 'string' },
+                                { key: 'amc_name', label: 'AMC', exportFormat: 'string' },
+                                { key: 'plan_type', label: 'Plan Type', exportFormat: 'string' },
+                                { key: 'option_type', label: 'Option', exportFormat: 'string' },
+                                { key: 'category', label: 'Category', exportFormat: 'string' },
+                                { key: 'sub_category', label: 'Sub-Category', exportFormat: 'string' },
+                            ]}
+                            fileNameConfig={{
+                                page: 'funds-explorer',
+                                filters: {
+                                    category: Categories.find(c => c.id === activeCategory)?.label,
+                                    subCategory: activeSubCategory !== 'All' ? activeSubCategory : undefined,
+                                    search: searchTerm || undefined,
+                                },
+                            }}
+                            metadata={{
+                                title: `Funds Explorer — ${Categories.find(c => c.id === activeCategory)?.label || ''}`,
+                                filters: {
+                                    Category: Categories.find(c => c.id === activeCategory)?.label,
+                                    'Sub-Category': activeSubCategory !== 'All' ? activeSubCategory : 'All',
+                                    Search: searchTerm || undefined,
+                                },
+                            }}
+                        />
                     </div>
 
                     <div className="scheme-grid">
