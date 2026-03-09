@@ -5,6 +5,7 @@ import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
 import PageEmptyState from '../components/common/PageEmptyState';
 import ExportButton from '../components/common/ExportButton';
+import WatchButton from '../components/common/WatchButton';
 import { searchSchemes, getSchemePortfolio } from '../api/schemes';
 import { getBulkPrices } from '../api/stocks';
 import { handleApiError } from '../api/client';
@@ -212,6 +213,12 @@ export default function SchemePortfolioPage() {
                                 <span className="shp-sector-chip" style={{ background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '500' }}>
                                     {portfolio.plan_type} • {portfolio.option_type}
                                 </span>
+                                <WatchButton
+                                    assetType="scheme"
+                                    schemeId={Number(schemeIdParam)}
+                                    name={portfolio.scheme_name}
+                                    size="sm"
+                                />
                             </div>
                             <div className="shp-identity-right" style={{ display: 'flex', gap: '24px' }}>
                                 <div className="shp-identity-stat" style={{ textAlign: 'right' }}>

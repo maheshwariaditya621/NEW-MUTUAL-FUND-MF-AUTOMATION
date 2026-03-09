@@ -1,0 +1,126 @@
+/* ================================================
+   WatchButton.css — Watch button styles
+   ================================================ */
+
+.watch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: inherit;
+    font-weight: 600;
+    border-radius: 20px;
+    cursor: pointer;
+    transition:
+        background-color 180ms ease,
+        border-color 180ms ease,
+        color 180ms ease,
+        transform 120ms ease,
+        box-shadow 180ms ease;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* ── Sizes ── */
+.watch-btn--sm {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+}
+
+.watch-btn--md {
+    font-size: 0.82rem;
+    padding: 5px 14px;
+}
+
+/* ── Outline variant (default) ── */
+.watch-btn--outline {
+    border: 1.5px solid var(--accent-primary);
+    background: transparent;
+    color: var(--accent-primary);
+}
+
+.watch-btn--outline:hover:not(:disabled) {
+    background: var(--accent-light);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 102, 204, 0.15);
+}
+
+/* ── Filled variant ── */
+.watch-btn--filled {
+    border: none;
+    background: var(--accent-primary);
+    color: #fff;
+}
+
+.watch-btn--filled:hover:not(:disabled) {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+
+/* ── Watching state (for both variants) ── */
+.watch-btn--watching.watch-btn--outline {
+    background: var(--accent-primary);
+    color: #fff;
+    border-color: var(--accent-primary);
+}
+
+.watch-btn--watching.watch-btn--outline:hover:not(:disabled) {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+.watch-btn--watching.watch-btn--filled {
+    background: var(--success);
+}
+
+.watch-btn--watching.watch-btn--filled:hover:not(:disabled) {
+    background: var(--danger);
+}
+
+/* ── Busy / loading ── */
+.watch-btn--busy {
+    opacity: 0.65;
+    cursor: wait;
+}
+
+/* ── Flash animations ── */
+@keyframes flashAdded {
+    0% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.6);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px rgba(40, 167, 69, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+    }
+}
+
+@keyframes flashRemoved {
+    0% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.5);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px rgba(220, 53, 69, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+    }
+}
+
+.watch-btn--flash-added {
+    animation: flashAdded 0.6s ease;
+}
+
+.watch-btn--flash-removed {
+    animation: flashRemoved 0.6s ease;
+}
+
+/* ── Disabled ── */
+.watch-btn:disabled {
+    pointer-events: none;
+}

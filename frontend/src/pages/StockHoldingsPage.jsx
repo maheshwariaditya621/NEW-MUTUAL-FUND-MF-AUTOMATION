@@ -5,6 +5,7 @@ import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
 import PageEmptyState from '../components/common/PageEmptyState';
 import ExportButton from '../components/common/ExportButton';
+import WatchButton from '../components/common/WatchButton';
 import { getStockHoldings, getStockPrice } from '../api/stocks';
 import { handleApiError } from '../api/client';
 import { formatNumber } from '../utils/helpers';
@@ -304,6 +305,12 @@ export default function StockHoldingsPage() {
                                 <div className="shp-identity-left">
                                     <div className="shp-id-top" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                         <span className="shp-company-name">{summary.company_name}</span>
+                                        <WatchButton
+                                            assetType="stock"
+                                            isin={summary.isin}
+                                            name={summary.company_name}
+                                            size="sm"
+                                        />
                                         <div className="rv-live-price-wrapper" style={{ display: 'flex', alignItems: 'center', minWidth: '120px' }}>
                                             {livePrice ? (
                                                 <div className="rv-live-price-chip">

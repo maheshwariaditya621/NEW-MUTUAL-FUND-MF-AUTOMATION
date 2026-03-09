@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-do
 import { useEffect } from 'react';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { WatchlistProvider } from './contexts/WatchlistContext';
 import ThemeToggle from './components/common/ThemeToggle';
 import ScrollToTop from './components/common/ScrollToTop';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -15,6 +16,7 @@ import SectorExposurePage from './pages/SectorExposurePage';
 import AMCSectorExposurePage from './pages/AMCSectorExposurePage';
 import AdminVault from './pages/AdminVault';
 import LoginPage from './pages/LoginPage';
+import WatchlistDashboardPage from './pages/WatchlistDashboardPage';
 import HeaderSearch from './components/common/HeaderSearch';
 import Chatbot from './components/Chatbot';
 import DisclaimerBanner from './components/common/DisclaimerBanner';
@@ -48,7 +50,10 @@ const Header = () => {
         <div className="header-content">
           <div className="header-left">
             <Link to="/" className="logo">
-              <h1>MF Analytics</h1>
+              <div className="logo-container">
+                <span className="logo-mf">MF</span>
+                <span className="logo-analytics">Analytics</span>
+              </div>
             </Link>
 
             {isAuthenticated && (
@@ -56,6 +61,7 @@ const Header = () => {
                 <Link to="/stocks" className="nav-link">Stock Holdings</Link>
                 <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>
                 <Link to="/insights" className="nav-link">Insights</Link>
+                <Link to="/watchlist" className="nav-link"><span className="wl-icon">🔖</span> Watchlist</Link>
                 <div className="nav-dropdown">
                   <span className="nav-link dropdown-toggle">Tools ▾</span>
                   <div className="dropdown-menu">
@@ -141,6 +147,11 @@ function AppContent() {
                 <AdminVault />
               </ProtectedRoute>
             } />
+            <Route path="/watchlist" element={
+              <ProtectedRoute>
+                <WatchlistDashboardPage />
+              </ProtectedRoute>
+            } />
           </Routes>
         </main>
 
@@ -174,8 +185,10 @@ function App() {
     <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
-          <ScrollToTop />
-          <AppContent />
+          <WatchlistProvider>
+            <ScrollToTop />
+            <AppContent />
+          </WatchlistProvider>
         </AuthProvider>
       </BrowserRouter>
     </ThemeProvider>
