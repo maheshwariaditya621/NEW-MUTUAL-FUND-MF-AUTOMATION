@@ -20,6 +20,7 @@ function WatchBtn({ item, onClick }) {
             className={`search-watch-btn ${watched ? 'watched' : ''}`}
             title={watched ? 'Remove from watchlist' : 'Add to watchlist'}
             onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation(); // don't navigate
                 onClick(e, item, watched);
             }}

@@ -330,7 +330,7 @@ async def get_dashboard(
     if not curr_pid:
         return {"error": "No portfolio data available"}
 
-    # Fetch user's watchlist
+    # Fetch user's full watchlist first to ensure persistence
     cur.execute(
         "SELECT asset_type, company_id, scheme_id FROM user_watchlist WHERE user_id = %s",
         (user_id,)
@@ -340,85 +340,107 @@ async def get_dashboard(
     stock_ids  = [r[1] for r in wlist if r[0] == "stock"]
     scheme_ids = [r[2] for r in wlist if r[0] == "scheme"]
 
-    # ── Stock activity: gross buying + gross selling computed per scheme ──
-    # Only compare against schemes from AMCs that have uploaded curr-period data.
-    # If an AMC hasn't submitted yet, their prev-period holdings must be excluded
-    # to avoid showing false 100%-sold entries.
+    # ── Stock activity ──
     stock_summaries = []
-    if stock_ids and prev_pid:
+    if stock_ids:
+        # Get base info for all watched stocks first
         placeholders = ",".join(["%s"] * len(stock_ids))
         cur.execute(f"""
-            WITH curr_amcs AS (
-                -- AMCs that have actually submitted data for the current period
-                SELECT DISTINCT s.amc_id
-                FROM scheme_snapshots ss
-                JOIN schemes s ON ss.scheme_id = s.scheme_id
-                WHERE ss.period_id = %s
-            ),
-            curr AS (
-                SELECT ss.scheme_id, eh.company_id, eh.quantity
-                FROM equity_holdings eh
-                JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
-                WHERE ss.period_id = %s AND eh.company_id IN ({placeholders})
-            ),
-            prev AS (
-                -- Only previous-period data for AMCs that ALSO have current-period data
-                SELECT ss.scheme_id, eh.company_id, eh.quantity
-                FROM equity_holdings eh
-                JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
-                JOIN schemes s2 ON ss.scheme_id = s2.scheme_id
-                JOIN curr_amcs ca ON s2.amc_id = ca.amc_id
-                WHERE ss.period_id = %s AND eh.company_id IN ({placeholders})
-            ),
-            per_scheme AS (
+            SELECT c.company_id, COALESCE(ce.canonical_name, c.company_name) as name, c.isin, c.sector
+            FROM companies c
+            LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
+            WHERE c.company_id IN ({placeholders})
+        """, stock_ids)
+        base_stocks = {r[0]: {"company_id": r[0], "name": r[1], "isin": r[2], "sector": r[3]} for r in cur.fetchall()}
+
+        if prev_pid:
+            cur.execute(f"""
+                WITH curr_amcs AS (
+                    SELECT DISTINCT s.amc_id
+                    FROM scheme_snapshots ss
+                    JOIN schemes s ON ss.scheme_id = s.scheme_id
+                    WHERE ss.period_id = %s
+                ),
+                curr AS (
+                    SELECT ss.scheme_id, eh.company_id, eh.quantity
+                    FROM equity_holdings eh
+                    JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
+                    WHERE ss.period_id = %s AND eh.company_id IN ({placeholders})
+                ),
+                prev AS (
+                    SELECT ss.scheme_id, eh.company_id, eh.quantity
+                    FROM equity_holdings eh
+                    JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
+                    JOIN schemes s2 ON ss.scheme_id = s2.scheme_id
+                    JOIN curr_amcs ca ON s2.amc_id = ca.amc_id
+                    WHERE ss.period_id = %s AND eh.company_id IN ({placeholders})
+                ),
+                per_scheme AS (
+                    SELECT
+                        COALESCE(c.company_id, p.company_id) AS company_id,
+                        COALESCE(c.scheme_id,  p.scheme_id)  AS scheme_id,
+                        COALESCE(c.quantity, 0)               AS curr_qty,
+                        COALESCE(p.quantity, 0)               AS prev_qty,
+                        COALESCE(c.quantity, 0) - COALESCE(p.quantity, 0) AS delta
+                    FROM curr c
+                    FULL OUTER JOIN prev p
+                        ON c.company_id = p.company_id AND c.scheme_id = p.scheme_id
+                )
                 SELECT
-                    COALESCE(c.company_id, p.company_id) AS company_id,
-                    COALESCE(c.scheme_id,  p.scheme_id)  AS scheme_id,
-                    COALESCE(c.quantity, 0)               AS curr_qty,
-                    COALESCE(p.quantity, 0)               AS prev_qty,
-                    COALESCE(c.quantity, 0) - COALESCE(p.quantity, 0) AS delta
-                FROM curr c
-                FULL OUTER JOIN prev p
-                    ON c.company_id = p.company_id AND c.scheme_id = p.scheme_id
-            )
-            SELECT
-                co.company_id,
-                COALESCE(ce.canonical_name, co.company_name) AS name,
-                co.isin,
-                co.sector,
-                SUM(CASE WHEN ps.delta > 0 THEN ps.delta          ELSE 0 END) AS gross_buying,
-                SUM(CASE WHEN ps.delta < 0 THEN ABS(ps.delta)     ELSE 0 END) AS gross_selling,
-                SUM(ps.delta)                                                   AS net_change,
-                COUNT(DISTINCT CASE WHEN ps.curr_qty > 0 THEN ps.scheme_id END) AS num_funds,
-                COUNT(DISTINCT CASE WHEN ps.delta > 0  THEN ps.scheme_id END)   AS buying_schemes,
-                COUNT(DISTINCT CASE WHEN ps.delta < 0  THEN ps.scheme_id END)   AS selling_schemes
-            FROM per_scheme ps
-            JOIN companies co ON ps.company_id = co.company_id
-            LEFT JOIN corporate_entities ce ON co.entity_id = ce.entity_id
-            GROUP BY co.company_id, co.company_name, ce.canonical_name, co.isin, co.sector
-            ORDER BY net_change DESC
-        """, [curr_pid, curr_pid, *stock_ids, prev_pid, *stock_ids])
-
-        for row in cur.fetchall():
-            cid, name, isin, sector, gross_buy, gross_sell, net, num_funds, buying_sc, selling_sc = row
-            gross_buy  = int(gross_buy  or 0)
-            gross_sell = int(gross_sell or 0)
-            net        = int(net        or 0)
-            trend = "up" if net > 0 else ("down" if net < 0 else "stable")
-
-            stock_summaries.append({
-                "company_id":      cid,
-                "name":            name,
-                "isin":            isin,
-                "sector":          sector,
-                "net_change":      net,
-                "buying":          gross_buy,
-                "selling":         gross_sell,
-                "num_funds":       int(num_funds     or 0),
-                "buying_schemes":  int(buying_sc     or 0),
-                "selling_schemes": int(selling_sc    or 0),
-                "trend":           trend,
-            })
+                    ps.company_id,
+                    SUM(CASE WHEN ps.delta > 0 THEN ps.delta          ELSE 0 END) AS gross_buying,
+                    SUM(CASE WHEN ps.delta < 0 THEN ABS(ps.delta)     ELSE 0 END) AS gross_selling,
+                    SUM(ps.delta)                                                   AS net_change,
+                    COUNT(DISTINCT CASE WHEN ps.curr_qty > 0 THEN ps.scheme_id END) AS num_funds,
+                    COUNT(DISTINCT CASE WHEN ps.delta > 0  THEN ps.scheme_id END)   AS buying_schemes,
+                    COUNT(DISTINCT CASE WHEN ps.delta < 0  THEN ps.scheme_id END)   AS selling_schemes
+                FROM per_scheme ps
+                GROUP BY ps.company_id
+            """, [curr_pid, curr_pid, *stock_ids, prev_pid, *stock_ids])
+            
+            activity_map = {r[0]: r[1:] for r in cur.fetchall()}
+            
+            for cid in stock_ids:
+                base = base_stocks.get(cid)
+                if not base: continue
+                act = activity_map.get(cid, (0, 0, 0, 0, 0, 0))
+                g_buy, g_sell, net, n_funds, b_sc, s_sc = act
+                trend = "up" if net > 0 else ("down" if net < 0 else "stable")
+                stock_summaries.append({
+                    **base,
+                    "net_change": int(net),
+                    "buying": int(g_buy),
+                    "selling": int(g_sell),
+                    "num_funds": int(n_funds),
+                    "buying_schemes": int(b_sc),
+                    "selling_schemes": int(s_sc),
+                    "trend": trend
+                })
+        else:
+            # Handle case where no previous period exists
+            cur.execute(f"""
+                SELECT eh.company_id, SUM(eh.quantity), COUNT(DISTINCT ss.scheme_id)
+                FROM equity_holdings eh
+                JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
+                WHERE ss.period_id = %s AND eh.company_id IN ({placeholders})
+                GROUP BY eh.company_id
+            """, [curr_pid, *stock_ids])
+            activity_map = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+            
+            for cid in stock_ids:
+                base = base_stocks.get(cid)
+                if not base: continue
+                qty, n_funds = activity_map.get(cid, (0, 0))
+                stock_summaries.append({
+                    **base,
+                    "net_change": int(qty),
+                    "buying": int(qty),
+                    "selling": 0,
+                    "num_funds": int(n_funds),
+                    "buying_schemes": int(n_funds) if qty > 0 else 0,
+                    "selling_schemes": 0,
+                    "trend": "up" if qty > 0 else "stable"
+                })
 
 
     # ── Scheme activity: only compare schemes whose AMC has curr-period data ──
