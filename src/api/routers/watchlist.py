@@ -112,12 +112,15 @@ def _get_user_prefs(user_id: int, cur: cursor) -> dict:
 def _format_shares(val) -> str:
     if val is None:
         return "—"
-    v = int(val)
-    if abs(v) >= 10_00_000:
-        return f"{v/10_00_000:.1f}L"
-    if abs(v) >= 1000:
+    v = float(val)
+    abs_v = abs(v)
+    if abs_v >= 1_00_00_000:
+        return f"{v/1_00_00_000:.2f}Cr"
+    if abs_v >= 1_00_000:
+        return f"{v/1_00_000:.1f}L"
+    if abs_v >= 1000:
         return f"{v/1000:.1f}K"
-    return str(v)
+    return str(int(v))
 
 
 # ─────────────────────────── Periods List ─────────────────────────────────────
