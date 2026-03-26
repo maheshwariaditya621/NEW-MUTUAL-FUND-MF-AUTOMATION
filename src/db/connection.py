@@ -74,7 +74,13 @@ def get_pool() -> pool.ThreadedConnectionPool:
                         database=DB_NAME,
                         user=DB_USER,
                         password=DB_PASSWORD,
-                        options='-c client_encoding=UTF8'
+                        options='-c client_encoding=UTF8',
+                        # TCP keepalives: prevents AWS/network devices from
+                        # silently killing idle SSL connections after ~5 min.
+                        keepalives=1,
+                        keepalives_idle=60,       # start probing after 60s idle
+                        keepalives_interval=10,   # probe every 10s
+                        keepalives_count=5        # drop after 5 missed probes
                     )
                     logger.info(f"Initialized PostgreSQL connection pool: {DB_NAME}")
                 except psycopg2.Error as e:
@@ -84,9 +90,33 @@ def get_pool() -> pool.ThreadedConnectionPool:
 
 
 def get_pool_connection() -> connection:
-    """Get a connection from the pool."""
-    pool = get_pool()
-    conn = pool.getconn()
+    """Get a connection from the pool, replacing it if stale/dead."""
+    p = get_pool()
+    conn = p.getconn()
+    try:
+        # Health check: a single lightweight query reveals dead SSL connections
+        # before the actual request tries to use them.
+        conn.cursor().execute("SELECT 1")
+        conn.rollback()  # discard the health-check transaction
+    except Exception:
+        logger.warning("Stale connection detected in pool — replacing with a fresh one.")
+        # Close the dead connection and open a brand-new one.
+        try:
+            p.putconn(conn, close=True)
+        except Exception:
+            pass
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            options='-c client_encoding=UTF8',
+            keepalives=1,
+            keepalives_idle=60,
+            keepalives_interval=10,
+            keepalives_count=5
+        )
     conn.autocommit = False
     return conn
 
