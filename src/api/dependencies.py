@@ -59,6 +59,7 @@ def verify_admin(x_admin_secret: str = Header(None)) -> bool:
 
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status
+from datetime import datetime, timezone
 from src.api.utils.auth_utils import decode_access_token
 
 # Token URL must match the login endpoint
@@ -70,12 +71,7 @@ async def get_current_user(
 ) -> dict:
     """
     Dependency to get the currently authenticated user from a JWT token.
-    
-    Returns:
-        User data dictionary
-        
-    Raises:
-        HTTPException: If token is invalid or user not found
+    Checks for status, account expiry, and brute-force locks.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -91,9 +87,11 @@ async def get_current_user(
     if username is None:
         raise credentials_exception
         
-    # Fetch user from database
+    # Fetch user from database with new security fields
     cur.execute(
-        "SELECT id, username, email, role, is_active, created_at, last_login FROM users WHERE username = %s",
+        """SELECT id, username, email, role, is_active, created_at, last_login, 
+                  expires_at, permissions, locked_until 
+           FROM users WHERE username = %s""",
         (username,)
     )
     user = cur.fetchone()
@@ -101,8 +99,25 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
         
+    # 1. Manual Inactive Check
     if not user[4]: # is_active
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(status_code=403, detail="Your account has been deactivated. Please contact admin.")
+        
+    # 2. Expiry Check
+    expires_at = user[7]
+    if expires_at and datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(
+            status_code=403, 
+            detail="Your access period has ended. Please contact the administrator to renew your access."
+        )
+
+    # 3. Lock Check (Brute-force protection)
+    locked_until = user[9]
+    if locked_until and datetime.now(timezone.utc) < locked_until:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Account temporarily locked due to multiple failed attempts. Try again after {locked_until.strftime('%H:%M:%S UTC')}."
+        )
         
     return {
         "id": user[0],
@@ -111,5 +126,26 @@ async def get_current_user(
         "role": user[3],
         "is_active": user[4],
         "created_at": user[5],
-        "last_login": user[6]
+        "last_login": user[6],
+        "expires_at": user[7],
+        "permissions": user[8] or [],
+        "locked_until": user[9]
     }
+
+def require_permission(permission: str):
+    """
+    Dependency factor to require a specific permission for an endpoint.
+    Admin role or 'all' permission bypasses specific checks.
+    """
+    async def permission_checker(current_user: dict = Depends(get_current_user)):
+        perms = current_user.get("permissions", [])
+        role = current_user.get("role")
+        
+        if role == 'admin' or "all" in perms or permission in perms:
+            return True
+            
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Access Denied: You do not have permission to access {permission}."
+        )
+    return permission_checker

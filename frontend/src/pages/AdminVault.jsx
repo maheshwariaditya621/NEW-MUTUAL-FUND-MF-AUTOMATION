@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './AdminVault.css';
 import FileManagement from './admin/FileManagement';
+import { useAuth } from '../contexts/AuthContext';
+import { 
+    Users, UserPlus, Link as LinkIcon, Shield, Trash2, 
+    Edit2, UserCheck, Copy, Check, Eye, Clock, X
+} from 'lucide-react';
 
 const AdminVault = () => {
     const [password, setPassword] = useState('');
@@ -16,6 +21,21 @@ const AdminVault = () => {
     const [uploadResult, setUploadResult] = useState(null);
     const [syncResult, setSyncResult] = useState(null);
     const [sortConfig, setSortConfig] = useState({ key: 'confidence', direction: 'desc' });
+    
+    // User management state
+    const { token: authToken } = useAuth();
+    const [users, setUsers] = useState([]);
+    const [invites, setInvites] = useState([]);
+    const [showInviteModal, setShowInviteModal] = useState(false);
+    const [copySuccess, setCopySuccess] = useState(null);
+    const [newInviteEmail, setNewInviteEmail] = useState('');
+    const [editingUser, setEditingUser] = useState(null);
+    const [showEditUserModal, setShowEditUserModal] = useState(false);
+    const [selectedPermissions, setSelectedPermissions] = useState([]);
+    const [inviteDaysValid, setInviteDaysValid] = useState(7);
+    const [isPermanentAccount, setIsPermanentAccount] = useState(false);
+    const [accountExpiryDays, setAccountExpiryDays] = useState(30);
+    const [newPassword, setNewPassword] = useState('');
 
     // Extraction state
     const ALL_SLUGS = [
@@ -108,8 +128,140 @@ const AdminVault = () => {
         }
     };
 
+    const fetchUsers = async () => {
+        try {
+            const resp = await fetch(`${API_BASE}/users`, {
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) setUsers(await resp.json());
+            else {
+                const err = await resp.json();
+                console.error("Failed to fetch users:", err.detail);
+            }
+        } catch (err) { console.error("Failed to fetch users", err); }
+    };
+
+    const fetchInvites = async () => {
+        try {
+            const resp = await fetch(`${API_BASE}/invites`, {
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) setInvites(await resp.json());
+        } catch (err) { console.error("Failed to fetch invites", err); }
+    };
+
+    const handleCreateInvite = async (e) => {
+        e.preventDefault();
+        try {
+            const resp = await fetch(`${API_BASE}/invites`, {
+                method: 'POST',
+                headers: { 
+                    'X-Admin-Secret': password,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: newInviteEmail,
+                    permissions: selectedPermissions,
+                    days_valid: inviteDaysValid,
+                    account_expiry_days: isPermanentAccount ? null : accountExpiryDays
+                })
+            });
+            if (resp.ok) {
+                setNewInviteEmail('');
+                setSelectedPermissions([]);
+                setShowInviteModal(false);
+                fetchInvites();
+                alert('✅ Invite link generated! Copy it from the Active Invitations table.');
+            } else {
+                const err = await resp.json();
+                alert(`Failed to create invite: ${err.detail}`);
+            }
+        } catch (err) { alert("Failed to create invite"); }
+    };
+
+    const handleImpersonate = async (userId) => {
+        if (!window.confirm('Switch to this user\'s view? You will be logged out of your admin session.')) return;
+        try {
+            const resp = await fetch(`${API_BASE}/users/${userId}/impersonate`, {
+                method: 'POST',
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                localStorage.setItem('token', data.access_token);
+                window.location.href = '/';
+            } else {
+                const err = await resp.json();
+                alert(`Masquerade failed: ${err.detail}`);
+            }
+        } catch (err) { alert("Masquerade failed"); }
+    };
+
+    const revokeInvite = async (inviteId) => {
+        if (!window.confirm("Revoke this invite link?")) return;
+        try {
+            const resp = await fetch(`${API_BASE}/invites/${inviteId}`, {
+                method: 'DELETE',
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) fetchInvites();
+        } catch (err) { alert("Failed to revoke"); }
+    };
+
+    const toggleUserStatus = async (user) => {
+        try {
+            await fetch(`${API_BASE}/users/${user.id}`, {
+                method: 'PATCH',
+                headers: { 
+                    'X-Admin-Secret': password,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ is_active: !user.is_active })
+            });
+            fetchUsers();
+        } catch (err) { alert("Failed to update user"); }
+    };
+
+    const handleUpdateUser = async (e) => {
+        e.preventDefault();
+        try {
+            const resp = await fetch(`${API_BASE}/users/${editingUser.id}`, {
+                method: 'PATCH',
+                headers: { 
+                    'X-Admin-Secret': password,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    username: editingUser.username,
+                    email: editingUser.email,
+                    permissions: selectedPermissions,
+                    role: editingUser.role,
+                    is_active: editingUser.is_active,
+                    expires_at: editingUser.expires_at,
+                    password: newPassword || undefined
+                })
+            });
+            if (resp.ok) {
+                setShowEditUserModal(false);
+                setEditingUser(null);
+                setNewPassword('');
+                fetchUsers();
+                alert('✅ User updated successfully!');
+            } else {
+                const err = await resp.json();
+                alert(`Update failed: ${err.detail}`);
+            }
+        } catch (err) { alert("Failed to update user"); }
+    };
+
     useEffect(() => {
-        if (isAuthenticated) fetchData();
+        if (isAuthenticated) {
+            fetchData();
+            if (activeTab === 'users') {
+                fetchUsers();
+                fetchInvites();
+            }
+        }
     }, [isAuthenticated, activeTab]);
 
     // Poll active extraction job
@@ -282,6 +434,7 @@ const AdminVault = () => {
             <div className="admin-tabs">
                 <button className={`tab-btn ${activeTab === 'merges' ? 'active' : ''}`} onClick={() => setActiveTab('merges')}>Scheme Merges</button>
                 <button className={`tab-btn ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>System Alerts</button>
+                <button className={`tab-btn ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>👥 Users & Access</button>
                 <button className={`tab-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>📁 File Manager</button>
                 <button className={`tab-btn ${activeTab === 'extraction' ? 'active' : ''}`} onClick={() => setActiveTab('extraction')}>🚀 Pipeline Control</button>
             </div>
@@ -348,6 +501,121 @@ const AdminVault = () => {
                                 <div className="alert-content">{a.content}</div>
                             </div>
                         ))}
+                    </div>
+                )}
+
+                {activeTab === 'users' && (
+                    <div className="users-management-container">
+                        <div className="admin-section-header">
+                            <h3>User Accounts</h3>
+                            <button className="btn-approve" onClick={() => {
+                                setShowInviteModal(true);
+                                setSelectedPermissions(['view_stocks', 'view_portfolio']);
+                            }}>
+                                <UserPlus size={16} /> Generate Invite Link
+                            </button>
+                        </div>
+
+                        <div className="table-responsive">
+                            <table className="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>User</th>
+                                        <th>Status</th>
+                                        <th>Permissions</th>
+                                        <th>Expires</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {users.map(u => (
+                                        <tr key={u.id}>
+                                            <td>
+                                                <div className="user-primary">{u.username}</div>
+                                                <div className="user-secondary">{u.email}</div>
+                                            </td>
+                                            <td>
+                                                <span className={`status-pill ${u.is_active ? 'active' : 'inactive'}`}>
+                                                    {u.is_active ? 'ACTIVE' : 'LOCKED'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div className="perms-list">
+                                                    {(u.permissions || []).map(p => (
+                                                        <span key={p} className="perm-tag">{p}</span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                {u.expires_at ? new Date(u.expires_at).toLocaleDateString() : 'Never'}
+                                            </td>
+                                            <td>
+                                                <div className="action-btns">
+                                                    <button className="icon-btn" title="Edit User" onClick={() => {
+                                                        setEditingUser(u);
+                                                        setSelectedPermissions(u.permissions || []);
+                                                        setShowEditUserModal(true);
+                                                    }}>
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button className="icon-btn" title="View as User" onClick={() => handleImpersonate(u.id)}>
+                                                        <Eye size={16} />
+                                                    </button>
+                                                    <button className="icon-btn" title={u.is_active ? "Lock User" : "Unlock User"} onClick={() => toggleUserStatus(u)}>
+                                                        {u.is_active ? <X size={16} /> : <UserCheck size={16} />}
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="admin-section-header" style={{ marginTop: '40px' }}>
+                            <h3>Active Invitations</h3>
+                        </div>
+
+                        <div className="table-responsive">
+                            <table className="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Email</th>
+                                        <th>Token / Link</th>
+                                        <th>Expires</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {invites.filter(i => !i.is_used).map(i => (
+                                        <tr key={i.invite_id}>
+                                            <td>{i.email}</td>
+                                            <td>
+                                                <div className="invite-link-cell">
+                                                    <code>{i.token.substring(0, 8)}...</code>
+                                                    <button className="icon-btn" onClick={() => {
+                                                        const link = `${window.location.origin}/register-invite?token=${i.token}`;
+                                                        navigator.clipboard.writeText(link);
+                                                        setCopySuccess(i.invite_id);
+                                                        setTimeout(() => setCopySuccess(null), 2000);
+                                                    }}>
+                                                        {copySuccess === i.invite_id ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td>{new Date(i.expires_at).toLocaleDateString()}</td>
+                                            <td><span className="badge status-pending">PENDING</span></td>
+                                            <td>
+                                                <button className="icon-btn text-danger" onClick={() => revokeInvite(i.invite_id)}>
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
 
@@ -741,6 +1009,215 @@ const AdminVault = () => {
                     </div>
                 )}
             </div>
+
+            {showInviteModal && (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <div className="modal-header">
+                            <h3>Generate New Invite</h3>
+                            <button className="icon-btn" onClick={() => setShowInviteModal(false)}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleCreateInvite}>
+                            <div className="form-group">
+                                <label>Recipient Email</label>
+                                <input 
+                                    type="email" 
+                                    required 
+                                    className="admin-input"
+                                    value={newInviteEmail}
+                                    onChange={e => setNewInviteEmail(e.target.value)}
+                                    placeholder="guest@example.com"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Permissions</label>
+                                <div className="permissions-grid">
+                                    {[
+                                        { id: 'view_stocks', label: 'Stock Holdings' },
+                                        { id: 'view_portfolio', label: 'Scheme Portfolio' },
+                                        { id: 'view_insights', label: 'A.I. Insights' },
+                                        { id: 'view_watchlist', label: 'Watchlist Access' },
+                                        { id: 'view_tools', label: 'Tool Explorer' },
+                                        { id: 'all', label: 'FULL ACCESS (All Features)' }
+                                    ].map(perm => (
+                                        <label key={perm.id} className="perm-checkbox-label">
+                                            <input 
+                                                type="checkbox"
+                                                checked={selectedPermissions.includes(perm.id)}
+                                                onChange={e => {
+                                                    if (e.target.checked) setSelectedPermissions(prev => [...prev, perm.id]);
+                                                    else setSelectedPermissions(prev => prev.filter(p => p !== perm.id));
+                                                }}
+                                            />
+                                            {perm.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label>1. Link Validity (Days)</label>
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    max="365"
+                                    className="admin-input"
+                                    value={inviteDaysValid}
+                                    onChange={e => setInviteDaysValid(parseInt(e.target.value) || 7)}
+                                />
+                                <p style={{ fontSize: '0.75rem', marginTop: '4px', opacity: 0.6 }}>
+                                    How many days this registration link will work.
+                                </p>
+                            </div>
+
+                            <div className="form-group" style={{ background: 'rgba(255,255,255,0.05)', padding: '1rem', borderRadius: '8px' }}>
+                                <label style={{ marginBottom: '8px', display: 'block' }}>2. Account Access Policy</label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: isPermanentAccount ? 0 : '1rem' }}>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={isPermanentAccount}
+                                        onChange={e => setIsPermanentAccount(e.target.checked)}
+                                    />
+                                    <strong>Permanent Access (No Account Expiry)</strong>
+                                </label>
+                                
+                                {!isPermanentAccount && (
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label style={{ fontSize: '0.85rem' }}>Account Duration (Days after registration)</label>
+                                        <input 
+                                            type="number" 
+                                            min="1" 
+                                            className="admin-input"
+                                            value={accountExpiryDays}
+                                            onChange={e => setAccountExpiryDays(parseInt(e.target.value) || 30)}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn-secondary" onClick={() => setShowInviteModal(false)}>Cancel</button>
+                                <button type="submit" className="btn-approve">Create Link</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {showEditUserModal && editingUser && (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <div className="modal-header">
+                            <h3>Edit User Permissions</h3>
+                            <button className="icon-btn" onClick={() => setShowEditUserModal(false)}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleUpdateUser}>
+                            <div className="form-group">
+                                <label>Username (ID)</label>
+                                <input 
+                                    type="text" 
+                                    className="admin-input"
+                                    value={editingUser.username}
+                                    onChange={e => setEditingUser({...editingUser, username: e.target.value})}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Email Address</label>
+                                <input 
+                                    type="email" 
+                                    className="admin-input"
+                                    value={editingUser.email}
+                                    onChange={e => setEditingUser({...editingUser, email: e.target.value})}
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Permissions</label>
+                                <div className="permissions-grid">
+                                    {[
+                                        { id: 'view_stocks', label: 'Stock Holdings' },
+                                        { id: 'view_portfolio', label: 'Scheme Portfolio' },
+                                        { id: 'view_insights', label: 'A.I. Insights' },
+                                        { id: 'view_watchlist', label: 'Watchlist Access' },
+                                        { id: 'view_tools', label: 'Tool Explorer' },
+                                        { id: 'all', label: 'FULL ACCESS (All Features)' }
+                                    ].map(perm => (
+                                        <label key={perm.id} className="perm-checkbox-label">
+                                            <input 
+                                                type="checkbox"
+                                                checked={selectedPermissions.includes(perm.id)}
+                                                onChange={e => {
+                                                    if (e.target.checked) setSelectedPermissions(prev => [...prev, perm.id]);
+                                                    else setSelectedPermissions(prev => prev.filter(p => p !== perm.id));
+                                                }}
+                                            />
+                                            {perm.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Account Role</label>
+                                <select 
+                                    className="admin-input"
+                                    value={editingUser.role}
+                                    onChange={e => setEditingUser({...editingUser, role: e.target.value})}
+                                >
+                                    <option value="user">User (Restricted)</option>
+                                    <option value="manager">Manager (Pipeline control)</option>
+                                    <option value="admin">Administrator (Full System Control)</option>
+                                </select>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Account Expiry Date</label>
+                                <input 
+                                    type="date" 
+                                    className="admin-input"
+                                    value={editingUser.expires_at ? new Date(editingUser.expires_at).toISOString().split('T')[0] : ''}
+                                    onChange={e => {
+                                        const val = e.target.value;
+                                        if (val) {
+                                            const d = new Date(val);
+                                            d.setHours(23, 59, 59, 999);
+                                            setEditingUser({
+                                                ...editingUser, 
+                                                expires_at: d.toISOString()
+                                            });
+                                        } else {
+                                            setEditingUser({
+                                                ...editingUser, 
+                                                expires_at: null
+                                            });
+                                        }
+                                    }}
+                                />
+                                <p style={{ fontSize: '0.75rem', marginTop: '4px', opacity: 0.6 }}>
+                                    Leave blank for permanent access. User will be blocked after this date.
+                                </p>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Reset Password</label>
+                                <input 
+                                    type="password" 
+                                    className="admin-input"
+                                    placeholder="Enter new password to reset"
+                                    value={newPassword}
+                                    onChange={e => setNewPassword(e.target.value)}
+                                />
+                                <p style={{ fontSize: '0.75rem', marginTop: '4px', opacity: 0.6 }}>
+                                    Leave blank to keep current password.
+                                </p>
+                            </div>
+
+                            <div className="modal-footer">
+                                <button type="button" className="btn-secondary" onClick={() => setShowEditUserModal(false)}>Cancel</button>
+                                <button type="submit" className="btn-approve">Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

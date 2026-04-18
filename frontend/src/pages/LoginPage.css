@@ -71,6 +71,7 @@
     font-weight: 800;
     background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     margin-bottom: 8px;
     letter-spacing: -1px;
@@ -98,6 +99,28 @@
     font-weight: 500;
     color: #e2e8f0;
     margin-left: 4px;
+}
+
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.forgot-link {
+    background: none;
+    border: none;
+    color: var(--accent-primary, #3b82f6);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0;
+    transition: opacity 0.2s;
+}
+
+.forgot-link:hover {
+    text-decoration: underline;
+    opacity: 0.8;
 }
 
 .input-wrapper {

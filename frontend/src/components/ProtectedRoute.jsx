@@ -2,8 +2,8 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
-const ProtectedRoute = ({ children }) => {
-    const { isAuthenticated, loading } = useAuth();
+const ProtectedRoute = ({ children, requiredPermission }) => {
+    const { isAuthenticated, loading, hasPermission } = useAuth();
     const location = useLocation();
 
     if (loading) {
@@ -24,6 +24,11 @@ const ProtectedRoute = ({ children }) => {
     if (!isAuthenticated) {
         // Redirect to login but save the current location they were trying to go to
         return <Navigate to="/login" state={{ from: location }} replace />;
+    }
+
+    if (requiredPermission && !hasPermission(requiredPermission)) {
+        // Return Access Denied for specific feature restriction
+        return <Navigate to="/access-denied" replace />;
     }
 
     return children;

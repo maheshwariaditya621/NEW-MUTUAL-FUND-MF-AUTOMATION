@@ -49,8 +49,29 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('token');
     };
 
+    /**
+     * Check if the current user has a specific permission.
+     * Admin role or "all" permission bypasses all specific checks.
+     */
+    const hasPermission = (permission) => {
+        if (!user) return false;
+        if (user.role === 'admin') return true;
+        const perms = user.permissions || [];
+        if (perms.includes('all')) return true;
+        return perms.includes(permission);
+    };
+
     return (
-        <AuthContext.Provider value={{ user, token, loading, login, logout, isAuthenticated: !!user }}>
+        <AuthContext.Provider value={{ 
+            user, 
+            token, 
+            loading, 
+            login, 
+            logout, 
+            hasPermission,
+            isAuthenticated: !!user,
+            isAdmin: user?.role === 'admin'
+        }}>
             {children}
         </AuthContext.Provider>
     );

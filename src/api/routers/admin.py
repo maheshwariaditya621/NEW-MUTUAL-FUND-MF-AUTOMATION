@@ -4,13 +4,17 @@ from psycopg2.extensions import cursor
 from pydantic import BaseModel
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import json
 import pandas as pd
 import io
 
-from src.api.models.admin import PendingMerge, NotificationLog, AdminStats
-from src.api.dependencies import get_db_cursor, verify_admin
+from src.api.models.admin import (
+    PendingMerge, NotificationLog, AdminStats,
+    UserManagementRead, UserCreate, UserUpdate, InviteCreate, InviteRead
+)
+from src.api.dependencies import get_db_cursor, verify_admin, get_current_user
+from src.api.utils.auth_utils import get_password_hash, create_access_token
 from src.config import logger
 from src.services.admin_file_service import admin_file_service
 
@@ -489,3 +493,244 @@ async def get_extraction_job(job_id: str):
     if job_id not in _extraction_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     return _extraction_jobs[job_id]
+
+
+# ─────────────────────────────────────────────────────────
+# User Management Endpoints
+# ─────────────────────────────────────────────────────────
+
+@router.get("/users", response_model=List[UserManagementRead], dependencies=[Depends(verify_admin)])
+async def list_users(cur: cursor = Depends(get_db_cursor)):
+    """List all users for management."""
+    cur.execute("""
+        SELECT id, username, email, role, is_active, permissions, expires_at, 
+               last_login, created_at, failed_login_attempts, locked_until 
+        FROM users 
+        ORDER BY created_at DESC
+    """)
+    results = []
+    for row in cur.fetchall():
+        results.append(UserManagementRead(
+            id=row[0], username=row[1], email=row[2], role=row[3],
+            is_active=row[4], permissions=row[5] or [], expires_at=row[6],
+            last_login=row[7], created_at=row[8], failed_login_attempts=row[9],
+            locked_until=row[10]
+        ))
+    return results
+
+@router.post("/users", response_model=UserManagementRead, dependencies=[Depends(verify_admin)])
+async def create_user(user_in: UserCreate, cur: cursor = Depends(get_db_cursor)):
+    """Create a new user manually."""
+    # Check if exists
+    cur.execute("SELECT id FROM users WHERE username = %s OR email = %s", (user_in.username, user_in.email))
+    if cur.fetchone():
+        raise HTTPException(status_code=400, detail="Username or Email already exists")
+    
+    password_hash = get_password_hash(user_in.password)
+    
+    cur.execute("""
+        INSERT INTO users (username, email, password_hash, role, permissions, expires_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, created_at
+    """, (user_in.username, user_in.email, password_hash, user_in.role, 
+          json.dumps(user_in.permissions), user_in.expires_at))
+    
+    res = cur.fetchone()
+    return UserManagementRead(
+        id=res[0], username=user_in.username, email=user_in.email, role=user_in.role,
+        is_active=True, permissions=user_in.permissions, expires_at=user_in.expires_at,
+        last_login=None, created_at=res[1], failed_login_attempts=0, locked_until=None
+    )
+
+@router.patch("/users/{user_id}", response_model=UserManagementRead, dependencies=[Depends(verify_admin)])
+async def update_user(user_id: int, user_in: UserUpdate, cur: cursor = Depends(get_db_cursor)):
+    """Update user details, permissions, or reset password."""
+    # Build dynamic update query
+    updates = []
+    params = []
+    
+    if user_in.username is not None:
+        updates.append("username = %s")
+        params.append(user_in.username)
+    if user_in.email is not None:
+        updates.append("email = %s")
+        params.append(user_in.email)
+    if user_in.role is not None:
+        updates.append("role = %s")
+        params.append(user_in.role)
+    if user_in.is_active is not None:
+        updates.append("is_active = %s")
+        params.append(user_in.is_active)
+        # If activating, reset failed attempts
+        if user_in.is_active:
+            updates.append("failed_login_attempts = 0")
+            updates.append("locked_until = NULL")
+    if user_in.permissions is not None:
+        updates.append("permissions = %s")
+        params.append(json.dumps(user_in.permissions))
+    if user_in.expires_at is not None:
+        updates.append("expires_at = %s")
+        params.append(user_in.expires_at)
+    if user_in.password is not None:
+        updates.append("password_hash = %s")
+        params.append(get_password_hash(user_in.password))
+        
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+        
+    params.append(user_id)
+    query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s RETURNING id"
+    cur.execute(query, tuple(params))
+    
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Fetch updated user
+    cur.execute("""
+        SELECT id, username, email, role, is_active, permissions, expires_at, 
+               last_login, created_at, failed_login_attempts, locked_until 
+        FROM users WHERE id = %s
+    """, (user_id,))
+    row = cur.fetchone()
+    return UserManagementRead(
+        id=row[0], username=row[1], email=row[2], role=row[3],
+        is_active=row[4], permissions=row[5] or [], expires_at=row[6],
+        last_login=row[7], created_at=row[8], failed_login_attempts=row[9],
+        locked_until=row[10]
+    )
+
+@router.post("/users/{user_id}/impersonate", dependencies=[Depends(verify_admin)])
+async def impersonate_user(user_id: int, cur: cursor = Depends(get_db_cursor)):
+    """Admin 'Masquerade' feature: Generate a token for any user."""
+    cur.execute("SELECT username, role, is_active FROM users WHERE id = %s", (user_id,))
+    user = cur.fetchone()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user[2]: # is_active
+        raise HTTPException(status_code=400, detail="Cannot impersonate an inactive user")
+        
+    # Generate token for that user
+    access_token = create_access_token(data={"sub": user[0]})
+    
+    logger.info(f"Admin is impersonating user: {user[0]}")
+    return {"access_token": access_token, "token_type": "bearer", "username": user[0]}
+
+
+# ─────────────────────────────────────────────────────────
+# Invite Link System Endpoints
+# ─────────────────────────────────────────────────────────
+
+@router.post("/invites", response_model=InviteRead, dependencies=[Depends(verify_admin)])
+async def create_invite(
+    invite_in: InviteCreate, 
+    cur: cursor = Depends(get_db_cursor)
+):
+    """Generate a unique invite token for a guest."""
+    token = str(uuid.uuid4().hex)
+    expires_at = datetime.utcnow() + timedelta(days=invite_in.days_valid)
+    
+    cur.execute("""
+        INSERT INTO user_invites (token, email, permissions, expires_at, created_by, account_expiry_days)
+        VALUES (%s, %s, %s, %s, NULL, %s)
+        RETURNING invite_id, created_at
+    """, (token, invite_in.email, json.dumps(invite_in.permissions), expires_at, invite_in.account_expiry_days))
+    
+    res = cur.fetchone()
+    return InviteRead(
+        invite_id=res[0], token=token, email=invite_in.email,
+        permissions=invite_in.permissions, expires_at=expires_at,
+        account_expiry_days=invite_in.account_expiry_days,
+        is_used=False, created_at=res[1]
+    )
+
+@router.get("/invites", response_model=List[InviteRead], dependencies=[Depends(verify_admin)])
+async def list_invites(cur: cursor = Depends(get_db_cursor)):
+    """List all active/inactive onboarding invites."""
+    cur.execute("SELECT invite_id, token, email, permissions, expires_at, is_used, created_at, account_expiry_days FROM user_invites ORDER BY created_at DESC")
+    invites = []
+    for row in cur.fetchall():
+        invites.append(InviteRead(
+            invite_id=row[0], token=row[1], email=row[2],
+            permissions=row[3] or [], expires_at=row[4],
+            is_used=row[5], created_at=row[6], account_expiry_days=row[7]
+        ))
+    return invites
+
+@router.delete("/invites/{invite_id}", dependencies=[Depends(verify_admin)])
+async def revoke_invite(invite_id: int, cur: cursor = Depends(get_db_cursor)):
+    """Revoke/Delete an invite link."""
+    cur.execute("DELETE FROM user_invites WHERE invite_id = %s", (invite_id,))
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    return {"status": "success", "message": "Invite revoked"}
+
+
+@router.get("/public/invites/{token}", response_model=InviteRead)
+async def verify_invite(token: str, cur: cursor = Depends(get_db_cursor)):
+    """Public endpoint to verify an invite token before registration."""
+    cur.execute("""
+        SELECT invite_id, token, email, permissions, expires_at, is_used, created_at 
+        FROM user_invites WHERE token = %s AND is_used = FALSE
+    """, (token,))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Invalid or used invite token")
+        
+    expires_at = row[4]
+    if expires_at and datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Invite link has expired")
+        
+    return InviteRead(
+        invite_id=row[0], token=row[1], email=row[2],
+        permissions=row[3] or [], expires_at=row[4],
+        account_expiry_days=row[7] if len(row) > 7 else None,
+        is_used=row[5], created_at=row[6]
+    )
+
+class UserRegisterRequest(BaseModel):
+    token: str
+    username: str
+    password: str
+
+@router.post("/public/invites/register")
+async def register_from_invite(
+    req: UserRegisterRequest,
+    cur: cursor = Depends(get_db_cursor)
+):
+    """Public endpoint to register a new user via invite."""
+    token = req.token
+    username = req.username
+    password = req.password
+    # 1. Verify invite again
+    cur.execute("SELECT invite_id, email, permissions, expires_at, account_expiry_days FROM user_invites WHERE token = %s AND is_used = FALSE", (token,))
+    invite = cur.fetchone()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invalid invite")
+    
+    # invite indices: 0:id, 1:email, 2:permissions, 3:link_expires_at, 4:account_expiry_days
+    if invite[3] and datetime.now(timezone.utc) > invite[3]:
+        raise HTTPException(status_code=400, detail="Invite link has expired")
+        
+    # 2. Check if username/email taken
+    cur.execute("SELECT id FROM users WHERE username = %s OR email = %s", (username, invite[1]))
+    if cur.fetchone():
+        raise HTTPException(status_code=400, detail="Username or Email already taken")
+        
+    # 3. Create user with optional expiry
+    user_expires_at = None
+    if invite[4] is not None:
+        user_expires_at = datetime.now(timezone.utc) + timedelta(days=invite[4])
+        # Set to end of day
+        user_expires_at = user_expires_at.replace(hour=23, minute=59, second=59)
+
+    hashed = get_password_hash(password)
+    cur.execute("""
+        INSERT INTO users (username, email, password_hash, role, permissions, expires_at)
+        VALUES (%s, %s, %s, 'user', %s, %s)
+    """, (username, invite[1], hashed, json.dumps(invite[2]), user_expires_at))
+    
+    # 4. Mark invite as used
+    cur.execute("UPDATE user_invites SET is_used = TRUE WHERE token = %s", (token,))
+    
+    return {"status": "success", "message": "Registration successful. You can now login."}

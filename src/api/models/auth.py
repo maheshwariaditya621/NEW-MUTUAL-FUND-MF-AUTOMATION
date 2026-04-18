@@ -6,6 +6,7 @@ class UserBase(BaseModel):
     username: str
     email: EmailStr
     role: str = "user"
+    permissions: List[str] = []
 
 class UserCreate(UserBase):
     password: str

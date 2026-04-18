@@ -94,8 +94,17 @@ htmlcov/
 .streamlit/secrets.toml
 
 # ============================================================
-# DATABASE BACKUPS
+# DATABASE BACKUPS (IMPORTANT)
 # ============================================================
 *.sql
 *.dump
 mf_backup*
+
+# ============================================================
+# ANTIGRAVITY / SYSTEM SCRATCH
+# ============================================================
+scratch/
+brain/
+*.png
+*.webp
+*.jpg

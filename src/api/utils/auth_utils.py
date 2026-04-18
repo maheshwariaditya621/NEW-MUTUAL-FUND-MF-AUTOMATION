@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional, Union, Any
+import pyotp
 from jose import jwt
 from passlib.context import CryptContext
 from src.config import JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -48,3 +49,23 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except Exception:
         return None
+
+# --- TOTP (2FA) Support ---
+
+def generate_totp_secret() -> str:
+    """Generate a new random TOTP secret base32 string."""
+    return pyotp.random_base32()
+
+def verify_totp(secret: str, code: str) -> bool:
+    """Verify a TOTP code against a secret."""
+    if not secret or not code:
+        return False
+    totp = pyotp.TOTP(secret)
+    return totp.verify(code)
+
+def get_totp_uri(username: str, secret: str) -> str:
+    """Get the provisioning URI for a TOTP secret (to be used in QR codes)."""
+    return pyotp.totp.TOTP(secret).provisioning_uri(
+        name=username, 
+        issuer_name="MF Analytics"
+    )

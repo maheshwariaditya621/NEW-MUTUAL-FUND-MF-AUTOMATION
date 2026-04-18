@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import { TrendingUp, PieChart, Lightbulb, Activity, Database, ShieldCheck } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import './Home.css';
 
 export default function Home() {
+    const { hasPermission } = useAuth();
     return (
         <div className="home-wrapper">
             {/* Dynamic Animated Background for Hero */}
@@ -51,38 +53,44 @@ export default function Home() {
                     </div>
 
                     <div className="features-grid">
-                        <Link to="/stocks" className="feature-card glass-card">
-                            <div className="feature-icon-wrapper blue-glow">
-                                <TrendingUp size={28} className="feature-icon" />
-                            </div>
-                            <h3>Stock Holdings Search</h3>
-                            <p>
-                                Find exactly which mutual fund schemes hold a specific stock. Track their allocation percentages and historical buying or selling trends seamlessly.
-                            </p>
-                            <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
-                        </Link>
+                        {hasPermission('view_stocks') && (
+                            <Link to="/stocks" className="feature-card glass-card">
+                                <div className="feature-icon-wrapper blue-glow">
+                                    <TrendingUp size={28} className="feature-icon" />
+                                </div>
+                                <h3>Stock Holdings Search</h3>
+                                <p>
+                                    Find exactly which mutual fund schemes hold a specific stock. Track their allocation percentages and historical buying or selling trends seamlessly.
+                                </p>
+                                <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
+                            </Link>
+                        )}
 
-                        <Link to="/schemes" className="feature-card glass-card">
-                            <div className="feature-icon-wrapper purple-glow">
-                                <PieChart size={28} className="feature-icon" />
-                            </div>
-                            <h3>Scheme Portfolio Tracker</h3>
-                            <p>
-                                Dive deep into any mutual fund's portfolio. Compare monthly asset holdings, sector allocations, and spot shifting strategies effortlessly.
-                            </p>
-                            <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
-                        </Link>
+                        {hasPermission('view_portfolio') && (
+                            <Link to="/schemes" className="feature-card glass-card">
+                                <div className="feature-icon-wrapper purple-glow">
+                                    <PieChart size={28} className="feature-icon" />
+                                </div>
+                                <h3>Scheme Portfolio Tracker</h3>
+                                <p>
+                                    Dive deep into any mutual fund's portfolio. Compare monthly asset holdings, sector allocations, and spot shifting strategies effortlessly.
+                                </p>
+                                <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
+                            </Link>
+                        )}
 
-                        <Link to="/insights" className="feature-card glass-card">
-                            <div className="feature-icon-wrapper green-glow">
-                                <Lightbulb size={28} className="feature-icon" />
-                            </div>
-                            <h3>Smart Market Insights</h3>
-                            <p>
-                                Discover macro trends. See which mid and small-cap stocks are attracting the most fund manager capital across the entire industry.
-                            </p>
-                            <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
-                        </Link>
+                        {hasPermission('view_insights') && (
+                            <Link to="/insights" className="feature-card glass-card">
+                                <div className="feature-icon-wrapper green-glow">
+                                    <Lightbulb size={28} className="feature-icon" />
+                                </div>
+                                <h3>Smart Market Insights</h3>
+                                <p>
+                                    Discover macro trends. See which mid and small-cap stocks are attracting the most fund manager capital across the entire industry.
+                                </p>
+                                <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </div>
