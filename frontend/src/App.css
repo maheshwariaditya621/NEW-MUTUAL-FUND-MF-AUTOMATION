@@ -136,6 +136,10 @@
 }
 
 /* Dropdown Tool Customization */
+.nav-dropdown {
+  position: relative;
+}
+
 .nav-dropdown .dropdown-toggle {
   cursor: pointer;
 }
