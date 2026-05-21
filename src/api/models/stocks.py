@@ -42,6 +42,16 @@ class HistoricalHolding(BaseModel):
     percent_change: Optional[float] = Field(None, description="Percentage change in shares from previous month")
 
 
+class CategoryBreakdown(BaseModel):
+    """Aggregate holding data grouped by scheme category."""
+    category: str = Field(..., description="Top-level scheme category (e.g., Equity Funds, Hybrid Funds)")
+    sub_category: str = Field(..., description="Granular sub-category (e.g., Arbitrage Fund, Large Cap)")
+    num_schemes: int = Field(..., description="Number of schemes in this category holding the stock")
+    total_shares: int = Field(..., description="Total shares held across all schemes in this category")
+    ownership_percent: Optional[float] = Field(None, description="% of company shares held by this category")
+    percent_to_nav: Optional[float] = Field(None, description="Average % to NAV across schemes in this category")
+
+
 class SchemeHolding(BaseModel):
     """Individual scheme holding details with history."""
     scheme_name: str = Field(..., description="Full scheme name")
@@ -50,7 +60,9 @@ class SchemeHolding(BaseModel):
     option_type: str = Field(..., description="Growth, Dividend, or IDCW")
     equity_aum_cr: Decimal = Field(..., description="Latest Equity Assets Under Management in crores")
     total_aum_cr: Decimal = Field(..., description="Latest Total Assets Under Management in crores (including Debt/Liquid)")
-    
+    website_category: Optional[str] = Field(None, description="Top-level scheme category for display")
+    website_sub_category: Optional[str] = Field(None, description="Granular sub-category for grouping")
+
     # Historical data (last N months)
     history: List[HistoricalHolding] = Field(..., description="Monthly holding history for this scheme")
 
@@ -78,6 +90,9 @@ class StockHoldingsSummary(BaseModel):
     
     # Detailed holdings
     holdings: List[SchemeHolding] = Field(..., description="Detailed scheme-wise holdings")
+
+    # Category-wise breakdown (aggregated from holdings)
+    category_breakdown: List[CategoryBreakdown] = Field(default=[], description="Holdings aggregated by scheme category")
 
     # Data completeness warning (present when latest month has incomplete AMC data)
     data_warning: Optional[dict] = Field(None, description="Warning when latest period has partial AMC data")

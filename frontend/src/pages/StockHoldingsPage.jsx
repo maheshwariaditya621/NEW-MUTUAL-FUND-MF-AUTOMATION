@@ -70,13 +70,14 @@ export default function StockHoldingsPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [livePrice, setLivePrice] = useState(null);
-    const [viewMode, setViewMode] = useState('scheme'); // 'scheme' | 'amc'
+    const [viewMode, setViewMode] = useState('scheme'); // 'scheme' | 'amc' | 'category'
     const [filterText, setFilterText] = useState('');
     const [sortConfig, setSortConfig] = useState({ key: 'shares_0', direction: 'desc' });
     const [selectedMonth, setSelectedMonth] = useState(null);
     const [aumViewMode, setAumViewMode] = useState('total'); // 'total' or 'equity'
     const [allAvailableMonths, setAllAvailableMonths] = useState([]);
     const [showAmcStatus, setShowAmcStatus] = useState(false);
+    const [expandedCats, setExpandedCats] = useState({}); // sub_category -> bool
 
     useEffect(() => {
         if (!summary?.holdings?.[0]?.history) return;
@@ -152,12 +153,25 @@ export default function StockHoldingsPage() {
         setSortConfig(prev => {
             if (prev.key !== key) return { key, direction: 'desc' };
             if (prev.direction === 'desc') return { key, direction: 'asc' };
-            return { key: null, direction: 'desc' }; // 3-state cycle: desc -> asc -> none
+            return { key: null, direction: 'desc' };
         });
     };
 
     const sortArrow = (key) =>
         sortConfig.key === key ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : null;
+
+    // Helper: get CSS class from category name
+    const catClass = (cat) => {
+        if (!cat) return 'other';
+        const c = cat.toLowerCase();
+        if (c.includes('equity')) return 'equity';
+        if (c.includes('hybrid')) return 'hybrid';
+        if (c.includes('debt')) return 'debt';
+        if (c.includes('index')) return 'index';
+        if (c.includes('thematic')) return 'thematic';
+        if (c.includes('elss') || c.includes('tax')) return 'elss';
+        return 'other';
+    };
 
     const amcAggregated = useMemo(() => {
         if (!summary?.holdings) return [];
@@ -192,6 +206,57 @@ export default function StockHoldingsPage() {
         }
         return Object.values(map);
     }, [summary]);
+
+    // ── Category grouped data (for Category-wise view) ──
+    const { broadGroups, subGroups } = useMemo(() => {
+        if (!summary?.holdings) return { broadGroups: [], subGroups: [] };
+        
+        const broadMap = {};
+        const subMap = {};
+        
+        for (const scheme of summary.holdings) {
+            const cat  = scheme.website_category     || 'Other';
+            const sub  = scheme.website_sub_category || 'Uncategorized';
+            const subKey  = `${cat}||${sub}`;
+            
+            // Broad category aggregation
+            if (!broadMap[cat]) {
+                broadMap[cat] = { category: cat, totalShares: 0, schemeCount: 0 };
+            }
+            // Sub category aggregation
+            if (!subMap[subKey]) {
+                subMap[subKey] = { category: cat, sub_category: sub, schemes: [], totalShares: 0 };
+            }
+            
+            const latestShares = scheme.history[0]?.num_shares ?? 0;
+            if (latestShares > 0) {
+                broadMap[cat].totalShares += latestShares;
+                subMap[subKey].totalShares += latestShares;
+            }
+            broadMap[cat].schemeCount += 1;
+            subMap[subKey].schemes.push(scheme);
+        }
+        
+        // Sort broad groups by shares descending
+        const broadGroupsArr = Object.values(broadMap).sort((a, b) => b.totalShares - a.totalShares);
+        
+        // Sort sub groups by Broad Category name, then shares descending
+        const subGroupsArr = Object.values(subMap).sort((a, b) => {
+            if (a.category !== b.category) return a.category.localeCompare(b.category);
+            return b.totalShares - a.totalShares;
+        });
+        
+        return { broadGroups: broadGroupsArr, subGroups: subGroupsArr };
+    }, [summary]);
+
+    // toggle expand/collapse of one category
+    const toggleCat = (key) => setExpandedCats(prev => ({ ...prev, [key]: !prev[key] }));
+    const expandAll  = () => {
+        const next = {};
+        subGroups.forEach(g => { next[`${g.category}||${g.sub_category}`] = true; });
+        setExpandedCats(next);
+    };
+    const collapseAll = () => setExpandedCats({});
 
     const schemesToRender = useMemo(() => {
         if (!summary?.holdings) return [];
@@ -518,6 +583,7 @@ export default function StockHoldingsPage() {
                                 <div className="shp-view-toggle">
                                     <button className={`shp-toggle-btn ${viewMode === 'scheme' ? 'active' : ''}`} onClick={() => setViewMode('scheme')}>Scheme-wise</button>
                                     <button className={`shp-toggle-btn ${viewMode === 'amc' ? 'active' : ''}`} onClick={() => setViewMode('amc')}>AMC-wise</button>
+                                    <button className={`shp-toggle-btn ${viewMode === 'category' ? 'active' : ''}`} onClick={() => setViewMode('category')}>Category-wise</button>
                                 </div>
                                 <div className="shp-filter-toggle" style={{ display: 'flex', gap: '4px' }}>
                                     <button className={`shp-toggle-btn ${!filterParam ? 'active' : ''}`} onClick={() => { searchParams.delete('filter'); setSearchParams(searchParams); }}>All</button>
@@ -685,6 +751,103 @@ export default function StockHoldingsPage() {
                             </div>
 
                             <div className="shp-table-inner">
+                                {viewMode === 'category' ? (
+                                    /* ── CATEGORY-WISE VIEW ── */
+                                    <>
+                                        {/* Summary cards strip (Broad Categories) */}
+                                        <div className="shp-cat-summary-strip">
+                                            {broadGroups.map(g => {
+                                                const cls = catClass(g.category);
+                                                return (
+                                                    <div key={g.category} className={`shp-cat-summary-card theme-${cls}`}>
+                                                        <div className="shp-cat-card-label">{g.category}</div>
+                                                        <div className="shp-cat-card-value">{fmt(g.totalShares)}</div>
+                                                        <div className="shp-cat-card-sub">{g.schemeCount} scheme{g.schemeCount !== 1 ? 's' : ''}</div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* Expand / Collapse all controls */}
+                                        <div style={{ display:'flex', gap:'8px', marginBottom:'10px', alignItems:'center' }}>
+                                            <span style={{ fontSize:'11px', color:'var(--text-secondary)', fontWeight:600 }}>Groups:</span>
+                                            <button onClick={expandAll}  style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'5px', border:'1px solid var(--border-color)', background:'var(--bg-tertiary)', color:'var(--text-secondary)', cursor:'pointer' }}>Expand All</button>
+                                            <button onClick={collapseAll} style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'5px', border:'1px solid var(--border-color)', background:'var(--bg-tertiary)', color:'var(--text-secondary)', cursor:'pointer' }}>Collapse All</button>
+                                        </div>
+
+                                        <table className="shp-table">
+                                            <thead>
+                                                <tr>
+                                                    <th className="shp-th" style={{ textAlign:'left', minWidth:260 }}>Category / Scheme</th>
+                                                    {displayMonths.map((m, i) => (
+                                                        <th key={m} className={`shp-th shp-month-${i}`} colSpan={i === 0 ? 3 : 2}>{m}</th>
+                                                    ))}
+                                                </tr>
+                                                <tr>
+                                                    <th className="shp-th shp-th-sub" style={{ textAlign:'left' }}>Name</th>
+                                                    {displayMonths.map((m, i) => (
+                                                        <React.Fragment key={m}>
+                                                            {i === 0 && <th className={`shp-th shp-th-sub shp-month-${i}`}>% AUM</th>}
+                                                            <th className={`shp-th shp-th-sub shp-month-${i}`}>Qty</th>
+                                                            <th className={`shp-th shp-th-sub shp-month-${i}`}>Change</th>
+                                                        </React.Fragment>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {subGroups.map(g => {
+                                                    const key = `${g.category}||${g.sub_category}`;
+                                                    const isOpen = !!expandedCats[key];
+                                                    const cls = catClass(g.category);
+                                                    return (
+                                                        <React.Fragment key={key}>
+                                                            {/* Category header row */}
+                                                            <tr className="shp-cat-header-row" onClick={() => toggleCat(key)}>
+                                                                <td className="shp-td shp-td-name" colSpan={1 + displayMonths.reduce((acc, _, i) => acc + (i === 0 ? 3 : 2), 0)}>
+                                                                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%' }}>
+                                                                        <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                                                                            <span className={`shp-chevron ${isOpen ? 'open' : ''}`}>›</span>
+                                                                            <span className={`shp-cat-badge ${cls}`}>{g.category}</span>
+                                                                            <span className="shp-subcat-chip">{g.sub_category}</span>
+                                                                        </div>
+                                                                        <div style={{ display:'flex', alignItems:'center', gap:'16px', marginRight:'8px' }}>
+                                                                            <span className="shp-cat-schemes-count">{g.schemes.length} scheme{g.schemes.length !== 1 ? 's' : ''}</span>
+                                                                            <div style={{ textAlign:'right' }}>
+                                                                                <div style={{ fontSize:'13px', fontWeight:700, fontVariantNumeric:'tabular-nums' }}>{fmt(g.totalShares)}</div>
+                                                                                <div style={{ fontSize:'10px', color:'var(--text-secondary)', fontWeight:600 }}>TOTAL SHARES</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+
+                                                            {/* Scheme drill-down rows */}
+                                                            {isOpen && g.schemes.map((scheme, si) => (
+                                                                <tr key={si} className="shp-cat-scheme-row">
+                                                                    <td className="shp-td shp-td-name">
+                                                                        <div className="shp-fund-name">{scheme.scheme_name}</div>
+                                                                        <div className="shp-fund-sub">{scheme.amc_name}</div>
+                                                                    </td>
+                                                                    {displayMonths.map((m, i) => {
+                                                                        const h = (scheme.history || []).find(x => x.month === m);
+                                                                        return (
+                                                                            <React.Fragment key={m}>
+                                                                                {i === 0 && <td className={`shp-td shp-num shp-month-${i}`}>{fmtPct(h?.percent_to_aum) || <MissingData />}</td>}
+                                                                                <td className={`shp-td shp-num shp-month-${i}`}>{fmt(h?.num_shares) || <MissingData />}</td>
+                                                                                <td className={`shp-td shp-num shp-month-${i}`}><ChangeCell change={h?.month_change} pct={h?.percent_change} /></td>
+                                                                            </React.Fragment>
+                                                                        );
+                                                                    })}
+                                                                </tr>
+                                                            ))}
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </>
+                                ) : (
+                                /* ── SCHEME / AMC TABLE ── */
                                 <table className="shp-table">
                                     <thead>
                                         <tr>
@@ -746,6 +909,7 @@ export default function StockHoldingsPage() {
                                         ))}
                                     </tbody>
                                 </table>
+                                )}
                             </div>
                         </div>
                     </>

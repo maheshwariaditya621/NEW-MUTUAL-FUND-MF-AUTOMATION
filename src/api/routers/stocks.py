@@ -16,7 +16,8 @@ from src.api.models.stocks import (
     SchemeHolding,
     MonthlyHoldingData,
     HistoricalHolding,
-    BulkPriceRequest
+    BulkPriceRequest,
+    CategoryBreakdown
 )
 from datetime import date, datetime
 import calendar
@@ -372,30 +373,47 @@ async def get_stock_holdings(
         raise HTTPException(status_code=500, detail=f"Failed to fetch holdings: {str(e)}")
 
 
-async def _get_cumulative_multiplier(entity_id: int, year: int, month: int, cur: cursor) -> float:
+async def _get_all_multipliers_batch(entity_id: int, periods: list, cur: cursor) -> dict:
     """
-    Calculates the cumulative quantity multiplier for a given historical period
-    based on all corporate actions effective after that period.
-    """
-    # Get last day of the period
-    last_day = calendar.monthrange(year, month)[1]
-    period_end_date = date(year, month, last_day)
+    OPTIMIZED: Fetch cumulative multipliers for ALL periods in a single DB query
+    instead of N separate queries (was the #1 performance bottleneck).
     
+    Returns: dict of (year, month) -> Decimal multiplier
+    """
+    if not entity_id or not periods:
+        return {p: Decimal('1.0') for p in periods}
+
+    # Build all period end-dates at once (Python-side, no DB needed)
+    period_end_dates = {
+        (yr, mo): date(yr, mo, calendar.monthrange(yr, mo)[1])
+        for yr, mo in periods
+    }
+
+    # Fetch ALL relevant corporate actions in ONE query
+    earliest_date = min(period_end_dates.values())
     cur.execute(
         """
-        SELECT ratio_factor 
-        FROM corporate_actions 
-        WHERE entity_id = %s AND effective_date > %s AND status = 'CONFIRMED'
+        SELECT ratio_factor, effective_date
+        FROM corporate_actions
+        WHERE entity_id = %s
+          AND effective_date > %s
+          AND status = 'CONFIRMED'
+        ORDER BY effective_date
         """,
-        (entity_id, period_end_date)
+        (entity_id, earliest_date)
     )
-    actions = cur.fetchall()
-    
-    multiplier = Decimal('1.0')
-    for action in actions:
-        multiplier *= Decimal(str(action[0]))
-    
-    return multiplier
+    all_actions = cur.fetchall()  # (ratio_factor, effective_date)
+
+    # For each period, compute the cumulative multiplier from actions AFTER that period
+    result = {}
+    for (yr, mo), end_dt in period_end_dates.items():
+        mult = Decimal('1.0')
+        for ratio_factor, eff_date in all_actions:
+            if eff_date > end_dt:
+                mult *= Decimal(str(ratio_factor))
+        result[(yr, mo)] = mult
+
+    return result
 
 
 async def _get_stock_holdings_aggregated(
@@ -480,14 +498,19 @@ async def _get_stock_holdings_aggregated(
     # display_periods are the first `months` (newest to oldest)
     display_periods = all_target_periods[:months]
     
-    # 3. Resolve these months to period_ids if they exist
-    period_ids_map = {} # (year, month) -> period_id
-    for yr, mo in all_target_periods:
-        cur.execute("SELECT period_id FROM periods WHERE year = %s AND month = %s", (yr, mo))
-        p_row = cur.fetchone()
-        if p_row:
-            period_ids_map[(yr, mo)] = p_row[0]
-            
+    # 3. Resolve ALL period_ids in a SINGLE batch query (was N+1 queries, each ~70ms)
+    period_ids_map = {}  # (year, month) -> period_id
+    if all_target_periods:
+        # Build IN clause with (year, month) tuples
+        yr_mo_conditions = " OR ".join(["(year = %s AND month = %s)"] * len(all_target_periods))
+        params = [val for yr, mo in all_target_periods for val in (yr, mo)]
+        cur.execute(
+            f"SELECT year, month, period_id FROM periods WHERE {yr_mo_conditions}",
+            params
+        )
+        for row in cur.fetchall():
+            period_ids_map[(row[0], row[1])] = row[2]
+
     all_period_ids = list(period_ids_map.values())
     display_period_ids = [period_ids_map.get(p) for p in display_periods if period_ids_map.get(p)]
     
@@ -521,21 +544,20 @@ async def _get_stock_holdings_aggregated(
     total_shares_current = 0
     num_funds_current = 0
     
-    # Pre-calculate adjusted shares and multipliers for ALL 5 target periods
+    # Pre-calculate ALL multipliers in ONE batch DB query (was 14 separate queries!)
+    period_multipliers_local = {}
+    if entity_id:
+        period_multipliers_local = await _get_all_multipliers_batch(entity_id, all_target_periods, cur)
+    else:
+        period_multipliers_local = {p: Decimal('1.0') for p in all_target_periods}
+
     adj_shares_map = {}
-    period_multipliers_local = {} # to be used for is_adjusted flag
     for yr, mo in all_target_periods:
         pid = period_ids_map.get((yr, mo))
         shares = 0
         if pid and pid in summary_data_map:
             shares = summary_data_map[pid][1]
-        
-        mult = 1.0
-        if entity_id:
-            mult = await _get_cumulative_multiplier(entity_id, yr, mo, cur)
-        
-        period_multipliers_local[(yr, mo)] = mult
-        adj_shares_map[(yr, mo)] = int(shares) # Rely on DB-side adj_quantity
+        adj_shares_map[(yr, mo)] = int(shares)  # Rely on DB-side adj_quantity
 
     for idx, (yr, mo) in enumerate(display_periods):
         month_str = date(yr, mo, 1).strftime("%b-%y").upper()
@@ -572,10 +594,8 @@ async def _get_stock_holdings_aggregated(
                 month_change = adj_shares - adj_prev_shares
                 percent_change = round((month_change / adj_prev_shares) * 100, 2)
         
-        # Multiplier check for is_adjusted flag
-        mult = 1.0
-        if entity_id:
-            mult = await _get_cumulative_multiplier(entity_id, yr, mo, cur)
+        # Multiplier check for is_adjusted flag (already computed in batch above)
+        mult = period_multipliers_local.get((yr, mo), Decimal('1.0'))
 
         ownership_pct = None
         if shares_outstanding and adj_shares:
@@ -607,7 +627,9 @@ async def _get_stock_holdings_aggregated(
             SUM(COALESCE(eh.adj_quantity, eh.quantity)) as quantity,
             p.period_id,
             p.year,
-            p.month
+            p.month,
+            s.website_category,
+            s.website_sub_category
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
         JOIN schemes s ON ss.scheme_id = s.scheme_id
@@ -615,7 +637,7 @@ async def _get_stock_holdings_aggregated(
         JOIN periods p ON ss.period_id = p.period_id
         JOIN companies c ON eh.company_id = c.company_id
         WHERE {filter_clause} AND p.period_id IN ({','.join(['%s']*len(all_period_ids))})
-        GROUP BY s.scheme_id, s.scheme_name, a.amc_name, s.plan_type, s.option_type, ss.total_value_inr, ss.total_net_assets_inr, p.period_id, p.year, p.month
+        GROUP BY s.scheme_id, s.scheme_name, a.amc_name, s.plan_type, s.option_type, ss.total_value_inr, ss.total_net_assets_inr, p.period_id, p.year, p.month, s.website_category, s.website_sub_category
         ORDER BY s.scheme_id, p.year DESC, p.month DESC
         """,
         (filter_val, *all_period_ids)
@@ -634,15 +656,12 @@ async def _get_stock_holdings_aggregated(
         """, (scheme_ids, all_period_ids))
         valid_snapshots = set((row[0], row[1]) for row in cur.fetchall())
         
-    # Pre-calculate multipliers and organize data
-    period_multipliers = {}
-    if entity_id:
-        for yr, mo in all_target_periods:
-            period_multipliers[(yr, mo)] = await _get_cumulative_multiplier(entity_id, yr, mo, cur)
+    # Multipliers already computed above (period_multipliers_local)
+    period_multipliers = period_multipliers_local
 
     schemes_data = {}
     for row in raw_holdings:
-        sid, sname, amc, plan, opt, eq_aum, tot_aum, pnav, qty, pid, yr, mo = row
+        sid, sname, amc, plan, opt, eq_aum, tot_aum, pnav, qty, pid, yr, mo, wcat, wsub = row
         # mult = period_multipliers.get((yr, mo), 1.0) # Redundant
         adj_qty = int(qty)
 
@@ -656,6 +675,8 @@ async def _get_stock_holdings_aggregated(
                 "name": sname, "amc": amc, "plan": plan, "opt": opt,
                 "equity_aum_cr": eq_val,
                 "total_aum_cr": tot_val,
+                "website_category": wcat or "Other",
+                "website_sub_category": wsub or "Uncategorized",
                 "monthly_data": {} # (yr, mo) -> {qty, pnav}
             }
         schemes_data[sid]["monthly_data"][(yr, mo)] = {
@@ -731,12 +752,42 @@ async def _get_stock_holdings_aggregated(
                 option_type=data["opt"],
                 equity_aum_cr=data["equity_aum_cr"],
                 total_aum_cr=data["total_aum_cr"],
+                website_category=data.get("website_category"),
+                website_sub_category=data.get("website_sub_category"),
                 history=history
             )))
 
     # Sort holdings by latest percent_to_nav desc
     holdings.sort(key=lambda x: x[0] or Decimal('0'), reverse=True)
     final_holdings = [h[1] for h in holdings]
+
+    # ── Build category breakdown from final holdings (latest month) ──
+    cat_map = {}  # (category, sub_category) -> {shares, schemes, pnav_sum}
+    for h in final_holdings:
+        cat = h.website_category or "Other"
+        sub = h.website_sub_category or "Uncategorized"
+        key = (cat, sub)
+        latest_hist = h.history[0] if h.history else None
+        shares = latest_hist.num_shares if latest_hist and latest_hist.num_shares else 0
+        pnav = float(latest_hist.percent_to_aum or 0) if latest_hist and latest_hist.percent_to_aum else 0
+        if shares > 0:
+            if key not in cat_map:
+                cat_map[key] = {"shares": 0, "schemes": 0, "pnav_sum": 0.0}
+            cat_map[key]["shares"] += shares
+            cat_map[key]["schemes"] += 1
+            cat_map[key]["pnav_sum"] += pnav
+
+    category_breakdown = []
+    for (cat, sub), agg in sorted(cat_map.items(), key=lambda x: -x[1]["shares"]):
+        own_pct = round((agg["shares"] / shares_outstanding) * 100, 4) if shares_outstanding and agg["shares"] else None
+        category_breakdown.append(CategoryBreakdown(
+            category=cat,
+            sub_category=sub,
+            num_schemes=agg["schemes"],
+            total_shares=agg["shares"],
+            ownership_percent=own_pct,
+            percent_to_nav=round(agg["pnav_sum"], 4) if agg["pnav_sum"] else None
+        ))
 
     # Dynamic Market Cap Calculation
     live_mcap = None
@@ -779,6 +830,7 @@ async def _get_stock_holdings_aggregated(
         ownership_percent=round((total_shares_current / shares_outstanding) * 100, 4) if shares_outstanding and total_shares_current else None,
         monthly_trend=monthly_trend,
         holdings=final_holdings,
+        category_breakdown=category_breakdown,
         shares_outstanding=shares_outstanding,
         shares_last_updated_at=shares_last_updated_at,
         data_warning=data_warning

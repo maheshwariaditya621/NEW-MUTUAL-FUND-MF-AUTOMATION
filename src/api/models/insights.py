@@ -27,6 +27,8 @@ class StockActivityItem(BaseModel):
     num_funds_curr: int = Field(..., description="Number of funds holding this stock in the latest month")
     num_funds_prev: int = Field(..., description="Number of funds holding this stock in the previous month")
     net_fund_entrants: int = Field(..., description="Net change in number of funds holding this stock")
+    ownership_change_percent: Optional[float] = Field(None, description="% of total company outstanding shares bought/sold")
+    holding_change_percent: Optional[float] = Field(None, description="% increase/decrease in existing mutual fund holdings")
 
 
 class StockActivityResponse(BaseModel):
@@ -35,5 +37,5 @@ class StockActivityResponse(BaseModel):
     prev_month: str = Field(..., description="Previous month for comparison (MMM-YY)")
     results: List[StockActivityItem] = Field(..., description="List of stocks with highest activity")
     total_results: int = Field(..., description="Total count of results")
-    activity_type: str = Field(..., description="'buying' or 'selling'")
+    activity_type: str = Field(..., description="'buying', 'selling', 'entrants', or 'exits'")
     data_warning: Optional[dict] = Field(None, description="Warning when data is based on a partial/incomplete period")

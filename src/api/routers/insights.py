@@ -17,9 +17,9 @@ router = APIRouter()
 
 @router.get("/stock-activity", response_model=StockActivityResponse)
 async def get_stock_activity(
-    activity_type: str = Query("buying", pattern="^(buying|selling)$", description="Type of activity to fetch"),
+    activity_type: str = Query("buying", pattern="^(buying|selling|entrants|exits)$", description="Type of activity to fetch"),
     mcap_category: Optional[str] = Query(None, description="Filter by market cap (Large Cap, Mid Cap, Small Cap)"),
-    limit: int = Query(50, ge=1, le=100, description="Number of top stocks to return"),
+    limit: int = Query(250, ge=1, le=1000, description="Number of top stocks to return"),
     cur: cursor = Depends(get_db_cursor),
     current_user: dict = Depends(get_current_user)
 ):
@@ -63,9 +63,23 @@ async def get_stock_activity(
         prev_month_label = date(y0, m0, 1).strftime("%b-%y").upper()
 
         # 2. Build the query to calculate net buying/selling (Entity-Centric)
-        order_direction = "DESC" if activity_type == "buying" else "ASC"
+        if activity_type == "buying":
+            order_col = "net_qty"
+            order_direction = "DESC"
+            where_conditions = ["qty_curr > qty_prev", "qty_prev > 0"] # Must have been held before to be a pure "buy" (accumulation)
+        elif activity_type == "selling":
+            order_col = "net_qty"
+            order_direction = "ASC"
+            where_conditions = ["qty_curr < qty_prev", "qty_curr > 0"] # Must still be held to be a "sell" (distribution)
+        elif activity_type == "entrants":
+            order_col = "qty_curr"
+            order_direction = "DESC"
+            where_conditions = ["qty_prev = 0", "qty_curr > 0"]
+        elif activity_type == "exits":
+            order_col = "qty_prev"
+            order_direction = "DESC"
+            where_conditions = ["qty_curr = 0", "qty_prev > 0"]
         
-        where_conditions = []
         if mcap_category:
             where_conditions.append("c.mcap_type = %s")
             
@@ -97,7 +111,8 @@ async def get_stock_activity(
                     COALESCE(c.entity_id, c.company_id + 10000000) as uid,
                     ss.scheme_id,
                     eh.quantity,
-                    COALESCE(eh.adj_quantity, eh.quantity) as adj_qty
+                    COALESCE(eh.adj_quantity, eh.quantity) as adj_qty,
+                    eh.market_value_inr as mval
                 FROM equity_holdings eh
                 JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
                 JOIN companies c ON eh.company_id = c.company_id
@@ -119,6 +134,7 @@ async def get_stock_activity(
                         0
                     )) as qty_prev,
                     SUM(COALESCE(curr.mval, 0)) as mval_curr,
+                    SUM(COALESCE(prev.mval, 0)) as mval_prev,
                     -- Entrant: held now, NOT held before, but was uploaded before
                     COUNT(DISTINCT curr.scheme_id) FILTER (
                         WHERE curr.scheme_id IS NOT NULL 
@@ -136,7 +152,7 @@ async def get_stock_activity(
                 LEFT JOIN splits s ON (COALESCE(curr.uid, prev.uid) = s.entity_id)
                 GROUP BY coalesce(curr.uid, prev.uid)
             )
-            SELECT DISTINCT ON (net_qty, uid)
+            SELECT DISTINCT ON ({order_col}, h_agg.uid)
                 c.isin, 
                 COALESCE(ce.canonical_name, c.company_name) as company_name, 
                 c.sector, c.mcap_type, c.market_cap, c.nse_symbol,
@@ -147,6 +163,7 @@ async def get_stock_activity(
                 num_funds_prev,
                 CASE 
                     WHEN qty_curr > 0 THEN ((qty_curr - qty_prev) * (mval_curr / qty_curr)) / 10000000.0
+                    WHEN qty_prev > 0 THEN ((qty_curr - qty_prev) * (mval_prev / qty_prev)) / 10000000.0
                     ELSE 0 
                 END as buy_value_cr,
                 c.shares_outstanding,
@@ -156,7 +173,7 @@ async def get_stock_activity(
             JOIN companies c ON (CASE WHEN h_agg.uid > 10000000 THEN h_agg.uid - 10000000 = c.company_id ELSE h_agg.uid = c.entity_id END)
             LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
             WHERE (qty_curr > 0 OR qty_prev > 0) {where_clause}
-            ORDER BY net_qty {order_direction}, h_agg.uid, c.updated_at DESC
+            ORDER BY {order_col} {order_direction}, h_agg.uid, c.updated_at DESC
             LIMIT %s
             """,
             [p0_id, p1_id, p1_id, p0_id, p0_id, p1_id] + ([mcap_category] if mcap_category else []) + [limit]
@@ -180,6 +197,22 @@ async def get_stock_activity(
             from src.services.pricing_service import pricing_service
             live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out)
             
+            
+            net_qty = int(row[8])
+            qty_prev = int(row[7])
+            
+            # 1. How much of the total company did MFs buy/sell?
+            ownership_change = None
+            if shares_out and shares_out > 0:
+                ownership_change = round((net_qty / shares_out) * 100, 4)
+                
+            # 2. How much did MFs increase their existing stake by?
+            holding_change = None
+            if qty_prev > 0:
+                holding_change = round((net_qty / qty_prev) * 100, 2)
+            elif qty_prev == 0 and net_qty > 0:
+                holding_change = 100.0 # 100% new
+            
             results.append(StockActivityItem(
                 isin=isin,
                 company_name=row[1],
@@ -188,12 +221,14 @@ async def get_stock_activity(
                 market_cap=Decimal(str(live_mcap)).quantize(Decimal('0.01')) if live_mcap else None,
                 nse_symbol=row[5],
                 total_qty_curr=int(row[6]),
-                total_qty_prev=int(row[7]),
-                net_qty_bought=int(row[8]),
+                total_qty_prev=qty_prev,
+                net_qty_bought=net_qty,
                 num_funds_curr=int(row[9]),
                 num_funds_prev=int(row[10]),
                 net_fund_entrants=int(row[13]),
-                buy_value_crore=Decimal(str(row[11])).quantize(Decimal('0.01'))
+                buy_value_crore=Decimal(str(row[11])).quantize(Decimal('0.01')),
+                ownership_change_percent=ownership_change,
+                holding_change_percent=holding_change
             ))
             
         return StockActivityResponse(

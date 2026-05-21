@@ -5,10 +5,10 @@ import { apiGet } from './client';
  * 
  * @param {string} activityType - 'buying' or 'selling'
  * @param {string} mcapCategory - Optional 'Large Cap', 'Mid Cap', or 'Small Cap'
- * @param {number} limit - Number of results (default 50)
+ * @param {number} limit - Number of results (default 250)
  * @returns {Promise<Object>} The activity response with month and results
  */
-export const getStockActivity = async (activityType = 'buying', mcapCategory = null, limit = 50) => {
+export const getStockActivity = async (activityType = 'buying', mcapCategory = null, limit = 250) => {
     const params = {
         activity_type: activityType,
         limit

@@ -28,17 +28,16 @@
 }
 
 .ins-title-row {
-    padding: 20px 24px;
+    padding: 24px;
     border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 16px;
+}
+
+.ins-title-group {
+    margin-bottom: 0;
 }
 
 .ins-title-group h1 {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 800;
     color: var(--text-primary);
     margin: 0 0 4px;
@@ -51,27 +50,83 @@
     font-weight: 500;
 }
 
-/* ── Tabs ── */
-.ins-tabs {
+/* ── Summary Stats ── */
+.ins-summary-cards {
     display: flex;
+    gap: 16px;
+    padding: 0 24px 24px 24px;
+    flex-wrap: wrap;
+}
+
+.ins-stat-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px 20px;
+    flex: 1;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ins-stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.ins-stat-value {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-primary);
+}
+
+.ins-stat-subtext {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* ── Tabs ── */
+.ins-tabs-wrap {
+    padding: 0 24px 24px 24px;
+}
+
+.ins-tabs {
+    display: inline-flex;
     background: var(--bg-tertiary);
     padding: 4px;
     gap: 4px;
     border-radius: 10px;
     border: 1px solid var(--border-color);
+    align-items: center;
+}
+
+.ins-tab-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border-color);
+    margin: 0 4px;
 }
 
 .ins-tab-btn {
-    padding: 8px 20px;
+    padding: 8px 16px;
     border: none;
     background: transparent;
     border-radius: 7px;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .ins-tab-btn:hover {
@@ -80,15 +135,13 @@
 }
 
 .ins-tab-btn.active {
-    background: #1d4ed8;
-    color: #ffffff;
-    box-shadow: 0 2px 8px rgba(29, 78, 216, 0.3);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-[data-theme="dark"] .ins-tab-btn.active {
-    background: #2563eb;
-    box-shadow: 0 2px 10px rgba(37, 99, 235, 0.4);
-}
+.ins-tab-btn.active.buying { background: #10b981; color: #fff; box-shadow: 0 2px 8px rgba(16,185,129,0.3); }
+.ins-tab-btn.active.selling { background: #ef4444; color: #fff; box-shadow: 0 2px 8px rgba(239,68,68,0.3); }
+.ins-tab-btn.active.entrants { background: #3b82f6; color: #fff; box-shadow: 0 2px 8px rgba(59,130,246,0.3); }
+.ins-tab-btn.active.exits { background: #f59e0b; color: #fff; box-shadow: 0 2px 8px rgba(245,158,11,0.3); }
 
 /* ── Filter Bar ── */
 .ins-filters {
@@ -123,6 +176,11 @@
     font-size: 13px;
     color: var(--text-primary);
     outline: none;
+}
+
+.ins-select option {
+    background-color: #ffffff !important;
+    color: #000000 !important;
 }
 
 .ins-select:focus,
@@ -298,8 +356,26 @@
 .ins-funds-count {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
+
+.conviction-bar-bg {
+    width: 40px;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.conviction-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.conviction-bar-fill.pos { background: #10b981; }
+.conviction-bar-fill.neg { background: #ef4444; }
 
 .ins-fund-change {
     font-size: 10.5px;
