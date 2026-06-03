@@ -98,7 +98,7 @@ const RegisterInvitePage = () => {
                 <div className="glass-card success-card">
                     <CheckCircle size={64} className="text-success" />
                     <h1>Account Verified</h1>
-                    <p>Welcome to MF Analytics. Your secure portal access is now ready.</p>
+                    <p>Welcome to AV Fincorp Pvt. Ltd. Your secure portal access is now ready.</p>
                     <Link to="/login" className="btn-primary">
                         <span>Sign In Now</span>
                         <ArrowRight size={18} />

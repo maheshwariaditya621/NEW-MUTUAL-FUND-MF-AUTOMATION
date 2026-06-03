@@ -83,7 +83,7 @@ const LoginPage = () => {
             <div className="login-card">
                 <div className="login-header">
                     <div className="login-icon-wrapper">
-                        {totpRequired ? <ShieldCheck size={40} className="totp-icon" /> : <h1 className="login-logo">MF-AUTO</h1>}
+                        {totpRequired ? <ShieldCheck size={40} className="totp-icon" /> : <h1 className="login-logo">AV Fincorp</h1>}
                     </div>
                     <h1 className="login-title">{totpRequired ? 'Second Factor' : 'Welcome Back'}</h1>
                     <p className="login-subtitle">
@@ -177,7 +177,7 @@ const LoginPage = () => {
                 </form>
 
                 <div className="login-footer">
-                    <p>&copy; {new Date().getFullYear()} MF Automation Platform</p>
+                    <p>&copy; {new Date().getFullYear()} AV Fincorp Pvt. Ltd</p>
                 </div>
             </div>
         </div>

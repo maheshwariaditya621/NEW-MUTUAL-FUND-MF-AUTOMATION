@@ -160,8 +160,8 @@ const Header = () => {
           <div className="header-left">
             <Link to="/" className="logo">
               <div className="logo-container">
-                <span className="logo-mf">MF</span>
-                <span className="logo-analytics">Analytics</span>
+                <span className="logo-mf">AV</span>
+                <span className="logo-analytics">Fincorp</span>
               </div>
             </Link>
 
@@ -309,7 +309,7 @@ function AppContent() {
             <div className="container">
               <div className="footer-content">
                 <p className="footer-copyright">
-                  Mutual Fund Analytics Platform © 2026
+                  AV Fincorp Pvt. Ltd © 2026
                 </p>
                 <Link to="/admin-vault" className="admin-link-btn">🔐 Admin Vault</Link>
               </div>

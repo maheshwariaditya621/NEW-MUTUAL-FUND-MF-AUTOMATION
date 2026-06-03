@@ -67,5 +67,5 @@ def get_totp_uri(username: str, secret: str) -> str:
     """Get the provisioning URI for a TOTP secret (to be used in QR codes)."""
     return pyotp.totp.TOTP(secret).provisioning_uri(
         name=username, 
-        issuer_name="MF Analytics"
+        issuer_name="AV Fincorp Pvt. Ltd"
     )

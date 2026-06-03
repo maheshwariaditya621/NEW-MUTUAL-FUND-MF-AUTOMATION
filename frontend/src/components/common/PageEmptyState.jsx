@@ -212,7 +212,7 @@ const PageEmptyState = ({
 
             <div className="pes-footer">
                 <div className="pes-footer-left">
-                    Mutual Fund Analytics Platform © 2026
+                    AV Fincorp Pvt. Ltd © 2026
                 </div>
                 <div className="pes-footer-right">
                     <span className="pes-admin-icon">🔐</span> Admin Vault

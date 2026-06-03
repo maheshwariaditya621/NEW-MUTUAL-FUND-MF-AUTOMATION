@@ -60,7 +60,7 @@ async def startup_event():
     try:
         from src.alerts.telegram_notifier import get_notifier
         notifier = get_notifier()
-        notifier.alert("🟢 <b>MF Analytics API is UP and Running</b>\nSite: avfincorp.com\nStatus: Healthy")
+        notifier.alert("🟢 <b>AV Fincorp Pvt. Ltd API is UP and Running</b>\nSite: avfincorp.com\nStatus: Healthy")
     except Exception as e:
         logger.error(f"Failed to send startup notification: {e}")
 

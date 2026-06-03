@@ -32,7 +32,7 @@ export default function Chatbot() {
     const [messages, setMessages] = useState([
         {
             role: 'bot',
-            text: "👋 Hi! I'm your MF Analytics assistant. Ask me anything about mutual fund holdings, market caps, or top stocks in a scheme!",
+            text: "👋 Hi! I'm your AV Fincorp Pvt. Ltd assistant. Ask me anything about mutual fund holdings, market caps, or top stocks in a scheme!",
         },
     ]);
     const [input, setInput] = useState('');
@@ -141,7 +141,7 @@ export default function Chatbot() {
                     <div className="chatbot-header__info">
                         <div className="chatbot-header__avatar">AI</div>
                         <div>
-                            <div className="chatbot-header__name">MF Assistant</div>
+                            <div className="chatbot-header__name">AV Fincorp Assistant</div>
                             <div className="chatbot-header__status">
                                 <span className="chatbot-header__dot" /> Powered by Groq
                             </div>

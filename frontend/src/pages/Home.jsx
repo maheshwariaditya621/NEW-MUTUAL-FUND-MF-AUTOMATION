@@ -19,7 +19,7 @@ export default function Home() {
                     <div className="hero-badge">Next-Generation Platform</div>
                     <h1 className="hero-title">
                         Smarter Insights for <br />
-                        <span className="hero-title-highlight">Mutual Fund Analytics</span>
+                        <span className="hero-title-highlight">AV Fincorp Pvt. Ltd</span>
                     </h1>
                     <p className="hero-subtitle">
                         Track portfolio changes, analyze fund manager behavior, and make data-driven investment decisions with our advanced search and visualization tools.

@@ -23,14 +23,14 @@ const AccessDeniedPage = () => {
                         <Home size={18} />
                         <span>Return Home</span>
                     </Link>
-                    <a href="mailto:admin@mf-analytics.com" className="btn-secondary">
+                    <a href="mailto:admin@avfincorp.com" className="btn-secondary">
                         <Mail size={18} />
                         <span>Contact Admin</span>
                     </a>
                 </div>
                 
                 <div className="footer-note">
-                    Secure Multi-User Portal • MF Analytics v2.0
+                    Secure Multi-User Portal • AV Fincorp Pvt. Ltd v2.0
                 </div>
             </div>
             
