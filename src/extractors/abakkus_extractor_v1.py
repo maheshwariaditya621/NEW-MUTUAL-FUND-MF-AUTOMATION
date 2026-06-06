@@ -34,9 +34,10 @@ class AbakkusExtractorV1(BaseExtractor):
         
         # 1. Build scheme mapping from 'Index' sheet if it exists
         scheme_mapping = {}
-        if 'Index' in xls.sheet_names:
+        index_sheet_name = next((s for s in xls.sheet_names if 'Index' in s), None)
+        if index_sheet_name:
             try:
-                index_df = pd.read_excel(xls, sheet_name='Index')
+                index_df = pd.read_excel(xls, sheet_name=index_sheet_name)
                 # Looking for 'Short Name' and 'Scheme Name' columns
                 # Let's clean column names for matching
                 index_df.columns = [str(c).strip().upper() for c in index_df.columns]
@@ -48,12 +49,12 @@ class AbakkusExtractorV1(BaseExtractor):
                             scheme_mapping[short] = full
                     logger.debug(f"Loaded {len(scheme_mapping)} scheme mappings from Index sheet.")
             except Exception as e:
-                logger.warning(f"Could not parse 'Index' sheet: {e}")
+                logger.warning(f"Could not parse '{index_sheet_name}' sheet: {e}")
 
         all_holdings: List[Dict[str, Any]] = []
 
         for sheet_name in xls.sheet_names:
-            if sheet_name == 'Index':
+            if 'Index' in sheet_name:
                 continue
                 
             df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
@@ -106,13 +107,25 @@ class AbakkusExtractorV1(BaseExtractor):
             # Priority 1: Index mapping
             # Priority 2: Row 0 column 1
             # Priority 3: Sheet name
-            scheme_name_raw = scheme_mapping.get(sheet_name)
+            scheme_name_raw = None
+            for short, full in scheme_mapping.items():
+                if short in sheet_name:
+                    scheme_name_raw = full
+                    break
+            
             if not scheme_name_raw:
-                # Try finding it in row 0-2 of column 1
+                # Try finding it in row 0-2 of column 0 or 1
                 for r in range(min(3, len(df_raw))):
-                    val = str(df_raw.iloc[r, 1]).strip()
-                    if val and "Unnamed" not in val and len(val) > 10:
-                        scheme_name_raw = val
+                    # Check column 0 for short name
+                    val0 = str(df_raw.iloc[r, 0]).strip()
+                    if val0 in scheme_mapping:
+                        scheme_name_raw = scheme_mapping[val0]
+                        break
+                    
+                    # Check column 1 for full name
+                    val1 = str(df_raw.iloc[r, 1]).strip()
+                    if val1 and "Unnamed" not in val1 and len(val1) > 10:
+                        scheme_name_raw = val1
                         break
             
             if not scheme_name_raw:
@@ -126,13 +139,16 @@ class AbakkusExtractorV1(BaseExtractor):
                 equity_df = self.filter_equity_isins(df, "isin")
             
             if not equity_df.empty:
+                # Check if percentages are in decimals (e.g. sum is ~1.0) or already percent (sum is ~100.0)
+                total_pct = sum(self.safe_float(r.get("percent_of_nav", 0)) for _, r in equity_df.iterrows())
+                pct_multiplier = 100.0 if (total_pct > 0 and total_pct <= 1.05) else 1.0
+
                 for _, row in equity_df.iterrows():
                     # Value Normalization
                     mkt_val = self.normalize_currency(row.get("market_value_inr", 0), global_unit)
                     
-                    # Percentage Parsing - Abakkus percentages are decimals (e.g. 0.0486 for 4.86%)
-                    # We multiply by 100 to store as 4.86 in the DB.
-                    raw_pct = self.safe_float(row.get("percent_of_nav", 0)) * 100.0
+                    # Percentage Parsing
+                    raw_pct = self.safe_float(row.get("percent_of_nav", 0)) * pct_multiplier
                     
                     all_holdings.append(
                         {
