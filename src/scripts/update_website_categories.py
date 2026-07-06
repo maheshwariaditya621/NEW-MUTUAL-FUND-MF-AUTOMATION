@@ -7,6 +7,7 @@ from src.config import logger
 CAT_EQUITY = "Equity Funds"
 CAT_DEBT = "Debt Funds"
 CAT_HYBRID = "Hybrid Funds"
+CAT_ARBITRAGE = "Arbitrage Funds"
 CAT_TAX_SAVING = "Tax-Saving Funds (ELSS)"
 CAT_INDEX = "Index Funds"
 CAT_THEMATIC = "Thematic Funds"
@@ -31,6 +32,10 @@ def get_website_category(scheme_name: str, amfi_broad: Optional[str], amfi_schem
     if "ELSS" in name_upper or "TAX SAVER" in name_upper or "TAX SAVG" in name_upper:
         return CAT_TAX_SAVING, "ELSS"
 
+    # Arbitrage Check — must come BEFORE Hybrid to avoid mis-classification
+    if "ARBITRAGE" in name_upper:
+        return CAT_ARBITRAGE, "Arbitrage Fund"
+
     # Thematic / Sectoral Check
     if amfi_scheme and "Sectoral/ Thematic" in amfi_scheme:
         return CAT_THEMATIC, "Sectoral/Thematic"
@@ -54,6 +59,9 @@ def get_website_category(scheme_name: str, amfi_broad: Optional[str], amfi_schem
             return CAT_DEBT, amfi_scheme if amfi_scheme else "Debt"
         
         if "HYBRID" in broad:
+            # Within AMFI Hybrid broad category, split out Arbitrage
+            if amfi_scheme and "Arbitrage" in amfi_scheme:
+                return CAT_ARBITRAGE, "Arbitrage Fund"
             return CAT_HYBRID, amfi_scheme if amfi_scheme else "Hybrid"
 
     # 3. Name-based Heuristics (Final Fallback)
@@ -68,10 +76,10 @@ def get_website_category(scheme_name: str, amfi_broad: Optional[str], amfi_schem
     ]):
         return CAT_DEBT, "Debt"
 
-    # Hybrid & Solution Oriented
+    # Hybrid & Solution Oriented (ARBITRAGE removed — handled above)
     if any(x in name_upper for x in [
-        "HYBRID", "BALANCED", "AGGRESSIVE", "CONSERVATIVE", "ARBITRAGE", 
-        "DYNAMIC ASSET", "EQUITY SAVINGS", "RETIREMENT", "CHILDREN", 
+        "HYBRID", "BALANCED", "AGGRESSIVE", "CONSERVATIVE",
+        "DYNAMIC ASSET", "EQUITY SAVINGS", "RETIREMENT", "CHILDREN",
         "PENSION", "MULTI ASSET", "ASSET ALLOCATOR"
     ]):
         return CAT_HYBRID, "Hybrid"

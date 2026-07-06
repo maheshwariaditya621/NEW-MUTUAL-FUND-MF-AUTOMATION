@@ -8,6 +8,7 @@ const Categories = [
     { id: 'equity', label: 'Equity Funds', icon: '🚀' },
     { id: 'debt', label: 'Debt Funds', icon: '🛡️' },
     { id: 'hybrid', label: 'Hybrid Funds', icon: '⚖️' },
+    { id: 'arbitrage', label: 'Arbitrage Funds', icon: '🔄' },
     { id: 'index', label: 'Index Funds', icon: '📉' },
     { id: 'tax', label: 'Tax-Saving Funds (ELSS)', icon: '💰' },
     { id: 'thematic', label: 'Thematic Funds', icon: '🏛️' },
@@ -17,7 +18,8 @@ const Categories = [
 const SubCategories = {
     equity: ['Large Cap', 'Mid Cap', 'Small Cap', 'Flexi Cap', 'Multi Cap', 'Dividend Yield', 'Value/Contra', 'Other Equity'],
     debt: ['Liquid', 'Money Market', 'Corporate Bond', 'Gilt', 'Dynamic Bond', 'Debt'],
-    hybrid: ['Balanced Advantage', 'Arbitrage Fund', 'Multi Asset Allocation', 'Aggressive Hybrid', 'Equity Savings', 'Conservative Hybrid', 'Hybrid'],
+    hybrid: ['Balanced Advantage', 'Multi Asset Allocation', 'Aggressive Hybrid', 'Equity Savings', 'Conservative Hybrid', 'Hybrid'],
+    arbitrage: ['Arbitrage Fund'],
     index: ['Index Fund', 'ETF'],
     tax: ['ELSS'],
     thematic: ['Sectoral/Thematic'],

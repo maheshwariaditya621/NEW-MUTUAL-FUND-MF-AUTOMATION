@@ -165,6 +165,7 @@ export default function StockHoldingsPage() {
         if (!cat) return 'other';
         const c = cat.toLowerCase();
         if (c.includes('equity')) return 'equity';
+        if (c.includes('arbitrage')) return 'arbitrage';
         if (c.includes('hybrid')) return 'hybrid';
         if (c.includes('debt')) return 'debt';
         if (c.includes('index')) return 'index';
@@ -754,6 +755,22 @@ export default function StockHoldingsPage() {
                                 {viewMode === 'category' ? (
                                     /* ── CATEGORY-WISE VIEW ── */
                                     <>
+                                        {/* Partial Data Warning for Category View */}
+                                        {summary.data_warning && (
+                                            <div style={{ 
+                                                marginBottom: '12px', padding: '10px 14px', 
+                                                backgroundColor: 'rgba(234, 179, 8, 0.1)', 
+                                                border: '1px solid rgba(234, 179, 8, 0.3)', 
+                                                borderRadius: '8px', color: '#d97706', 
+                                                fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' 
+                                            }}>
+                                                <span style={{ fontSize: '16px' }}>⚠️</span>
+                                                <span>
+                                                    <strong>Incomplete Data for {summary.data_warning.latest_label}:</strong> The totals below only include data from {summary.data_warning.amcs_uploaded} out of {summary.data_warning.amcs_expected} AMCs.
+                                                </span>
+                                            </div>
+                                        )}
+
                                         {/* Summary cards strip (Broad Categories) */}
                                         <div className="shp-cat-summary-strip">
                                             {broadGroups.map(g => {
@@ -761,7 +778,10 @@ export default function StockHoldingsPage() {
                                                 return (
                                                     <div key={g.category} className={`shp-cat-summary-card theme-${cls}`}>
                                                         <div className="shp-cat-card-label">{g.category}</div>
-                                                        <div className="shp-cat-card-value">{fmt(g.totalShares)}</div>
+                                                        <div className="shp-cat-card-value">
+                                                            {fmt(g.totalShares)}
+                                                            {summary.data_warning && <span style={{ color: '#eab308', marginLeft: '3px' }} title="Partial Data">*</span>}
+                                                        </div>
                                                         <div className="shp-cat-card-sub">{g.schemeCount} scheme{g.schemeCount !== 1 ? 's' : ''}</div>
                                                     </div>
                                                 );
