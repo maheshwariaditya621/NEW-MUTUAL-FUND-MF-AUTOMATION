@@ -485,7 +485,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
@@ -494,13 +494,14 @@
 }
 
 .modal-content {
-    background: #1e293b;
+    background: var(--bg-card, var(--bg-secondary));
+    color: var(--text-primary);
     width: 90%;
     max-width: 500px;
     padding: 2rem;
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
 }
 
 
@@ -520,9 +521,10 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--bg-tertiary);
     padding: 1rem;
     border-radius: 8px;
+    border: 1px solid var(--border-color);
 }
 
 .perm-checkbox-label {
@@ -531,6 +533,7 @@
     gap: 0.5rem;
     font-size: 0.85rem;
     cursor: pointer;
+    color: var(--text-primary);
 }
 
 .modal-footer {

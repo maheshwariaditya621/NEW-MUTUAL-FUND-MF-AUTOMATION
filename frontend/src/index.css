@@ -13,13 +13,17 @@
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
   --bg-tertiary: #e9ecef;
+  --bg-card: #ffffff;
+  --card-bg: #ffffff;
+  --bg-hover: #f1f5f9;
 
-  --text-primary: #212529;
-  --text-secondary: #6c757d;
-  --text-tertiary: #adb5bd;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-tertiary: #94a3b8;
+  --text-muted: #94a3b8;
 
   --border-color: #dee2e6;
-  --border-hover: #ced4da;
+  --border-hover: #cbd5e1;
 
   --accent-primary: #0066cc;
   --accent-hover: #0052a3;
@@ -45,16 +49,20 @@
 
 /* Dark Mode Colors */
 [data-theme="dark"] {
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #2d2d2d;
-  --bg-tertiary: #404040;
+  --bg-primary: #121824;
+  --bg-secondary: #1e2638;
+  --bg-tertiary: #2a354b;
+  --bg-card: #1e2638;
+  --card-bg: #1e2638;
+  --bg-hover: #263147;
 
-  --text-primary: #f8f9fa;
-  --text-secondary: #adb5bd;
-  --text-tertiary: #6c757d;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-muted: #64748b;
 
-  --border-color: #404040;
-  --border-hover: #525252;
+  --border-color: #2e3b52;
+  --border-hover: #3d4d6b;
 
   --accent-primary: #4d9fff;
   --accent-hover: #6bb0ff;
@@ -400,9 +408,9 @@ textarea:focus-visible {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -411,13 +419,14 @@ textarea:focus-visible {
 }
 
 .modal-content {
-  background: var(--bg-secondary, #1e293b);
+  background: var(--bg-card, var(--bg-secondary));
+  color: var(--text-primary);
   width: 100%;
   max-width: 500px;
   padding: 32px;
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
   position: relative;
   max-height: 90vh;
   overflow-y: auto;
@@ -439,13 +448,17 @@ textarea:focus-visible {
 
 .admin-input {
   width: 100%;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--bg-primary);
   border: 1px solid var(--border-color);
   padding: 12px 16px;
   border-radius: 10px;
-  color: white;
+  color: var(--text-primary);
   font-size: 1rem;
   transition: border-color 0.2s;
+}
+
+.admin-input::placeholder {
+  color: var(--text-tertiary);
 }
 
 .admin-input:focus {

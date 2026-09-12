@@ -519,7 +519,7 @@
     animation: slideUpModal 0.4s var(--transition-bounce);
 }
 
-.modal-header {
+.drilldown-modal .modal-header {
     padding: 24px 30px;
     display: flex;
     justify-content: space-between;
@@ -570,7 +570,7 @@
     transform: rotate(90deg);
 }
 
-.modal-content {
+.drilldown-modal .modal-content {
     padding: 30px;
     overflow-y: auto;
     flex: 1;
