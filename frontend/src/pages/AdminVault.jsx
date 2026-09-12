@@ -1037,6 +1037,7 @@ const AdminVault = () => {
                                         { id: 'view_portfolio', label: 'Scheme Portfolio' },
                                         { id: 'view_insights', label: 'A.I. Insights' },
                                         { id: 'view_watchlist', label: 'Watchlist Access' },
+                                        { id: 'view_announcements', label: 'Corporate Announcements' },
                                         { id: 'view_tools', label: 'Tool Explorer' },
                                         { id: 'all', label: 'FULL ACCESS (All Features)' }
                                     ].map(perm => (
@@ -1137,6 +1138,7 @@ const AdminVault = () => {
                                         { id: 'view_portfolio', label: 'Scheme Portfolio' },
                                         { id: 'view_insights', label: 'A.I. Insights' },
                                         { id: 'view_watchlist', label: 'Watchlist Access' },
+                                        { id: 'view_announcements', label: 'Corporate Announcements' },
                                         { id: 'view_tools', label: 'Tool Explorer' },
                                         { id: 'all', label: 'FULL ACCESS (All Features)' }
                                     ].map(perm => (

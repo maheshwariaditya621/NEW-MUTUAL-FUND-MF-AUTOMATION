@@ -1,10 +1,19 @@
-import { Link } from 'react-router-dom';
-import { TrendingUp, PieChart, Lightbulb, Activity, Database, ShieldCheck } from 'lucide-react';
+import { Link, Navigate } from 'react-router-dom';
+import { TrendingUp, PieChart, Lightbulb, Activity, Database, ShieldCheck, Radio } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Home.css';
 
 export default function Home() {
-    const { hasPermission } = useAuth();
+    const { user, hasPermission } = useAuth();
+
+    // If user has access only to announcements and no mutual fund modules, route them directly
+    const perms = user?.permissions || [];
+    const isAdmin = user?.role === 'admin' || perms.includes('all');
+    const hasMf = perms.includes('view_stocks') || perms.includes('view_portfolio') || perms.includes('view_insights') || perms.includes('view_tools') || perms.includes('view_watchlist');
+    if (!isAdmin && !hasMf && perms.includes('view_announcements')) {
+        return <Navigate to="/announcements" replace />;
+    }
+
     return (
         <div className="home-wrapper">
             {/* Dynamic Animated Background for Hero */}
@@ -89,6 +98,19 @@ export default function Home() {
                                     Discover macro trends. See which mid and small-cap stocks are attracting the most fund manager capital across the entire industry.
                                 </p>
                                 <span className="feature-link">Explore Tool <span className="arrow">→</span></span>
+                            </Link>
+                        )}
+
+                        {hasPermission('view_announcements') && (
+                            <Link to="/announcements" className="feature-card glass-card">
+                                <div className="feature-icon-wrapper purple-glow">
+                                    <Radio size={28} className="feature-icon" />
+                                </div>
+                                <h3>Corporate Announcements</h3>
+                                <p>
+                                    Live feed of NSE & BSE exchange filings, board meetings, dividends, buybacks, and revisions tracked across portfolio stocks.
+                                </p>
+                                <span className="feature-link">Explore Feed <span className="arrow">→</span></span>
                             </Link>
                         )}
                     </div>

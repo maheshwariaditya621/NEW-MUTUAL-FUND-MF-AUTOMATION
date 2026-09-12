@@ -66,7 +66,18 @@ const LoginPage = () => {
             if (userResponse.ok) {
                 const userData = await userResponse.json();
                 login(data.access_token, userData);
-                navigate(from, { replace: true });
+                
+                // Smart redirect: if landing on default '/' and user only has announcements access
+                let target = from;
+                if (from === '/') {
+                    const perms = userData.permissions || [];
+                    const isAdmin = userData.role === 'admin' || perms.includes('all');
+                    const hasMf = perms.includes('view_stocks') || perms.includes('view_portfolio') || perms.includes('view_insights') || perms.includes('view_tools') || perms.includes('view_watchlist');
+                    if (!isAdmin && !hasMf && perms.includes('view_announcements')) {
+                        target = '/announcements';
+                    }
+                }
+                navigate(target, { replace: true });
             } else {
                 throw new Error('Failed to fetch user details');
             }

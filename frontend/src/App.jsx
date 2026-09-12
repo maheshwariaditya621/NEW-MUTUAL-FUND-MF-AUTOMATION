@@ -154,12 +154,14 @@ const Header = () => {
   const { user, logout, isAuthenticated, hasPermission } = useAuth();
   const [showProfileModal, setShowProfileModal] = useState(false);
 
+  const isAnnouncementOnly = isAuthenticated && user?.role !== 'admin' && !hasPermission('all') && !hasPermission('view_stocks') && !hasPermission('view_portfolio') && hasPermission('view_announcements');
+
   return (
     <header className="app-header">
       <div className="container">
         <div className="header-content">
           <div className="header-left">
-            <Link to="/" className="logo">
+            <Link to={isAnnouncementOnly ? "/announcements" : "/"} className="logo">
               <div className="logo-container">
                 <span className="logo-mf">AV</span>
                 <span className="logo-analytics">Fincorp</span>
@@ -190,7 +192,7 @@ const Header = () => {
           </div>
 
           <div className="header-right">
-            {isAuthenticated && <HeaderSearch />}
+            {isAuthenticated && (hasPermission('view_stocks') || hasPermission('view_portfolio') || hasPermission('all')) && <HeaderSearch />}
             <ThemeToggle />
             {isAuthenticated && (
               <div className="nav-dropdown user-menu-dropdown">
