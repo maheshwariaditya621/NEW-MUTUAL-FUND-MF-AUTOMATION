@@ -1,14 +1,17 @@
-# src/downloaders/quant_downloader.py
-
 import os
 import time
 import json
 import shutil
+import re
+import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+from urllib.parse import urljoin
+
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -17,19 +20,19 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class QuantDownloader(BaseDownloader):
     """
     Quant Mutual Fund - Portfolio Downloader
     
+    Uses direct ASP.NET AJAX statutory disclosures API.
     URL: https://quantmutual.com/statutory-disclosures
     """
     
@@ -37,6 +40,24 @@ class QuantDownloader(BaseDownloader):
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
+    }
+
+    MONTH_SHORT_NAMES = {
+        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+    }
+
+    API_URL = "https://quantmutual.com/statutorydisclosures.aspx/displaydisclouser"
+    BASE_URL = "https://quantmutual.com"
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://quantmutual.com",
+        "Referer": "https://quantmutual.com/statutory-disclosures",
     }
 
     def __init__(self):
@@ -69,7 +90,6 @@ class QuantDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("QUANT", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
@@ -84,11 +104,8 @@ class QuantDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Quant: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -141,114 +158,140 @@ class QuantDownloader(BaseDownloader):
         self.notifier.notify_error("QUANT", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        url = "https://quantmutual.com/statutory-disclosures"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # 1) Find and click "MONTHLY PORTFOLIO" accordion header (excluding "FUND - WISE")
-            logger.info("Finding 'MONTHLY PORTFOLIO' section...")
-            headers = page.locator(".statutory.disclouser").all()
-            target_header = None
-            
-            for h in headers:
-                try:
-                    text = h.text_content().strip()
-                    if "MONTHLY PORTFOLIO" in text and "FUND - WISE" not in text:
-                        target_header = h
-                        break
-                except:
-                    continue
-            
-            if not target_header:
-                raise Exception("Could not find 'MONTHLY PORTFOLIO' section")
-            
-            logger.info("  [OK] Found 'MONTHLY PORTFOLIO' section")
-            logger.info("Expanding accordion...")
-            target_header.scroll_into_view_if_needed()
-            # Use JS click for reliability with animations
-            page.evaluate("(el) => el.click()", target_header.element_handle())
-            time.sleep(5)
-            logger.info("  [OK] Accordion expanded")
-
-            # 2) Select the Year
-            logger.info(f"Selecting year: {target_year}...")
-            content_area = target_header.locator("xpath=./following-sibling::div[1]")
-            year_li = content_area.locator(f"li.yearurl:has-text('{target_year}')").first
-            
-            if year_li.count() > 0:
-                page.evaluate("(el) => el.click()", year_li.element_handle())
-                time.sleep(7)  # Wait for AJAX load
-                logger.info(f"  [OK] Year {target_year} selected")
-            else:
-                # Fallback global search
-                year_li = page.locator(f"li.yearurl:has-text('{target_year}')").filter(
-                    has=page.locator("xpath=self::*[contains(@onclick, 'MONTHLY PORTFOLIO')]")
-                ).first
+    def _parse_documents_from_html(self, d_html: str) -> List[Dict[str, Any]]:
+        soup = BeautifulSoup(d_html, "html.parser")
+        documents = []
+        seen_urls = set()
+        
+        for a in soup.find_all("a", href=True):
+            raw_href = a["href"].strip()
+            if not raw_href or raw_href.startswith("javascript:") or raw_href.startswith("#"):
+                continue
                 
-                if year_li.count() > 0:
-                    page.evaluate("(el) => el.click()", year_li.element_handle())
-                    time.sleep(7)
-                    logger.info(f"  [OK] Year {target_year} selected (fallback)")
-                else:
-                    raise Exception(f"Year '{target_year}' not found in Monthly Portfolio section")
-
-            # 3) Find Month Download Link
-            logger.info(f"Searching for {month_name} {target_year} download link...")
-            container_sel = 'div[id="MONTHLY PORTFOLIO"]'
+            abs_url = urljoin(self.BASE_URL, raw_href)
+            if abs_url in seen_urls:
+                continue
+            seen_urls.add(abs_url)
             
-            # Try to find the link directly
-            month_link = page.locator(container_sel).get_by_text(f"{month_name} {target_year}", exact=False).first
+            visible_text = a.get_text(strip=True)
+            ext = Path(abs_url.split("?")[0]).suffix.lower()
             
-            if month_link.count() == 0:
-                # Alternative search
-                month_link = page.locator(f'{container_sel} a:has-text("{month_name}"):has-text("{target_year}")').first
-
-            if month_link.count() == 0:
-                logger.warning(f"  [FAIL] Month link for '{month_name} {target_year}' not found")
-                return None
+            combined_str = f"{visible_text} {raw_href}"
+            inferred_date = None
             
-            logger.info(f"  [OK] Found download link")
-            logger.info("Starting download...")
-            month_link.scroll_into_view_if_needed()
-            
-            with page.expect_download(timeout=120000) as download_info:
+            date_match = re.search(r"(\d{2})(\d{2})(\d{4})", combined_str)
+            if date_match:
+                d, m, y = date_match.groups()
                 try:
-                    month_link.click(timeout=10000)
-                except:
-                    # Use JS click if normal click fails
-                    page.evaluate("(el) => el.click()", month_link.element_handle())
+                    d_int, m_int, y_int = int(d), int(m), int(y)
+                    if 1 <= m_int <= 12 and 1 <= d_int <= 31 and 2000 <= y_int <= 2099:
+                        inferred_date = f"{d_int:02d}-{m_int:02d}-{y_int}"
+                except ValueError:
+                    pass
+                    
+            if not inferred_date:
+                for m_num, m_name in self.MONTH_NAMES.items():
+                    if re.search(rf"\b{m_name}\b", combined_str, re.IGNORECASE):
+                        year_match = re.search(r"\b(20\d\d)\b", combined_str)
+                        if year_match:
+                            y_int = int(year_match.group(1))
+                            last_d = calendar.monthrange(y_int, m_num)[1]
+                            inferred_date = f"{last_d:02d}-{m_num:02d}-{y_int}"
+                            break
+                            
+            documents.append({
+                "title": visible_text,
+                "raw_href": raw_href,
+                "absolute_url": abs_url,
+                "extension": ext,
+                "inferred_date": inferred_date
+            })
             
-            download = download_info.value
-            final_filename = download.suggested_filename
-            save_path = download_folder / final_filename
-            
-            download.save_as(save_path)
-            logger.info(f"  [OK] Saved: {final_filename}")
-            
-            return save_path
+        return documents
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+    def _identify_document_for_month(self, documents: List[Dict[str, Any]], year: int, month: int) -> Optional[Dict[str, Any]]:
+        last_day = calendar.monthrange(year, month)[1]
+        expected_dmy = f"{last_day:02d}-{month:02d}-{year}"
+        compact_date = f"{last_day:02d}{month:02d}{year}"
+        month_name = self.MONTH_NAMES[month].lower()
+        month_short = self.MONTH_SHORT_NAMES[month].lower()
+        
+        # Pass 1: exact inferred date match
+        for doc in documents:
+            if doc.get("inferred_date") == expected_dmy:
+                return doc
+                
+        # Pass 2: compact date in href or title
+        for doc in documents:
+            href_lower = doc["raw_href"].lower()
+            title_lower = doc["title"].lower()
+            if compact_date in href_lower or compact_date in title_lower:
+                return doc
+                
+        # Pass 3: month name and year in href or title
+        for doc in documents:
+            combined = f"{doc['title'].lower()} {doc['raw_href'].lower()}"
+            if str(year) in combined and (month_name in combined or month_short in combined):
+                return doc
+                
+        return None
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
+        session = requests.Session()
+        payload = {
+            "id": str(target_year),
+            "cat": "MONTHLY PORTFOLIO"
+        }
+        
+        logger.info(f"Querying Quant disclosures API for {target_year}...")
+        resp = session.post(self.API_URL, json=payload, headers=self.HEADERS, timeout=30)
+        
+        if resp.status_code != 200:
+            raise Exception(f"Quant API returned HTTP {resp.status_code}: {resp.text[:200]}")
+            
+        data = resp.json()
+        if "d" not in data or not data["d"]:
+            logger.warning("Quant API returned empty or missing 'd' field")
+            return None
+            
+        documents = self._parse_documents_from_html(data["d"])
+        logger.info(f"Discovered {len(documents)} document(s) in category 'MONTHLY PORTFOLIO'")
+        
+        doc = self._identify_document_for_month(documents, target_year, target_month)
+        if not doc:
+            logger.warning(f"No document matching {month_name} {target_year} found")
+            return None
+            
+        download_url = doc["absolute_url"]
+        filename = Path(doc["raw_href"]).name
+        target_path = download_folder / filename
+        
+        logger.info(f"Downloading {filename} from {download_url}...")
+        with session.get(download_url, headers={"User-Agent": self.HEADERS["User-Agent"]}, stream=True, timeout=60) as r:
+            if r.status_code != 200:
+                raise Exception(f"Failed to download file from {download_url}: HTTP {r.status_code}")
+                
+            with open(target_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+                        
+        # Validate Excel
+        file_size = target_path.stat().st_size
+        if file_size < 1000:
+            target_path.unlink(missing_ok=True)
+            raise Exception(f"Downloaded file too small ({file_size} bytes), possible error response")
+            
+        try:
+            wb = openpyxl.load_workbook(target_path, read_only=True)
+            sheet_count = len(wb.sheetnames)
+            wb.close()
+            logger.info(f"Validated Excel workbook: {sheet_count} sheet(s), {file_size:,} bytes")
+        except Exception as e:
+            target_path.unlink(missing_ok=True)
+            raise Exception(f"Downloaded file is not a valid Excel workbook: {e}")
+            
+        return target_path
 
 
 if __name__ == "__main__":

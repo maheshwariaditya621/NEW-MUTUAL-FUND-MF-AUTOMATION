@@ -4,12 +4,15 @@ import os
 import time
 import json
 import shutil
-import requests
+import re
+import calendar
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from typing import Dict, List, Optional, Tuple, Any
+import requests
+import openpyxl
+from bs4 import BeautifulSoup
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,7 +21,7 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
@@ -26,12 +29,23 @@ except ImportError:
     RETRY_BACKOFF = [5, 15]
 
 
+POST_URL = "https://www.licmf.com/downloads/consolidated-portfolio-files"
+BASE_URL = "https://www.licmf.com"
+PAGE_URL = "https://www.licmf.com/downloads/monthly-portfolio"
+CATEGORY_ID = "639"
+
+
 class LICDownloader(BaseDownloader):
     """
     LIC Mutual Fund - Portfolio Downloader
     
-    Uses Playwright to navigate forms and requests for efficient file downloads.
-    Supports persistent browser sessions.
+    Direct requests-based scraper using the consolidated portfolio endpoint:
+    POST https://www.licmf.com/downloads/consolidated-portfolio-files
+    
+    CRITICAL REQUIREMENT:
+    Both 'Monthly Portfolio Debt' AND 'Monthly Portfolio Equity' files must be published
+    and validated for the target month before the download is marked complete or merged.
+    If either is pending (asynchronous publication), the run exits cleanly without merging.
     """
     
     MONTH_NAMES = {
@@ -44,14 +58,20 @@ class LICDownloader(BaseDownloader):
         super().__init__("LIC Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "lic"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": PAGE_URL,
+        })
+        logger.info("LICDownloader initialized (Requests + BeautifulSoup Version)")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
-        
         marker_data = {
             "amc": "LIC",
             "year": year,
@@ -59,10 +79,8 @@ class LICDownloader(BaseDownloader):
             "files_downloaded": file_count,
             "timestamp": datetime.now().isoformat()
         }
-        
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker_data, f, indent=2)
-        
         logger.info(f"Created completion marker: {marker_path.name}")
 
     def _move_to_corrupt(self, source_dir: Path, year: int, month: int, reason: str):
@@ -85,50 +103,141 @@ class LICDownloader(BaseDownloader):
             reason=f"Incomplete download detected and moved to quarantine. Reason: {reason}"
         )
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
-            
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            args=["--window-size=1920,1080", "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-            slow_mo=500
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            ignore_https_errors=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for LIC.")
+    @staticmethod
+    def get_expected_date_str(year: int, month: int) -> Tuple[str, str]:
+        """Returns (e.g. 'August 31, 2026', '31-Aug-2026') for the last day of the month."""
+        month_name = calendar.month_name[month]
+        last_day = calendar.monthrange(year, month)[1]
+        formatted_full = f"{month_name} {last_day}, {year}"
+        short_month = calendar.month_abbr[month]
+        formatted_short = f"{last_day:02d}-{short_month}-{year}"
+        return formatted_full, formatted_short
 
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page:
-            self._page.close()
-        if self._browser:
-            self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
-            
-        self._page = None
-        self._context = None
-        self._browser = None
-        if self._playwright:
-            self._playwright.stop()
-        self._playwright = None
-        logger.info("Persistent Chrome session closed for LIC.")
+    def _validate_excel_file(self, file_path: Path) -> bool:
+        """Validate ZIP signature and openpyxl readable workbook."""
+        if not file_path.exists() or file_path.stat().st_size == 0:
+            return False
 
-    def download(self, year: int, month: int) -> Dict:
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+        if magic != b"PK\x03\x04" and magic != b"\xd0\xcf\x11\xe0":
+            logger.error(f"LIC: Invalid magic bytes for {file_path.name}: {magic.hex()}")
+            return False
+
+        if magic == b"PK\x03\x04":
+            try:
+                wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+                _ = wb.sheetnames
+                wb.close()
+                return True
+            except Exception as e:
+                logger.error(f"LIC: openpyxl validation failed for {file_path.name}: {e}")
+                return False
+
+        return True
+
+    def _download_file(self, url: str, target_path: Path) -> bool:
+        """Download file from url to target_path with validation."""
+        try:
+            resp = self.session.get(url, stream=True, timeout=60)
+            if resp.status_code != 200:
+                logger.error(f"LIC: Download failed for {url} with status {resp.status_code}")
+                return False
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = target_path.with_name(target_path.stem + ".tmp.xlsx")
+
+            with open(temp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=16384):
+                    if chunk:
+                        f.write(chunk)
+
+            if self._validate_excel_file(temp_path):
+                if target_path.exists():
+                    target_path.unlink()
+                temp_path.rename(target_path)
+                logger.info(f"  [OK] Saved and validated: {target_path.name} ({target_path.stat().st_size:,} bytes)")
+                return True
+            else:
+                if temp_path.exists():
+                    temp_path.unlink()
+                return False
+        except Exception as e:
+            logger.error(f"LIC: Exception during download of {url}: {e}")
+            return False
+
+    def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> Optional[List[Path]]:
+        """
+        Queries endpoint, verifies presence of BOTH Debt and Equity files,
+        and downloads both. Returns None if either is missing.
+        """
+        expected_full, expected_short = self.get_expected_date_str(target_year, target_month)
+        month_name = calendar.month_name[target_month]
+
+        data = {
+            "id": CATEGORY_ID,
+            "month": str(target_month),
+            "year": str(target_year)
+        }
+
+        logger.info(f"LIC: Requesting consolidated portfolio files for {month_name} {target_year}...")
+        resp = self.session.post(POST_URL, data=data, timeout=30)
+        if resp.status_code != 200:
+            logger.error(f"LIC: POST failed with status {resp.status_code}")
+            return None
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        links = soup.find_all("a")
+
+        debt_url = None
+        equity_url = None
+
+        for a in links:
+            href = a.get("href", "").strip()
+            caption_el = a.find("span", class_="caption")
+            caption = caption_el.get_text(strip=True) if caption_el else a.get_text(strip=True)
+
+            if re.search(rf"Monthly\s+Portfolio\s+Debt\s+as\s+on\s+{re.escape(expected_full)}", caption, re.IGNORECASE):
+                debt_url = urllib.parse.urljoin(BASE_URL, urllib.parse.quote(href))
+                logger.info(f"LIC: Discovered Debt file: '{caption}'")
+            elif re.search(rf"Monthly\s+Portfolio\s+Equity\s+as\s+on\s+{re.escape(expected_full)}", caption, re.IGNORECASE):
+                equity_url = urllib.parse.urljoin(BASE_URL, urllib.parse.quote(href))
+                logger.info(f"LIC: Discovered Equity file: '{caption}'")
+
+        # Strict Gatekeeping: Both files required
+        if not debt_url and not equity_url:
+            logger.warning(f"LIC: Neither Debt nor Equity file is published yet for {month_name} {target_year}.")
+            return None
+        elif debt_url and not equity_url:
+            logger.warning(f"LIC: [ASYNC PUBLICATION] Debt file is available, but Equity file is NOT YET PUBLISHED for {month_name} {target_year}.")
+            logger.warning("LIC: Halting execution. Month remains incomplete until Equity file is published.")
+            return None
+        elif not debt_url and equity_url:
+            logger.warning(f"LIC: [ASYNC PUBLICATION] Equity file is available, but Debt file is NOT YET PUBLISHED for {month_name} {target_year}.")
+            logger.warning("LIC: Halting execution. Month remains incomplete until Debt file is published.")
+            return None
+
+        # Both files are present!
+        logger.info(f"LIC: Both Debt and Equity files discovered for {month_name} {target_year}. Downloading...")
+        debt_target = download_folder / f"LIC_MF_Monthly_Debt_Portfolio_{target_month:02d}_{target_year}.xlsx"
+        equity_target = download_folder / f"LIC_MF_Monthly_Equity_Portfolio_{target_month:02d}_{target_year}.xlsx"
+
+        debt_ok = self._download_file(debt_url, debt_target)
+        equity_ok = self._download_file(equity_url, equity_target)
+
+        if debt_ok and equity_ok:
+            return [debt_target, equity_target]
+        else:
+            logger.error("LIC: Failed to download and validate both files.")
+            return None
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
         
         logger.info("=" * 60)
         logger.info("LIC MUTUAL FUND DOWNLOADER STARTED")
-        logger.info(f"Period: {year}-{month:02d}")
+        logger.info(f"Period: {year}-{month:02d} ({month_name})")
         if DRY_RUN:
             logger.info("MODE: DRY RUN (no network calls)")
         logger.info("=" * 60)
@@ -139,16 +248,12 @@ class LICDownloader(BaseDownloader):
         if target_dir.exists():
             success_marker = target_dir / "_SUCCESS.json"
             if success_marker.exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"LIC: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -166,56 +271,30 @@ class LICDownloader(BaseDownloader):
             try:
                 if DRY_RUN:
                     logger.info(f"LIC: [DRY RUN] Would download {month_name} {year}")
-                    duration = time.time() - start_time
-                    logger.info(f"[SUMMARY]")
-                    logger.info(f"AMC: LIC")
-                    logger.info(f"Mode: DRY RUN")
-                    logger.info(f"Month: {year}-{month:02d}")
-                    logger.info(f"Status: SIMULATED")
-                    logger.info(f"Duration: {duration:.2f}s")
-                    logger.info("=" * 60)
                     return {"amc": "LIC", "year": year, "month": month, "status": "success", "dry_run": True}
 
-                downloaded_files = self._run_download_flow(year, month_name, target_dir)
+                downloaded_files = self._run_download_flow(year, month, target_dir)
                 
                 if not downloaded_files:
-                    # Not Published Handling
                     duration = time.time() - start_time
-                    logger.warning(f"LIC: {year}-{month:02d} not yet published.")
+                    logger.warning(f"LIC: {year}-{month:02d} not complete/published yet.")
                     self.notifier.notify_not_published("LIC", year, month)
                     
                     if target_dir.exists():
                         shutil.rmtree(target_dir, ignore_errors=True)
                         
-                    logger.info(f"[SUMMARY]")
-                    logger.info(f"AMC: LIC")
-                    logger.info(f"Mode: AUTO")
-                    logger.info(f"Month: {year}-{month:02d}")
-                    logger.info(f"Status: NOT PUBLISHED")
-                    logger.info(f"Duration: {duration:.2f}s")
-                    logger.info("=" * 60)
                     return {"amc": "LIC", "year": year, "month": month, "status": "not_published"}
 
-                # Success
+                # Success: Both files downloaded and validated
                 self._create_success_marker(target_dir, year, month, len(downloaded_files))
                 
-                # Consolidate downloads
+                # Consolidate downloads into merged excels
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
                 self.notifier.notify_success("LIC", year, month, files_downloaded=len(downloaded_files), duration=duration)
                 
                 logger.success(f"[SUCCESS] LIC download completed: {len(downloaded_files)} files")
-                logger.info("=" * 60)
-                logger.info(f"[SUMMARY]")
-                logger.info(f"AMC: LIC")
-                logger.info(f"Mode: AUTO")
-                logger.info(f"Month: {year}-{month:02d}")
-                logger.info(f"Files downloaded: {len(downloaded_files)}")
-                logger.info(f"Duration: {duration:.2f}s")
-                logger.info(f"Status: SUCCESS")
-                logger.info("=" * 60)
-                
                 return {
                     "amc": "LIC",
                     "year": year,
@@ -238,15 +317,6 @@ class LICDownloader(BaseDownloader):
             
         duration = time.time() - start_time
         self.notifier.notify_error("LIC", year, month, error_type="Download Failure", reason=last_error[:100])
-        
-        logger.info(f"[SUMMARY]")
-        logger.info(f"AMC: LIC")
-        logger.info(f"Mode: AUTO")
-        logger.info(f"Month: {year}-{month:02d}")
-        logger.info(f"Status: FAILED")
-        logger.info(f"Duration: {duration:.2f}s")
-        logger.info("=" * 60)
-
         return {
             "amc": "LIC",
             "year": year,
@@ -256,145 +326,12 @@ class LICDownloader(BaseDownloader):
             "duration": duration
         }
 
-    def _run_download_flow(self, target_year: int, target_month_name: str, download_folder: Path) -> List[Path]:
-        """Internal flow using Playwright to extract links or handle session."""
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
-        try:
-            url = "https://www.licmf.com/downloads/monthly-portfolio"
-            
-            # Optimization: Skip navigation and wait if already on the page
-            if page.url == url:
-                logger.info(f"Already on {url}. Skipping navigation.")
-                # Brief wait to ensure any previous dynamic content is cleared if necessary
-                # but we'll mostly rely on the select_option and click triggers
-            else:
-                logger.info(f"Navigating to {url}...")
-                page.goto(url, wait_until="domcontentloaded", timeout=120000)
-                time.sleep(5)
-
-            # 1. Click Consolidated Portfolio tab
-            logger.info("Clicking 'Consolidated Portfolio' tab...")
-            page.click("text=Consolidated Portfolio", timeout=30000)
-            time.sleep(3)
-            
-            # 2. Select Portfolio Type: Monthly Portfolio
-            logger.info("Selecting Portfolio Type: Monthly Portfolio...")
-            page.select_option(".consolidated_type", label="Monthly Portfolio")
-            time.sleep(3)
-            
-            # 3. Select Year
-            logger.info(f"Selecting Year: {target_year}...")
-            year_selected = False
-            year_options = page.locator(".consolidated_year option").all()
-            for opt in year_options:
-                text = opt.inner_text().strip()
-                if str(target_year) in text:
-                    val = opt.get_attribute("value")
-                    if val:
-                        page.select_option(".consolidated_year", value=val)
-                        year_selected = True
-                        break
-            
-            if not year_selected:
-                logger.error(f"Could not find year '{target_year}' in options.")
-                return []
-                
-            time.sleep(3)
-            
-            # 4. Select Month
-            logger.info(f"Selecting Month: {target_month_name}...")
-            month_selected = False
-            month_options = page.locator(".consolidated_month option").all()
-            for opt in month_options:
-                text = opt.inner_text().strip()
-                if target_month_name.lower() in text.lower():
-                    val = opt.get_attribute("value")
-                    if val:
-                        page.select_option(".consolidated_month", value=val)
-                        month_selected = True
-                        break
-            
-            if not month_selected:
-                logger.error(f"Could not find month '{target_month_name}' in options.")
-                return []
-                
-            time.sleep(2)
-            
-            # 5. Click Submit
-            logger.info("Clicking Submit...")
-            page.click(".consolidated-submit-btn")
-            time.sleep(5)
-            
-            # 6. Extract links
-            links = page.locator(".cportfolio-files a").all()
-            if not links:
-                logger.warning("No download links found for the selected period.")
-                return []
-                
-            logger.info(f"Found {len(links)} links. Downloading...")
-            
-            # Get cookies for requests if needed, but we'll try direct download via requests first as per provided script
-            headers = {
-                'User-Agent': page.evaluate("navigator.userAgent")
-            }
-            
-            downloaded_paths = []
-            for link in links:
-                title = link.inner_text().strip()
-                href = link.get_attribute("href")
-                
-                if not href: continue
-                    
-                if not href.startswith("http"):
-                    href = f"https://www.licmf.com{href if href.startswith('/') else '/' + href}"
-                
-                # Clean URL
-                full_url = href.replace(" ", "%20")
-                
-                # Use original filename from URL
-                filename = full_url.split("/")[-1].replace("%20", " ")
-                if not filename or "." not in filename:
-                    # Fallback to sanitized title if URL doesn't have a clear filename
-                    safe_title = "".join([c for c in title if c.isalnum() or c in (" ", "-", "_")]).strip()
-                    ext = ".xlsx" if ".xlsx" in full_url.lower() else ".xls"
-                    if ".pdf" in full_url.lower(): ext = ".pdf"
-                    filename = f"{safe_title}{ext}"
-                
-                filepath = download_folder / filename
-                
-                logger.info(f"Downloading: {title} ...")
-                try:
-                    # Use requests to download, following the user's logic
-                    # verify=False handles potential cert issues on LIC site
-                    response = requests.get(full_url, headers=headers, stream=True, timeout=30, verify=False)
-                    if response.status_code == 200:
-                        with open(filepath, 'wb') as f:
-                            for chunk in response.iter_content(chunk_size=8192):
-                                f.write(chunk)
-                        logger.info(f"  Saved to: {filename}")
-                        downloaded_paths.append(filepath)
-                    else:
-                        logger.warning(f"  Failed: Status {response.status_code}")
-                except Exception as e:
-                    logger.error(f"  Error downloading {full_url}: {e}")
-
-            return downloaded_paths
-
-        finally:
-            if close_needed:
-                self.close_session()
-
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="LIC Mutual Fund Downloader")
-    parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--month", type=int, required=True)
+    parser.add_argument("--year", type=int, required=True, help="Year (YYYY)")
+    parser.add_argument("--month", type=int, required=True, help="Month (1-12)")
     args = parser.parse_args()
 
     downloader = LICDownloader()
@@ -406,7 +343,7 @@ if __name__ == "__main__":
     elif status == "skipped":
         logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"[INFO]  Info: Month not yet published")
+        logger.info(f"[INFO] Info: Month not yet published / waiting for both Debt and Equity")
     else:
         logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

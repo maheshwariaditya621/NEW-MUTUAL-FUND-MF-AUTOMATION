@@ -5,11 +5,15 @@ import time
 import json
 import shutil
 import re
+import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+from urllib.parse import urljoin, unquote
+
+import requests
+from bs4 import BeautifulSoup
+import xlrd
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,13 +22,12 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class ShriramDownloader(BaseDownloader):
@@ -32,13 +35,16 @@ class ShriramDownloader(BaseDownloader):
     Shriram Mutual Fund - Portfolio Downloader
 
     URL: https://www.shriramamc.in/investor-statutory-disclosures
-    Uses FY-based dropdown and month-specific download buttons.
-
-    FY Label Convention on the website:
-      - "2024-2025" covers months April 2024 → March 2025
-      - "2023-2024" covers months April 2023 → March 2024
-    Dropdown option text ends with the FY end year, e.g. "-2025" for FY 2024-2025.
+    Downloads monthly consolidated portfolio workbooks using pure requests + BeautifulSoup.
     """
+
+    PAGE_URL = "https://www.shriramamc.in/investor-statutory-disclosures"
+    BASE_URL = "https://www.shriramamc.in"
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
 
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
@@ -51,6 +57,8 @@ class ShriramDownloader(BaseDownloader):
         5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
         9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
     }
+
+    OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
     def __init__(self):
         super().__init__("Shriram Mutual Fund")
@@ -83,22 +91,11 @@ class ShriramDownloader(BaseDownloader):
         self.notifier.notify_error("SHRIRAM", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
     def _get_fy_label(self, year: int, month: int) -> str:
-        """
-        Compute the full FY label shown in the Shriram website dropdown.
-        Dropdown shows full strings like '2024-2025'.
-
-        Indian FY runs April → March.
-        - Jan/Feb/Mar: FY is (year-1)-(year), e.g. Jan 2025 → '2024-2025'
-        - Apr→Dec: FY is (year)-(year+1), e.g. Oct 2024 → '2024-2025'
-        """
-        if month <= 3:
-            fy_start = year - 1
-            fy_end = year
+        """Indian Financial Year (April - March)"""
+        if month >= 4:
+            return f"{year}-{year + 1}"
         else:
-            fy_start = year
-            fy_end = year + 1
-
-        return f"{fy_start}-{fy_end}"
+            return f"{year - 1}-{year}"
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -114,6 +111,9 @@ class ShriramDownloader(BaseDownloader):
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
                 logger.info(f"SHRIRAM: {year}-{month:02d} files already downloaded.")
+                logger.info("Verifying consolidation/merged files...")
+                self.consolidate_downloads(year, month)
+
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
                 logger.info(f"🕒 Duration: {duration:.2f}s")
@@ -165,219 +165,135 @@ class ShriramDownloader(BaseDownloader):
         self.notifier.notify_error("SHRIRAM", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
+    def _discover_monthly_portfolio(self, soup: BeautifulSoup, html: str, year: int, month: int) -> Optional[Dict[str, Any]]:
+        month_full = self.MONTH_NAMES[month]
+        month_abbr = self.MONTH_ABBR[month]
+        fy_str = self._get_fy_label(year, month)
+        year_str = str(year)
+
+        month_pattern = re.compile(rf"\b({month_full}|{month_abbr})\b.*?\b{year_str}\b", re.IGNORECASE)
+
+        # 1. Primary: Search DOM (Active Financial Year)
+        section = None
+        for cand in soup.find_all(["div", "section"]):
+            cid = cand.get("id", "")
+            if "Monthly--Fortnightly" in cid:
+                section = cand
+                break
+
+        if section:
+            tab_btn = None
+            for btn in section.find_all(["button", "a"]):
+                btn_text = btn.get_text(strip=True)
+                if "Monthly Portfolio for the FY" in btn_text:
+                    tab_btn = btn
+                    break
+
+            if tab_btn:
+                panel = section.find(id=re.compile(r"accordion-panel"))
+                if panel:
+                    cards = panel.find_all("div", class_=lambda c: c and "rounded-lg" in c)
+                    for card in cards:
+                        heading_el = card.find("div", class_=re.compile(r"editor-content"))
+                        heading = heading_el.get_text(strip=True) if heading_el else card.get_text(" ", strip=True)
+
+                        if month_pattern.search(heading):
+                            link_el = card.find("a", href=True)
+                            if link_el and link_el.get("href"):
+                                href = link_el["href"].strip()
+                                full_url = urljoin(self.BASE_URL, href)
+                                filename = Path(unquote(full_url.split("?")[0])).name
+                                return {
+                                    "month_label": heading,
+                                    "url": full_url,
+                                    "filename": filename,
+                                    "source": "HTML DOM (Active FY)",
+                                    "fy": fy_str,
+                                }
+
+        # 2. Secondary: Embedded Next.js Payload (All Financial Years)
+        pos = html.find(r'Monthly Portfolio for the FY\"')
+        if pos != -1:
+            end = html.find(r'Fortnightly Portfolio for the FY\"', pos)
+            tab_block = html[pos:end] if end != -1 else html[pos:pos + 100000]
+
+            item_pattern = re.compile(
+                r'\\"accord_answer\\":\s*\\"([^\\"]+)\\",\s*\\"download_label\\":\s*\\"[^\\"]*\\",\s*\\"download_link\\":\s*\\"([^\\"]+)\\"'
+            )
+            for match in item_pattern.finditer(tab_block):
+                label = match.group(1).strip()
+                dlink = match.group(2).strip().replace(r"\/", "/")
+
+                if month_pattern.search(label):
+                    full_url = urljoin(self.BASE_URL, dlink)
+                    filename = Path(unquote(full_url.split("?")[0])).name
+                    return {
+                        "month_label": label,
+                        "url": full_url,
+                        "filename": filename,
+                        "source": "Embedded Next.js Payload",
+                        "fy": fy_str,
+                    }
+
+        return None
+
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        url = "https://www.shriramamc.in/investor-statutory-disclosures"
+        session = requests.Session()
+        logger.info(f"Fetching SHRIRAM statutory disclosures page...")
+        resp = session.get(self.PAGE_URL, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
 
-        # e.g. "Nov 2025"
-        month_abbr = self.MONTH_ABBR[target_month]
-        search_label = f"{month_abbr} {target_year}"
+        html_text = resp.text
+        soup = BeautifulSoup(html_text, "html.parser")
 
-        # e.g. "2024-2025" for Oct 2024; "2025-2026" for Nov 2025
-        fy_label = self._get_fy_label(target_year, target_month)
-        logger.info(f"Target FY: {fy_label}")
+        discovery = self._discover_monthly_portfolio(soup, html_text, target_year, target_month)
+        if not discovery:
+            logger.warning(f"SHRIRAM: Monthly portfolio not found for {month_name} {target_year}")
+            return None
 
-        pw = None
-        browser = None
+        url = discovery["url"]
+        filename = discovery["filename"]
+        target_path = download_folder / filename
+
+        logger.info(f"Discovered monthly portfolio for {month_name} {target_year}:")
+        logger.info(f"  URL: {url}")
+        logger.info(f"  Source: {discovery['source']}")
+        logger.info(f"  Saving to: {filename}")
+
+        with session.get(url, headers={"User-Agent": self.HEADERS["User-Agent"]}, stream=True, timeout=45) as r:
+            r.raise_for_status()
+            with open(target_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+
+        file_size = target_path.stat().st_size
+        if file_size < 1000:
+            target_path.unlink(missing_ok=True)
+            raise ValueError(f"Downloaded file too small ({file_size} bytes)")
+
+        # Validate XLS OLE2 Header & Workbook structure
+        with open(target_path, "rb") as f:
+            magic = f.read(8)
+
+        if magic != self.OLE2_MAGIC:
+            target_path.unlink(missing_ok=True)
+            raise ValueError(f"Invalid XLS magic bytes (got {magic.hex()})")
+
         try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+            wb = xlrd.open_workbook(str(target_path))
+            sheets = wb.sheet_names()
+            logger.info(f"  [OK] Validated {filename}: {len(sheets)} sheet(s), {file_size:,} bytes")
+        except Exception as e:
+            logger.warning(f"  [WARN] xlrd load check: {e} (keeping file)")
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Step 1: Click the accordion header (div.cursor-pointer containing the heading text)
-            # Confirmed via DOM inspection: the clickable element is a DIV with class "cursor-pointer"
-            logger.info("Expanding 'Monthly, Fortnightly & Weekly Portfolio' accordion...")
-            try:
-                accordion_clicked = page.evaluate("""
-                    (function() {
-                        // The accordion header is a div.cursor-pointer
-                        var divs = document.querySelectorAll('div.cursor-pointer');
-                        for (var i = 0; i < divs.length; i++) {
-                            var text = divs[i].innerText || divs[i].textContent || '';
-                            if (text.includes('Monthly, Fortnightly') && text.includes('Portfolio of Scheme')) {
-                                divs[i].click();
-                                return 'clicked_ok';
-                            }
-                        }
-                        return 'not_found';
-                    })();
-                """)
-                logger.info(f"  Accordion result: {accordion_clicked}")
-                time.sleep(3)  # Wait for accordion animation to complete
-            except Exception as e:
-                logger.warning(f"  ⚠ Accordion JS failed: {str(e)[:80]}")
-
-            # Step 2: Click "Monthly Portfolio for the FY" tab
-            logger.info("Clicking 'Monthly Portfolio for the FY' tab...")
-            try:
-                # Find button elements that contain this text
-                tab_found = page.evaluate("""
-                    (function() {
-                        var btns = document.querySelectorAll('button, a, div[role="tab"]');
-                        for (var i = 0; i < btns.length; i++) {
-                            var text = btns[i].innerText || '';
-                            if (text.includes('Monthly Portfolio for the FY')) {
-                                btns[i].click();
-                                return 'clicked:' + i;
-                            }
-                        }
-                        return 'not_found';
-                    })();
-                """)
-                logger.info(f"  Tab result: {tab_found}")
-                time.sleep(2)
-            except Exception as e:
-                logger.warning(f"  ⚠ Tab JS failed: {str(e)[:80]}")
-
-            # Step 3: Select the correct FY from custom combobox
-            # IMPORTANT: There are 20+ comboboxes on the page (all accordion sections)
-            # We must find the one that is NOW VISIBLE inside the expanded "Monthly Portfolio" section
-            # Strategy: find the combobox that has the currently expected FY as a nearby option
-            logger.info(f"Selecting FY '{fy_label}' from custom combobox...")
-            try:
-                selected = page.evaluate(f"""
-                    (function() {{
-                        // Find all combobox inputs
-                        var combos = document.querySelectorAll('input[id^="select-year_"][role="combobox"]');
-                        // Find the first one whose parent section contains a visible listbox
-                        for (var i = 0; i < combos.length; i++) {{
-                            var rect = combos[i].getBoundingClientRect();
-                            // Check if the combobox is in the viewport (visible)
-                            if (rect.top >= 0 && rect.bottom <= window.innerHeight && rect.width > 0) {{
-                                combos[i].click();
-                                return 'clicked_combo_' + i + ':' + combos[i].id;
-                            }}
-                        }}
-                        // Fallback: click the first combo that is scrolled into rough position
-                        if (combos.length > 0) {{
-                            combos[0].scrollIntoView({{block: 'center'}});
-                            combos[0].click();
-                            return 'fallback_clicked_0';
-                        }}
-                        return 'no_combo_found';
-                    }})();
-                """)
-                logger.info(f"  Combobox click result: {selected}")
-                time.sleep(2)
-
-                # Now click the matching FY option in the opened dropdown
-                option_clicked = page.evaluate(f"""
-                    (function() {{
-                        // The listbox options are in ul.select-box-list > li
-                        var lists = document.querySelectorAll('ul.select-box-list');
-                        for (var l = 0; l < lists.length; l++) {{
-                            var rect = lists[l].getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0) {{
-                                // This list is visible - find our option
-                                var items = lists[l].querySelectorAll('li');
-                                for (var i = 0; i < items.length; i++) {{
-                                    if (items[i].innerText.trim() === '{fy_label}') {{
-                                        items[i].click();
-                                        return 'selected:' + items[i].innerText.trim();
-                                    }}
-                                }}
-                                // List is visible but label not found - log what's there
-                                var opts = Array.from(items).map(function(li){{return li.innerText.trim();}});
-                                return 'label_not_found:' + opts.slice(0,5).join(',');
-                            }}
-                        }}
-                        return 'no_visible_list';
-                    }})();
-                """)
-                logger.info(f"  FY option result: {option_clicked}")
-                time.sleep(3)
-
-            except Exception as e:
-                logger.warning(f"  ⚠ FY selection error: {str(e)[:100]}")
-
-
-            # Step 4: Find the month card and click its "Download" link
-            # The grid shows cards like: [PDF icon] [Month Year] [Download]
-            # We scan all grid item divs, find the one containing our month label,
-            # then click the "Download" link inside it.
-            logger.info(f"Searching for month card: '{search_label}'...")
-
-            # Try grid items first
-            grid_items = page.locator(".max-h-auto > div:nth-child(2) > .grid > div").all()
-            logger.info(f"  Found {len(grid_items)} grid items to scan")
-
-            target_download_link = None
-            for item in grid_items:
-                try:
-                    item_text = item.inner_text()
-                    if search_label in item_text:
-                        logger.info(f"  [OK] Found card for: {search_label}")
-                        # The download element is a link with text "Download" inside the card
-                        dl_link = item.get_by_text("Download", exact=False).first
-                        if dl_link.count() > 0:
-                            target_download_link = dl_link
-                            break
-                        # Fallback: any <a> tag inside the card
-                        a_tag = item.locator("a").first
-                        if a_tag.count() > 0:
-                            target_download_link = a_tag
-                            break
-                except Exception:
-                    continue
-
-            if target_download_link is None:
-                logger.warning(f"  [FAIL] No download link found for {search_label}")
-                return None
-
-            # Step 6: Trigger download (with popup handling as per codegen)
-            logger.info("Triggering download...")
-            try:
-                with page.expect_download(timeout=60000) as download_info:
-                    try:
-                        with page.expect_popup(timeout=8000) as popup_info:
-                            target_download_link.click(force=True)
-                        popup_page = popup_info.value
-                        if popup_page:
-                            popup_page.close()
-                            logger.info("  [OK] Popup handled and closed")
-                    except PlaywrightTimeout:
-                        # No popup created — direct download
-                        logger.info("  ℹ No popup detected, proceeding with direct download")
-
-                download = download_info.value
-                suggested_name = download.suggested_filename
-
-                if not suggested_name or "." not in suggested_name:
-                    suggested_name = f"Shriram_{target_year}_{target_month:02d}.xlsx"
-
-                save_path = download_folder / suggested_name
-                download.save_as(save_path)
-                logger.info(f"  [OK] Saved: {suggested_name}")
-                return save_path
-
-            except Exception as e:
-                logger.error(f"  [FAIL] Download failed: {str(e)[:150]}")
-                raise
-
-        finally:
-            if browser:
-                browser.close()
-            if pw:
-                pw.stop()
+        return target_path
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Shriram Mutual Fund Downloader")
-    parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2025)")
+    parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2026)")
     parser.add_argument("--month", type=int, required=True, help="Month (1-12)")
     args = parser.parse_args()
 
@@ -386,9 +302,9 @@ if __name__ == "__main__":
 
     status = result["status"]
     if status == "success":
-        logger.success(f"[SUCCESS] Success: Downloaded file")
+        logger.success(f"[SUCCESS] Success: Downloaded file {result.get('file', '')}")
     elif status == "skipped":
-        logger.success(f"[SUCCESS] Success: Month already complete")
+        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
         logger.info(f"[INFO]  Info: Month not yet published")
     else:

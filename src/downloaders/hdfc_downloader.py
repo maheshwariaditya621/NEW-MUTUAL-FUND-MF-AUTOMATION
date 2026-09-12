@@ -250,12 +250,12 @@ class HDFCDownloader(BaseDownloader):
             "month": month
         }
 
-        # Minimal headers (exact as specified)
+        # Standard browser headers (needed for both API and CDN downloads)
         headers = {
             "Accept": "*/*",
             "Origin": "https://www.hdfcfund.com",
             "Referer": "https://www.hdfcfund.com/",
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         }
 
         logger.info(f"Calling HDFC API (year={year}, month={month})")
@@ -359,8 +359,8 @@ class HDFCDownloader(BaseDownloader):
 
                 logger.info(f"Downloading {i}/{len(files)}: {name}")
 
-                # Normal GET request (no authentication)
-                r = requests.get(url, timeout=60)
+                # GET request with browser headers to avoid CDN 403 Forbidden
+                r = requests.get(url, headers=headers, timeout=60)
                 r.raise_for_status()
 
                 # Save file with original filename

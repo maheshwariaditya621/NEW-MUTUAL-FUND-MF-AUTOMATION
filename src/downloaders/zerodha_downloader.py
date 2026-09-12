@@ -4,11 +4,15 @@ import os
 import time
 import json
 import shutil
+import re
+import calendar
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+
+import requests
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -17,13 +21,12 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class ZerodhaDownloader(BaseDownloader):
@@ -31,8 +34,8 @@ class ZerodhaDownloader(BaseDownloader):
     Zerodha Mutual Fund - Portfolio Downloader
 
     URL: https://www.zerodhafundhouse.com/resources/disclosures
-    Refined implementation based on user-provided codegen logic.
-    Downloads the "All Schemes" report which triggers multiple Excel files.
+    Downloads monthly portfolio disclosures directly using pure requests
+    via pre-rendered Next.js application state (__NEXT_DATA__).
     """
 
     MONTH_NAMES = {
@@ -40,6 +43,14 @@ class ZerodhaDownloader(BaseDownloader):
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
+
+    DISCLOSURES_URL = "https://www.zerodhafundhouse.com/resources/disclosures"
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    ZIP_MAGIC = b"PK\x03\x04"
 
     def __init__(self):
         super().__init__("Zerodha Mutual Fund")
@@ -72,6 +83,8 @@ class ZerodhaDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists() and (target_dir / "_SUCCESS.json").exists():
             logger.info(f"ZERODHA: {year}-{month:02d} already complete.")
+            logger.info("Verifying consolidation/merged files...")
+            self.consolidate_downloads(year, month)
             return {"status": "skipped", "reason": "already_downloaded"}
 
         self.ensure_directory(str(target_dir))
@@ -107,151 +120,151 @@ class ZerodhaDownloader(BaseDownloader):
 
         # Final Failure
         if target_dir.exists() and not (target_dir / "_SUCCESS.json").exists():
-             shutil.rmtree(target_dir, ignore_errors=True)
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("ZERODHA", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> List[Path]:
-        url = "https://www.zerodhafundhouse.com/resources/disclosures"
-        downloaded_paths = []
+    def _fetch_monthly_files_metadata(self, session: requests.Session) -> List[Dict]:
+        """Fetch disclosures page and parse all monthly portfolio disclosure file records from __NEXT_DATA__."""
+        resp = session.get(self.DISCLOSURES_URL, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
 
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            # Accept downloads is key
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+        m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', resp.text, re.DOTALL)
+        if not m:
+            raise ValueError("Could not find __NEXT_DATA__ in Zerodha disclosures page")
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(3)
-            logger.info("  [OK] Page loaded")
+        next_data = json.loads(m.group(1))
+        props = next_data.get("props", {}).get("pageProps", {})
+        reports = props.get("initialReports", [])
 
-            # Expand Portfolio Disclosures
-            logger.info("Expanding Portfolio Disclosures...")
-            page.get_by_role("button", name="Portfolio Disclosures Arrow").click()
-            time.sleep(1)
+        portfolio_disc = None
+        for r in reports:
+            if r.get("title") == "Portfolio Disclosures":
+                portfolio_disc = r
+                break
 
-            # Ensure "All Schemes" is selected
-            logger.info("Selecting 'All Schemes'...")
-            page.get_by_role("combobox", name="Select").click()
-            time.sleep(0.5)
-            # If All Schemes is already selected, this might fail or we can just click it
-            try:
-                page.get_by_role("option", name="All Schemes").click(timeout=5000)
-            except:
-                page.keyboard.press("Escape")
-            time.sleep(1)
+        if not portfolio_disc:
+            raise ValueError("Portfolio Disclosures section not found in pageProps")
 
-            # Date Selection Modal
-            # Logic from codegen: find the current date display button and click it
-            logger.info("Opening date picker...")
-            active_date_button = page.locator("button.styles_trigger-button__ewAgc").first
-            active_date_button.click()
-            time.sleep(1)
+        monthly_data = None
+        for section in portfolio_disc.get("data", []):
+            if section.get("id") == "monthly-portfolio-disclosures":
+                monthly_data = section
+                break
 
-            # Ensure Monthly is selected
-            page.get_by_role("radio", name="Monthly").click()
-            time.sleep(0.5)
+        if not monthly_data:
+            raise ValueError("monthly-portfolio-disclosures section not found in Portfolio Disclosures")
 
-            # Get current year from modal
-            # Selector from subagent debug: button[aria-label="Previous year"] + div
-            year_label_locator = page.locator("button[aria-label='Previous year'] + div")
-            current_year_str = year_label_locator.inner_text().strip()
-            # If it contains "2026", "2025" etc.
-            year_val = int(current_year_str) if current_year_str.isdigit() else datetime.now().year
-            
-            logger.info(f"  Current year in picker: {year_val} (Target: {target_year})")
-            
-            # Navigate to target year
-            for _ in range(10): # safety break
-                if year_val == target_year:
+        return monthly_data.get("files", [])
+
+    def _parse_file_info(self, file_dict: Dict) -> Dict:
+        """Extract schemeCode, year, and month from the disclosure file item."""
+        name = file_dict.get("name", "")
+        url = file_dict.get("url", "")
+
+        m_code = re.match(r'^([A-Z0-9]+)\s*-', name)
+        scheme_code = m_code.group(1) if m_code else ""
+
+        year = None
+        m_yr = re.search(r'\b(202\d)\b', name)
+        if m_yr:
+            year = int(m_yr.group(1))
+
+        month = None
+        months_dict = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
+        abbr_dict = {m.lower(): i for i, m in enumerate(calendar.month_abbr) if m}
+
+        for m_name, m_idx in months_dict.items():
+            if re.search(rf'\b{m_name}\b', name, re.IGNORECASE):
+                month = m_idx
+                break
+        if not month:
+            for m_abbr, m_idx in abbr_dict.items():
+                if re.search(rf'\b{m_abbr}\b', name, re.IGNORECASE):
+                    month = m_idx
                     break
-                if year_val > target_year:
-                    page.get_by_role("button", name="Previous year").click()
-                    year_val -= 1
-                else:
-                    page.get_by_role("button", name="Next year").click()
-                    year_val += 1
-                time.sleep(0.5)
 
-            # Select Month
-            logger.info(f"  Selecting month: {month_name}")
-            page.get_by_role("listitem", name=month_name).click()
-            time.sleep(0.5)
+        return {
+            "name": name,
+            "url": url,
+            "scheme_code": scheme_code,
+            "year": year,
+            "month": month,
+            "modTs": file_dict.get("modTs")
+        }
 
-            # Apply
-            page.get_by_role("button", name="Apply").click()
-            time.sleep(2)
-            logger.info(f"  [OK] Period set to {month_name} {target_year}")
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> List[Path]:
+        """Download all scheme portfolio workbooks for target year and month using pure requests."""
+        session = requests.Session()
+        logger.info(f"Fetching disclosures metadata from Zerodha...")
+        files_metadata = self._fetch_monthly_files_metadata(session)
+        logger.info(f"  Found {len(files_metadata)} historical monthly portfolio records in state")
 
-            # Download Report
-            logger.info("Triggering download...")
-            
-            # Since "All Schemes" triggers multiple downloads, we need a way to catch them.
-            # However, Playwright's expect_download only catches one.
-            # If we use All Schemes, we might need a longer wait or just iterate.
-            # But the user specifically provided codegen with "All Schemes".
-            
-            # Let's try to catch the FIRST download at least.
+        matching_files = []
+        for f in files_metadata:
+            info = self._parse_file_info(f)
+            if info["year"] == target_year and info["month"] == target_month:
+                matching_files.append(info)
+
+        if not matching_files:
+            logger.warning(f"  No files found matching {month_name} {target_year}")
+            return []
+
+        logger.info(f"  Discovered {len(matching_files)} scheme file(s) for {month_name} {target_year}")
+
+        downloaded_paths = []
+        for idx, item in enumerate(matching_files, 1):
+            raw_filename = item["url"].split("/")[-1]
+            filename = urllib.parse.unquote(raw_filename)
+            save_path = download_folder / filename
+
+            logger.info(f"  [{idx}/{len(matching_files)}] Downloading: {filename}")
+            logger.info(f"      URL: {item['url']}")
+
             try:
-                with page.expect_download(timeout=60000) as download_info:
-                    page.get_by_role("button", name="Download Report").click()
-                
-                download = download_info.value
-                filename = download.suggested_filename
-                save_path = download_folder / filename
-                download.save_as(str(save_path))
+                with session.get(item["url"], headers=self.HEADERS, stream=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(save_path, "wb") as f_out:
+                        for chunk in r.iter_content(chunk_size=65536):
+                            if chunk:
+                                f_out.write(chunk)
+
+                file_size = save_path.stat().st_size
+                if file_size < 1000:
+                    save_path.unlink(missing_ok=True)
+                    logger.error(f"    [FAIL] File too small ({file_size} bytes)")
+                    continue
+
+                # Magic byte validation
+                with open(save_path, "rb") as f_check:
+                    magic = f_check.read(4)
+
+                if magic != self.ZIP_MAGIC:
+                    logger.warning(f"    [WARN] Magic bytes {magic.hex()} (expected {self.ZIP_MAGIC.hex()})")
+
+                # Validation with openpyxl
+                try:
+                    wb = openpyxl.load_workbook(save_path, read_only=True)
+                    sheet_count = len(wb.sheetnames)
+                    wb.close()
+                    logger.info(f"    [OK] Validated {filename}: {sheet_count} sheet(s), {file_size:,} bytes")
+                except Exception as e:
+                    logger.warning(f"    [WARN] openpyxl load check: {e} (keeping file)")
+
                 downloaded_paths.append(save_path)
-                logger.info(f"  [OK] Saved: {filename}")
-                
-                # Check if more downloads are happening?
-                # For Zerodha "All Schemes", it usually triggers 3-5 files.
-                # We can wait a bit and see if the folder fills up or just rely on the first one.
-                # Actually, better to iterate schemes if we want ALL data.
-                # But I will try to support the user's "All Schemes" request.
-                
-                # Wait for other potential downloads to start/finish
-                time.sleep(10) 
-                
-                # Scan folder for other files that might have been saved automatically by browser
-                # Wait, context.new_page() with accept_downloads=True on Windows/Linux 
-                # doesn't automatically save to a specific dir unless told.
-                # Playwright expects explicit download handling.
-                
-                # If "All Schemes" triggers multiple, we'd need multiple expect_download() in parallel.
-                # This is complex. Recommendation: if All Schemes is used, maybe only the first one maps.
-                
-                # REALITY: For Zerodha, we need ALL schemes. 
-                # If the user wants "All Schemes" to work, I should probably detect if multiple downloads happen.
-                
+
             except Exception as e:
-                logger.error(f"  [FAIL] Download failed: {str(e)[:100]}")
-                raise
+                logger.error(f"    [FAIL] Error downloading {filename}: {e}")
+                if save_path.exists():
+                    save_path.unlink(missing_ok=True)
 
-            return downloaded_paths
-
-        finally:
-            if browser:
-                browser.close()
-            if pw:
-                pw.stop()
+        return downloaded_paths
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Zerodha Mutual Fund Downloader")
-    parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2025)")
+    parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2026)")
     parser.add_argument("--month", type=int, required=True, help="Month (1-12)")
     args = parser.parse_args()
 

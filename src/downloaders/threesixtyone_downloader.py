@@ -1,15 +1,14 @@
-# src/downloaders/threesixtyone_downloader.py
-
 import os
 import time
 import json
 import shutil
 import re
+import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from typing import Dict, List, Optional, Tuple, Any
+import openpyxl
+from curl_cffi import requests as cffi_requests
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,32 +17,155 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class ThreeSixtyOneDownloader(BaseDownloader):
     """
     360 ONE Mutual Fund (formerly IIFL) - Portfolio Downloader
     
-    URL: https://archive.iiflmf.com/downloads/disclosures
+    Downloads official monthly consolidated portfolio workbooks from 360 ONE's Next.js application
+    and AWS S3 storage without browser automation.
+    
+    URL: https://www.360.one/asset/mutual-funds/downloads/
     """
     
+    PAGE_URL = "https://www.360.one/asset/mutual-funds/downloads/"
+
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.360.one/",
+    }
+
+    DOWNLOAD_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "*/*",
+    }
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
 
-    def __init__(self):
+    def __init__(self, impersonate: str = "chrome124"):
         super().__init__("360 ONE Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "threesixtyone"
+        self.impersonate = impersonate
+        self._session = None
+
+    @property
+    def session(self) -> cffi_requests.Session:
+        if self._session is None:
+            self._session = cffi_requests.Session(impersonate=self.impersonate)
+        return self._session
+
+    def _fetch_disclosures_catalog(self) -> Dict[str, Any]:
+        """Fetch the downloads page and extract the complete disclosures JSON catalog."""
+        resp = self.session.get(self.PAGE_URL, headers=self.DEFAULT_HEADERS, timeout=30)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Failed to fetch 360 ONE downloads page: HTTP {resp.status_code}")
+
+        html = resp.text
+
+        # Extract Next.js App Router RSC payload chunks
+        pushes = re.findall(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', html)
+        if not pushes:
+            raise ValueError("No Next.js RSC payload found in page HTML.")
+
+        full_payload = ""
+        for p in pushes:
+            unescaped = p.encode("utf-8").decode("unicode_escape", errors="ignore")
+            full_payload += unescaped
+
+        # Locate the "disclosures":{ object
+        start_key = '"disclosures":{'
+        start_idx = full_payload.find(start_key)
+        if start_idx == -1:
+            raise ValueError("Could not find 'disclosures' key in Next.js payload.")
+
+        start_brace = start_idx + len('"disclosures":')
+        brace_count = 0
+        end_idx = -1
+
+        for i in range(start_brace, len(full_payload)):
+            if full_payload[i] == "{":
+                brace_count += 1
+            elif full_payload[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+
+        if end_idx == -1:
+            raise ValueError("Failed to parse balanced JSON for 'disclosures'.")
+
+        disclosures_str = full_payload[start_brace:end_idx]
+        return json.loads(disclosures_str)
+
+    def _find_monthly_portfolio_document(
+        self, year: int, month: int, catalog: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, str]]:
+        """Locate the monthly portfolio document record for a specific year and month."""
+        if catalog is None:
+            catalog = self._fetch_disclosures_catalog()
+
+        # Locate "Monthly Portfolio" subcategory
+        monthly_subcategory = None
+        for sub in catalog.get("subcategories", []):
+            if sub.get("title", "").strip().lower() == "monthly portfolio":
+                monthly_subcategory = sub
+                break
+
+        if not monthly_subcategory:
+            logger.warning("Monthly Portfolio subcategory not found in disclosures catalog.")
+            return None
+
+        target_month_name = self.MONTH_NAMES[month].lower()
+        target_year_str = str(year)
+
+        yearly_data = monthly_subcategory.get("yearlyData", [])
+        for y_entry in yearly_data:
+            y_label = str(y_entry.get("year", "")).lower()
+            if target_year_str not in y_label:
+                continue
+
+            monthly_data = y_entry.get("monthlyData", [])
+            for m_entry in monthly_data:
+                m_label = str(m_entry.get("month", "")).lower()
+                doc_groups = m_entry.get("documentGroups", [])
+
+                for dg in doc_groups:
+                    for doc in dg.get("documents", []):
+                        file_name = str(doc.get("fileName", "")).lower()
+                        file_url = doc.get("fileUrl", "")
+
+                        # Match by month label or filename
+                        if target_month_name in m_label or target_month_name in file_name or target_month_name in file_url.lower():
+                            return {
+                                "year": str(year),
+                                "month": target_month_name.capitalize(),
+                                "fileName": doc.get("fileName", ""),
+                                "fileUrl": file_url,
+                            }
+
+        return None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -69,7 +191,6 @@ class ThreeSixtyOneDownloader(BaseDownloader):
         logger.warning(f"360ONE: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("360ONE", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
-
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -143,80 +264,50 @@ class ThreeSixtyOneDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> Optional[Path]:
-        url = "https://archive.iiflmf.com/downloads/disclosures"
+        """Direct REST API + S3 download flow for 360 ONE without browser automation."""
+        doc = self._find_monthly_portfolio_document(target_year, target_month)
+        if not doc:
+            return None
 
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+        file_url = doc["fileUrl"]
+        url_filename = file_url.split("/")[-1]
+        stem = Path(url_filename).stem
+        ext = Path(url_filename).suffix or ".xlsx"
+        target_filename = f"{stem}{ext}"
+        dest_path = download_folder / target_filename
 
-            month_name = self.MONTH_NAMES[target_month]
-            if page.url != url:
-                logger.info(f"Navigating to {url}...")
-                page.goto(url, wait_until="load", timeout=90000)
-            
-            # 1) Expand Accordion
-            accordion_selector = 'a[href="#collapse0"]'
-            section_selector = '#collapse0'
-            
-            # Use wait_for_timeout to let any JS load
-            page.wait_for_selector(accordion_selector, timeout=10000)
-            
-            # Check if expanded (class 'in' on #collapse0 often indicates expansion in Bootstrap 3)
-            # or just check visibility
-            is_visible = page.is_visible(section_selector)
-            if not is_visible:
-                logger.info("Expanding 'Monthly Portfolio' section...")
-                page.click(accordion_selector)
-                page.wait_for_selector(f"{section_selector}.in, {section_selector}:visible", timeout=10000)
-            
-            # 2) Find Link using Year h4 and Month text
-            # XPath finds h4 with Year, then looks for standard sibling structure
-            xpath = (
-                f"//div[@id='collapse0']//h4[normalize-space()='{target_year}']"
-                f"/following-sibling::ul[preceding-sibling::h4[1][normalize-space()='{target_year}']]"
-                f"//a[normalize-space()='{month_name}']"
-            )
-            
-            link_count = page.locator(xpath).count()
-            if link_count == 0:
-                # Try partial month or case-insensitive if needed, but normative is full name
-                logger.debug(f"Retrying with broader XPath for {month_name}...")
-                xpath = (
-                    f"//div[@id='collapse0']//h4[contains(., '{target_year}')]"
-                    f"/following-sibling::ul[preceding-sibling::h4[1][contains(., '{target_year}')]]"
-                    f"//a[contains(normalize-space(.), '{month_name}')]"
-                )
-            
-            link_loc = page.locator(xpath).first
-            if not link_loc.is_visible():
-                return None
+        logger.info(f"360ONE: Downloading from {file_url} to {dest_path.name}...")
+        resp = self.session.get(file_url, headers=self.DOWNLOAD_HEADERS, timeout=60)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Download failed with HTTP {resp.status_code}: {file_url}")
 
-            # 3) Trigger Download
-            logger.info(f"Found link for {month_name} {target_year}. Downloading...")
-            with page.expect_download(timeout=60000) as download_info:
-                link_loc.click()
-            
-            download = download_info.value
-            save_path = download_folder / download.suggested_filename
-            download.save_as(save_path)
-            
-            return save_path
+        content = resp.content
+        is_zip = content.startswith(b"PK\x03\x04")
+        is_ole = content.startswith(b"\xd0\xcf\x11\xe0")
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        if not (is_zip or is_ole):
+            raise ValueError(f"Downloaded content is not valid Excel/ZIP. Magic: {content[:8]}")
+
+        # Normalize extension to .xlsx if OpenXML zip container
+        if is_zip and dest_path.suffix.lower() == ".xls":
+            dest_path = dest_path.with_suffix(".xlsx")
+
+        with open(dest_path, "wb") as f:
+            f.write(content)
+
+        # Validate readability
+        if is_zip:
+            wb = openpyxl.load_workbook(dest_path, read_only=True)
+            sheet_count = len(wb.sheetnames)
+            wb.close()
+            logger.info(f"360ONE: Downloaded & verified OpenXML portfolio ({len(content):,} bytes, {sheet_count} sheets): {dest_path.name}")
+        else:
+            import xlrd
+            wb = xlrd.open_workbook(dest_path)
+            sheet_count = len(wb.sheet_names())
+            logger.info(f"360ONE: Downloaded & verified OLE portfolio ({len(content):,} bytes, {sheet_count} sheets): {dest_path.name}")
+
+        return dest_path
 
 
 if __name__ == "__main__":

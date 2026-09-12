@@ -8,8 +8,8 @@ import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+import requests
+from bs4 import BeautifulSoup
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -30,8 +30,8 @@ class BajajDownloader(BaseDownloader):
     """
     Bajaj Finserv Mutual Fund - Portfolio Downloader
     
-    Uses Playwright to navigate statutory disclosures and download monthly portfolios.
-    Supports persistent browser sessions and "no-refresh" multi-month logic.
+    Extracts dynamic WordPress nonce from the downloads page and queries
+    the admin-ajax.php endpoint to download monthly consolidated portfolios.
     """
     
     MONTH_NAMES = {
@@ -227,151 +227,108 @@ class BajajDownloader(BaseDownloader):
         }
 
     def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> Optional[Path]:
-        """Internal flow using Playwright with session support and no-refresh logic."""
+        """Internal flow using requests and WordPress admin-ajax.php to download monthly portfolio."""
         month_name = self.MONTH_NAMES[target_month]
         fy_str = self._get_fy_string(target_year, target_month)
-        
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=False,
-                args=["--window-size=1920,1080", "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-                slow_mo=1000
+
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "*/*",
+        })
+
+        # 1. Fetch downloads page to obtain current dynamic nonce and ajaxUrl
+        page_url = "https://www.bajajamc.com/downloads?portfolio="
+        logger.info(f"Fetching {page_url} for dynamic nonce...")
+        resp = session.get(page_url, timeout=30)
+        resp.raise_for_status()
+
+        match = re.search(r"var\s+bajajDownloads\s*=\s*(\{.*?\});", resp.text)
+        if not match:
+            match = re.search(
+                r'id=["\']bajaj-downloads-js-js-extra["\'][^>]*>\s*var\s+bajajDownloads\s*=\s*(\{.*?\});',
+                resp.text
             )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                ignore_https_errors=True,
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
 
-            url = "https://www.bajajamc.com/downloads?statutory-disclosures="
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            time.sleep(10) # Hydration wait
+        if not match:
+            logger.error("Could not find 'bajajDownloads' configuration object in page HTML.")
+            return None
 
-            # 1. Close popups
-            try:
-                popups = page.locator(".close-btn, .popup-close, button[aria-label='Close']")
-                if popups.count() > 0:
-                    popups.first.click(timeout=3000)
-                    logger.debug("Closed popup.")
-            except:
-                pass
+        cfg = json.loads(match.group(1))
+        ajax_url = cfg.get("ajaxUrl", "https://www.bajajamc.com/wp-admin/admin-ajax.php")
+        nonce = cfg.get("nonce")
 
-            # 2. Portfolio -> Monthly Portfolio
-            logger.info("📂 Expanding 'Portfolio' section...")
-            # We look for the "Portfolio" section title. 
-            # In some cases, we might already be on it if no-refresh is working.
-            candidates = page.get_by_text("Portfolio", exact=True).all()
-            target_el = None
-            for c in candidates:
-                if c.is_visible() and "monthly" not in c.text_content().lower():
-                    target_el = c
-                    break
-            
-            if target_el:
-                target_el.scroll_into_view_if_needed()
-                target_el.click()
-                time.sleep(3)
-            
-            logger.info("📂 Selecting 'Monthly Portfolio' sub-item...")
-            monthly_opt = page.get_by_text("Monthly Portfolio", exact=True).first
-            if monthly_opt.is_visible():
-                monthly_opt.click()
-                time.sleep(5)
-            else:
-                logger.warning("'Monthly Portfolio' sub-item not visible. Trying alternative selection.")
+        if not nonce:
+            logger.error("Extracted nonce is empty.")
+            return None
 
-            # 3. Select Financial Year
-            logger.info(f"📅 Selecting Financial Year: {fy_str}...")
-            visible_selects = [s for s in page.locator("select").all() if s.is_visible()]
-            
-            if len(visible_selects) < 1:
-                logger.error("No visible selection dropdowns found for Year.")
-                return None
-                
-            year_select = visible_selects[0]
-            # Try selecting by label first
-            try:
-                year_select.select_option(label=fy_str)
-            except:
-                # Fallback to fuzzy text match on options
-                opts = year_select.locator("option").all()
-                found = False
-                for opt in opts:
-                    if fy_str in opt.inner_text():
-                        year_select.select_option(value=opt.get_attribute("value"))
-                        found = True
-                        break
-                if not found:
-                    logger.error(f"FY {fy_str} not found in dropdown.")
-                    return None
-            
-            time.sleep(3)
+        # 2. Query admin-ajax.php for monthly portfolio (section_id=757)
+        payload = {
+            "action": "bajaj_get_downloads",
+            "nonce": nonce,
+            "section_id": "757",
+            "year": fy_str,
+            "month": month_name,
+        }
 
-            # 4. Select Month
-            logger.info(f"📅 Selecting Month: {month_name}...")
-            # Refresh list of visible selects as the month one might have appeared
-            visible_selects = [s for s in page.locator("select").all() if s.is_visible()]
-            if len(visible_selects) < 2:
-                logger.error("Month dropdown did not appear after Year selection.")
-                return None
-            
-            month_select = visible_selects[1]
-            try:
-                # Get all options to find case-insensitive match
-                opts = month_select.locator("option").all_inner_texts()
-                match = None
-                for opt in opts:
-                    if opt.strip().lower() == month_name.lower():
-                        match = opt.strip()
-                        break
-                
-                if match:
-                    month_select.select_option(label=match)
-                    logger.info(f"Month {match} selected (case-insensitive match).")
-                else:
-                    # Fallback to direct selection which might fail if casing differs
-                    month_select.select_option(label=month_name)
-                    logger.info(f"Month {month_name} selected.")
-            except Exception as e:
-                logger.error(f"Month {month_name} not found in dropdown for FY {fy_str}. Error: {e}")
-                return None
-            
-            time.sleep(5)
+        logger.info(f"Querying portfolio disclosures for {month_name} {target_year} (FY {fy_str})...")
+        ajax_resp = session.post(ajax_url, data=payload, timeout=30)
+        if ajax_resp.status_code != 200:
+            logger.error(f"AJAX request failed with status HTTP {ajax_resp.status_code}")
+            return None
 
-            # 5. Download Excel
-            logger.info("🔍 Searching for Excel download link...")
-            # Narrow down to visible Excel links/buttons
-            dl_links = page.locator("a:visible, button:visible").filter(has_text=re.compile(r"Download|xls", re.I)).all()
-            
-            if not dl_links:
-                logger.warning(f"No download links found for {month_name} {target_year}.")
-                return None
-            
-            # Usually the first one is our target
-            target_link = dl_links[0]
-            
-            with page.expect_download(timeout=120000) as download_info:
-                target_link.scroll_into_view_if_needed()
-                target_link.click()
-            
-            download = download_info.value
-            filename = download.suggested_filename
-            final_path = download_folder / filename
-            download.save_as(str(final_path))
-            
-            logger.info(f"Downloaded: {filename}")
-            return final_path
+        result = ajax_resp.json()
+        if not result.get("success"):
+            logger.warning(f"AJAX response returned success=False for {month_name} {target_year}")
+            return None
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        data = result.get("data", {})
+        count = data.get("count", 0)
+        html_fragment = data.get("html", "")
+
+        if count == 0 or not html_fragment:
+            logger.warning(f"No documents published for {month_name} {target_year} (count={count})")
+            return None
+
+        # 3. Parse HTML fragment to extract document link
+        soup = BeautifulSoup(html_fragment, "html.parser")
+        a_tag = soup.find("a", href=True)
+        if not a_tag:
+            logger.warning("No <a> link found in response HTML fragment.")
+            return None
+
+        dl_url = a_tag["href"].strip()
+        filename = a_tag.get("download") or dl_url.split("/")[-1]
+        final_path = download_folder / filename
+
+        # 4. Download file
+        logger.info(f"Downloading: {filename} from {dl_url}...")
+        dl_resp = session.get(dl_url, stream=True, timeout=60)
+        if dl_resp.status_code != 200:
+            logger.error(f"Failed to download file from {dl_url}: HTTP {dl_resp.status_code}")
+            return None
+
+        with open(final_path, "wb") as f:
+            for chunk in dl_resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # 5. Validate magic bytes
+        with open(final_path, "rb") as f:
+            magic = f.read(8)
+
+        is_xlsx = magic.startswith(b"PK\x03\x04")
+        is_xls = magic.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+        if not (is_xlsx or is_xls):
+            logger.error(f"Invalid file signature for {filename}, deleting...")
+            final_path.unlink(missing_ok=True)
+            return None
+
+        logger.info(f"Downloaded and verified successfully: {filename} ({final_path.stat().st_size:,} bytes)")
+        return final_path
 
 
 if __name__ == "__main__":

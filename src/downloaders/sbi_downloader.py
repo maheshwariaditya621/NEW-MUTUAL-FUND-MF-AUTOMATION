@@ -1,14 +1,16 @@
 # src/downloaders/sbi_downloader.py
 
 import os
+import re
 import time
 import json
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, Tuple, Any
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -17,36 +19,55 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
-
-from src.config.constants import AMC_SBI
 
 class SBIDownloader(BaseDownloader):
     """
-    SBI Mutual Fund - Portfolio Downloader
-    
-    URL: https://www.sbimf.com/portfolios
-    Uses custom dropdown navigation for Frequency, Year, and Month filters
-    Downloads "All Schemes Monthly Portfolio" file
+    SBI Mutual Fund - Monthly Portfolio Downloader.
+
+    Downloads the official monthly consolidated "All Schemes Monthly Portfolio"
+    spreadsheet via direct POST API and HTML parsing without browser automation (Playwright/Selenium).
+
+    API:
+        POST https://www.sbimf.com/ajaxcall/CMS/GetSchemePortfolioSheets
+        Payload: {"FundId": 0, "PSYear": "2026", "PSMonth": "August", "PSFrequency": "Monthly"}
     """
-    
+
+    AMC_NAME = "sbi"
+    API_URL = "https://www.sbimf.com/ajaxcall/CMS/GetSchemePortfolioSheets"
+    PORTFOLIOS_PAGE = "https://www.sbimf.com/portfolios"
+
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "*/*",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://www.sbimf.com",
+        "Referer": PORTFOLIOS_PAGE,
+    }
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
 
-    def __init__(self):
+    def __init__(self, timeout: int = 30):
         super().__init__("SBI Mutual Fund")
         self.notifier = get_notifier()
-        self.AMC_NAME = "sbi"
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update(self.DEFAULT_HEADERS)
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -68,42 +89,122 @@ class SBIDownloader(BaseDownloader):
         if corrupt_target.exists():
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             corrupt_target = corrupt_target.parent / f"{corrupt_target.name}__{ts}"
-        
+
         logger.warning(f"SBI: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("SBI", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
+    def _run_download_flow(
+        self, target_year: int, target_month: int, month_name: str, download_folder: Path
+    ) -> Optional[Path]:
+        payload = {
+            "FundId": 0,
+            "PSYear": str(target_year),
+            "PSMonth": month_name,
+            "PSFrequency": "Monthly",
+        }
 
-    def download(self, year: int, month: int) -> Dict:
+        logger.info(f"Querying SBI MF API for {month_name} {target_year}...")
+        resp = self.session.post(self.API_URL, json=payload, timeout=self.timeout)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        rows = soup.find_all("tr")
+
+        consolidated_link = None
+        consolidated_title = None
+
+        for tr in rows:
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+
+            text_col = tds[0].get_text(strip=True)
+            if "no records found" in text_col.lower():
+                continue
+
+            # Prioritize the all-schemes monthly consolidated portfolio
+            if "all schemes" in text_col.lower():
+                links = tr.find_all("a")
+                for a in links:
+                    href = a.get("href", "").strip()
+                    if href and (".xlsx" in href.lower() or ".xls" in href.lower()):
+                        consolidated_link = href
+                        consolidated_title = text_col
+                        break
+                if consolidated_link:
+                    break
+
+        if not consolidated_link:
+            logger.warning(f"No consolidated 'All Schemes' portfolio found for {month_name} {target_year}")
+            return None
+
+        # Clean filename
+        clean_url_name = consolidated_link.split("?")[0].split("/")[-1]
+        if not (clean_url_name.endswith(".xlsx") or clean_url_name.endswith(".xls")):
+            clean_title = re.sub(r'[\\/*?:"<>|]', "_", consolidated_title).strip()
+            clean_url_name = f"{clean_title}.xlsx"
+
+        save_path = download_folder / clean_url_name
+
+        logger.info(f"Downloading consolidated portfolio: {consolidated_title}")
+        logger.info(f"  URL: {consolidated_link}")
+
+        r = self.session.get(consolidated_link, timeout=60)
+        r.raise_for_status()
+
+        content = r.content
+        size = len(content)
+        if size == 0:
+            raise ValueError(f"Downloaded 0 bytes for {consolidated_title}")
+
+        # Magic byte validation
+        is_xlsx = content.startswith(b"PK\x03\x04")
+        is_xls = content.startswith(b"\xd0\xcf\x11\xe0")
+        if not (is_xlsx or is_xls):
+            raise ValueError(f"Invalid spreadsheet format. Magic bytes: {content[:8]}")
+
+        with open(save_path, "wb") as f:
+            f.write(content)
+
+        # Integrity verification
+        try:
+            wb = openpyxl.load_workbook(save_path, read_only=True)
+            sheets_count = len(wb.sheetnames)
+            wb.close()
+            logger.info(f"  Validated XLSX: {sheets_count} sheets present")
+        except Exception as e:
+            logger.warning(f"  openpyxl inspection note: {e}")
+
+        logger.info(f"  [OK] Saved: {clean_url_name} ({size:,} bytes)")
+        return save_path
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
-        month_name = self.MONTH_NAMES[month]
-        
+        month_name = self.MONTH_NAMES.get(month, f"Month {month}")
+
         logger.info("=" * 60)
         logger.info("SBI MUTUAL FUND DOWNLOADER STARTED")
         logger.info(f"Period: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
+
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"SBI: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
-
                 return {
                     "status": "skipped",
                     "reason": "already_downloaded",
-                    "duration": duration
+                    "duration": duration,
                 }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing success marker")
@@ -118,19 +219,20 @@ class SBIDownloader(BaseDownloader):
                     return {"status": "success", "dry_run": True}
 
                 downloaded_path = self._run_download_flow(year, month, month_name, target_dir)
-                
+
                 if not downloaded_path:
                     logger.warning(f"SBI: No portfolio found for {month_name} {year}")
                     self.notifier.notify_not_published("SBI", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
                 self._create_success_marker(target_dir, year, month, 1)
-                
-                # Consolidate downloads
+
+                # Consolidate downloads (for SBI, the downloaded file is already the consolidated all-schemes file)
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("SBI", year, month, files_downloaded=1, duration=duration)
                 logger.success(f"[SUCCESS] SBI download completed: {downloaded_path.name}")
@@ -139,100 +241,19 @@ class SBIDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("SBI", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _select_custom_dropdown(self, page, dropdown_id: str, target_text: str):
-        """Helper to select from custom dropdown."""
-        dropdown = page.locator(f"#{dropdown_id}")
-        trigger = dropdown.locator(".select-selected")
-        trigger.click()
-        time.sleep(2)
-        options = dropdown.locator(".select-items div")
-        option = options.filter(has_text=target_text).first
-        if option.count() > 0:
-            option.click()
-            time.sleep(2)
-            logger.info(f"  [OK] Selected {dropdown_id}: {target_text}")
-        else:
-            logger.warning(f"  [FAIL] Not found in {dropdown_id}: {target_text}")
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        url = "https://www.sbimf.com/portfolios"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, timeout=60000)
-            page.wait_for_load_state("networkidle")
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Select filters using custom dropdowns
-            logger.info("Setting filters...")
-            self._select_custom_dropdown(page, "PSFrequency", "Monthly")
-            self._select_custom_dropdown(page, "PSYear", str(target_year))
-            self._select_custom_dropdown(page, "PSMonth", month_name)
-            
-            logger.info("Waiting for table to update...")
-            time.sleep(10)
-
-            # Find "All Schemes Monthly Portfolio" link
-            logger.info(f"Searching for 'All Schemes Monthly Portfolio'...")
-            anchor = page.locator('a').filter(has_text="All Schemes").filter(has_text="Monthly Portfolio").filter(has_text=month_name).filter(has_text=str(target_year)).first
-            
-            if anchor.count() == 0:
-                logger.warning(f"  [FAIL] Portfolio link not found for {month_name} {target_year}")
-                return None
-
-            logger.info(f"  [OK] Found: {anchor.text_content().strip()}")
-            
-            # Find the download button in the same row
-            row = page.locator("div.portfolio-list-wrapper .row, tr").filter(has=anchor).first
-            download_btn = row.locator('a:has-text("Download")').first
-            
-            if download_btn.count() == 0:
-                logger.warning("  [FAIL] Download button not found")
-                return None
-
-            # Download the file
-            logger.info("Downloading file...")
-            with page.expect_download(timeout=60000) as download_info:
-                download_btn.click()
-            
-            download = download_info.value
-            filename = download.suggested_filename
-            save_path = download_folder / filename
-            
-            download.save_as(save_path)
-            logger.info(f"  [OK] Saved: {filename}")
-            
-            return save_path
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, required=True)

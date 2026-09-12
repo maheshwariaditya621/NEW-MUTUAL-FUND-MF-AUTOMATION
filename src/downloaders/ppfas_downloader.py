@@ -86,96 +86,106 @@ class PPFASDownloader(BaseDownloader):
             message=f"Incomplete download detected and moved to quarantine. Reason: {reason}"
         )
 
-    def _download_via_playwright(self, target_year: int, target_month_name: str, download_folder: Path) -> Path:
+    def _download_via_requests(self, target_year: int, target_month_name: str, download_folder: Path) -> Path:
         """
-        Refined Playwright UI flow for PPFAS based on working implementation.
+        Download PPFAS consolidated portfolio file using requests + BeautifulSoup.
+
+        The PPFAS portfolio disclosure page is fully server-rendered static HTML.
+        All download links are embedded in the page source — no browser needed.
+
+        Page:    https://amc.ppfas.com/downloads/portfolio-disclosure/
+        Method:  GET page → parse HTML → find id="collapse{Month}{Year}" panel
+                 → extract <a class="btn btn-success"> (Consolidated link) → GET file
         """
-        from playwright.sync_api import sync_playwright
-        
+        import requests as _requests
+        from urllib.parse import urljoin
+        from bs4 import BeautifulSoup
+
         listing_url = "https://amc.ppfas.com/downloads/portfolio-disclosure/"
-        
-        with sync_playwright() as p:
-            # Use Chrome channel and non-headless as per proven success
-            browser = p.chromium.launch(channel="chrome", headless=False,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"])
-            context = browser.new_context(
-                accept_downloads=True,
-                user_agent="Mozilla/5.0"
+        base_url    = "https://amc.ppfas.com"
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://amc.ppfas.com/",
+        }
+
+        # 1. Fetch the portfolio disclosure page
+        logger.info(f"PPFAS: Fetching portfolio disclosure page")
+        resp = _requests.get(listing_url, headers=headers, timeout=30, allow_redirects=True)
+        resp.raise_for_status()
+        logger.info(f"PPFAS: Page fetched ({len(resp.text):,} chars)")
+
+        # 2. Parse with BeautifulSoup
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # 3. Find the month accordion panel by its stable ID
+        #    id="collapse{MonthName}{Year}"  e.g. id="collapseJuly2025"
+        panel_id = f"collapse{target_month_name}{target_year}"
+        panel = soup.find("div", id=panel_id)
+
+        if panel is None:
+            raise Exception(
+                f"PPFAS: Month panel not found for {target_month_name} {target_year} "
+                f"— not yet published or not on page"
             )
-            page = context.new_page()
-            
-            try:
-                logger.info(f"PPFAS: Navigating to {listing_url}")
-                page.goto(listing_url, timeout=120000, wait_until="load")
-                time.sleep(10)
-                
-                # 1. Select Year Tab
-                year_tab_selector = f'a[id="{target_year}-tab"]'
-                year_tab = page.locator(year_tab_selector)
-                
-                if year_tab.count() > 0:
-                    logger.info(f"PPFAS: Clicking Year Tab: {target_year}")
-                    year_tab.click()
-                    time.sleep(5)
-                else:
-                    # Fallback roles/labels
-                    year_tab = page.get_by_role("tab", name=str(target_year)).first
-                    if year_tab.count() > 0:
-                        year_tab.click()
-                        time.sleep(5)
-                    else:
-                        raise Exception(f"PPFAS: Year tab for {target_year} not found")
 
-                # 2. Expand Month Accordion
-                month_id = f"heading{target_month_name}{target_year}"
-                month_header = page.locator(f'div[id="{month_id}"] a')
-                
-                logger.info(f"PPFAS: Expanding Month Accordion: {target_month_name} {target_year}")
-                if month_header.count() > 0:
-                    # Use JS click as it's more reliable for accordions
-                    page.evaluate("(el) => el.click()", month_header.element_handle())
-                    time.sleep(10)
-                else:
-                    month_header_alt = page.get_by_text(f"{target_month_name} {target_year}", exact=False).first
-                    if month_header_alt.count() > 0:
-                        page.evaluate("(el) => el.click()", month_header_alt.element_handle())
-                        time.sleep(10)
-                    else:
-                        raise Exception(f"PPFAS: Month header for {target_month_name} {target_year} not found")
+        logger.info(f"PPFAS: Found month panel #{panel_id}")
 
-                # 3. Click "Consolidated" link
-                collapse_id = f"collapse{target_month_name}{target_year}"
-                container = page.locator(f'div[id="{collapse_id}"]')
-                consolidated_btn = container.get_by_text("Consolidated", exact=False).first
-                
-                if consolidated_btn.count() == 0:
-                    consolidated_btn = page.get_by_text("Consolidated", exact=False).first
+        # 4. Find the Consolidated link inside the panel
+        #    It is the <a class="btn btn-success"> with text containing "Consolidated"
+        consolidated_href = None
+        for a_tag in panel.find_all("a", href=True):
+            href = a_tag.get("href", "")
+            if "/downloads/portfolio-disclosure/" not in href:
+                continue
+            ext = Path(href.split("?")[0]).suffix.lower()
+            if ext not in (".xls", ".xlsx"):
+                continue
+            css_classes = a_tag.get("class", [])
+            link_text   = a_tag.get_text(separator=" ", strip=True)
+            if "btn-success" in css_classes and "Consolidated" in link_text:
+                consolidated_href = href
+                break
 
-                if consolidated_btn.count() > 0:
-                    logger.info("PPFAS: Triggering download for 'Consolidated'")
-                    try:
-                        consolidated_btn.scroll_into_view_if_needed(timeout=5000)
-                    except:
-                        pass
-                    
-                    with page.expect_download(timeout=120000) as download_info:
-                        try:
-                            consolidated_btn.click(timeout=10000)
-                        except:
-                            page.evaluate("(el) => el.click()", consolidated_btn.element_handle())
-                    
-                    download = download_info.value
-                    filename = download.suggested_filename
-                    save_path = download_folder / filename
-                    download.save_as(str(save_path))
-                    logger.success(f"PPFAS: Saved: {save_path.name}")
-                    return save_path
-                else:
-                    raise Exception(f"PPFAS: Consolidated link not found for {target_month_name} {target_year}")
+        if consolidated_href is None:
+            raise Exception(
+                f"PPFAS: Consolidated link not found for {target_month_name} {target_year}"
+            )
 
-            finally:
-                context.close()
-                browser.close()
+        # 5. Build absolute URL
+        file_url = consolidated_href if consolidated_href.startswith("http") else urljoin(base_url, consolidated_href)
+        logger.info(f"PPFAS: Consolidated URL: {file_url}")
+
+        # 6. Download the file
+        filename  = file_url.split("/")[-1].split("?")[0]
+        save_path = download_folder / filename
+
+        logger.info(f"PPFAS: Downloading: {filename}")
+        r = _requests.get(file_url, headers=headers, timeout=120, allow_redirects=True)
+        r.raise_for_status()
+        content = r.content
+
+        # 7. Validate Excel magic bytes (not an HTML error page)
+        is_xls  = len(content) >= 4 and content[:4] == b"\xd0\xcf\x11\xe0"
+        is_xlsx = len(content) >= 2 and content[:2] == b"PK"
+        if not (is_xls or is_xlsx):
+            preview = content[:120].decode("utf-8", errors="replace")
+            raise Exception(
+                f"PPFAS: Downloaded content is not a valid Excel file. Preview: {preview}"
+            )
+
+        # 8. Save to disk
+        with open(save_path, "wb") as f:
+            f.write(content)
+
+        size_kb = len(content) / 1024
+        logger.success(f"PPFAS: Saved: {save_path.name} ({size_kb:.1f} KB)")
+        return save_path
 
     def _check_file_count(self, file_count: int, year: int, month: int):
         """Sanity check file count (expected 1 for PPFAS consolidated)."""
@@ -197,7 +207,7 @@ class PPFASDownloader(BaseDownloader):
             raise ValueError(f"Invalid month: {month}")
 
         logger.info("=" * 60)
-        logger.info("PPFAS MUTUAL FUND PLAYWRIGHT DOWNLOADER STARTED")
+        logger.info("PPFAS MUTUAL FUND REQUESTS DOWNLOADER STARTED")
         logger.info(f"Period: {year}-{month:02d}")
         if DRY_RUN:
             logger.info("MODE: DRY RUN (no network calls)")
@@ -262,7 +272,7 @@ class PPFASDownloader(BaseDownloader):
                     logger.info("=" * 60)
                     return {"amc": AMC_PPFAS, "year": year, "month": month, "status": "success", "dry_run": True}
                 
-                file_path = self._download_via_playwright(year, month_name, target_dir)
+                file_path = self._download_via_requests(year, month_name, target_dir)
                 
                 # 4) Success Marker
                 self._create_success_marker(target_dir, year, month, 1)

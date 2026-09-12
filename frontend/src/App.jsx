@@ -23,6 +23,7 @@ import DisclaimerBanner from './components/common/DisclaimerBanner';
 import AccessDeniedPage from './pages/AccessDeniedPage';
 import RegisterInvitePage from './pages/RegisterInvitePage';
 import WatchlistDashboardPage from './pages/WatchlistDashboardPage';
+import AnnouncementsPage from './pages/AnnouncementsPage';
 import './App.css';
 
 // Helper component to handle global auth events like 401
@@ -171,6 +172,7 @@ const Header = () => {
                 {hasPermission('view_portfolio') && <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>}
                 {hasPermission('view_insights') && <Link to="/insights" className="nav-link">Insights</Link>}
                 {hasPermission('view_watchlist') && <Link to="/watchlist" className="nav-link"><span className="wl-icon">🔖</span> Watchlist</Link>}
+                {hasPermission('view_announcements') && <Link to="/announcements" className="nav-link"><span className="wl-icon">📢</span> Announcements</Link>}
                 
                 {hasPermission('view_tools') && (
                   <div className="nav-dropdown">
@@ -299,6 +301,11 @@ function AppContent() {
             <Route path="/watchlist" element={
               <ProtectedRoute requiredPermission="view_watchlist">
                 <WatchlistDashboardPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/announcements" element={
+              <ProtectedRoute requiredPermission="view_announcements">
+                <AnnouncementsPage />
               </ProtectedRoute>
             } />
           </Routes>

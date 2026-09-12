@@ -47,23 +47,22 @@ class HeliosExtractorV1(BaseExtractor):
 
     def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
         """Find GRAND TOTAL or NET ASSETS row and extract value."""
-        # Scan from bottom up
-        for i in range(len(df)-1, -1, -1):
+        for i in range(len(df)):
             row = df.iloc[i]
             row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
+            if any(bad in row_text for bad in ["EXPOSURE", "PERCENTAGE", "OPTIONS", "FUTURES", "DUE TO", "THROUGH", "PER UNIT", "DEVIATION", "ILLIQUID"]):
+                continue
             
             is_valid_marker = False
-            if "GRAND TOTAL (AUM)" in row_text or "GRAND TOTAL" in row_text:
-                is_valid_marker = True
-            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENTAGE TO" not in row_text:
+            if "GRAND TOTAL (AUM)" in row_text or "GRAND TOTAL" in row_text or "NET ASSETS" in row_text:
                 is_valid_marker = True
                 
             if is_valid_marker:
                 candidates = []
                 for val in row:
                     f_val = self.safe_float(val)
-                    # Filter out 1.0 or 100.0 (which represent 100% NAV) and 0s
-                    if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
+                    # Filter out 1.0 or 100.0 (which represent 100% NAV) and dates
+                    if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 10000000:
                         candidates.append(f_val)
                 
                 if candidates:
@@ -82,31 +81,34 @@ class HeliosExtractorV1(BaseExtractor):
                     # 1. Parse Scheme Name from Row 2
                     # Format: "SCHEME NAME :  Helios Balanced Advantage Fund..."
                     df_meta = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=5)
+                    # Scan first 5 rows for a cell containing 'SCHEME NAME'
+                    # Handle both layouts:
+                    #   A) label and name in the SAME cell: "SCHEME NAME : Helios XYZ Fund"
+                    #   B) label in col N, name in col N+1: ["SCHEME NAME :", "Helios XYZ Fund"]
                     raw_scheme_name = None
-                    
-                    # Usually in Row 2, Col 2 (index 2)
-                    if len(df_meta) > 2 and len(df_meta.columns) > 2:
-                        val = str(df_meta.iloc[2, 2]).strip()
-                        if "SCHEME NAME" in val.upper():
-                            # Check if name is in this cell or next
-                            if len(val) < 20 and len(df_meta.columns) > 3:
-                                raw_scheme_name = str(df_meta.iloc[2, 3]).strip()
-                            else:
-                                raw_scheme_name = val
-                    
-                    if not raw_scheme_name:
-                        logger.warning(f"[{sheet_name}] Could not find scheme name in Row 2. Skipping valid extraction for this sheet might fail.")
-                        # Fallback scan
-                        for r_idx, row in df_meta.iterrows():
-                            for c_idx, val in enumerate(row):
-                                if "SCHEME NAME" in str(val).upper():
-                                    raw_scheme_name = str(val).strip()
-                                    break
-                            if raw_scheme_name: break
+                    for r_idx in range(min(5, len(df_meta))):
+                        row_vals = df_meta.iloc[r_idx]
+                        for c_idx, val in enumerate(row_vals):
+                            val_str = str(val).strip()
+                            if "SCHEME NAME" in val_str.upper():
+                                # Check if the name is embedded in this cell
+                                cleaned = re.sub(r'(?i)SCHEME NAME\s*:\s*', '', val_str).strip()
+                                if len(cleaned) > 5:  # name is in this cell
+                                    raw_scheme_name = cleaned
+                                else:
+                                    # Name is in the NEXT cell in the same row
+                                    if c_idx + 1 < len(row_vals):
+                                        next_val = str(row_vals.iloc[c_idx + 1]).strip()
+                                        if next_val and next_val != 'nan':
+                                            raw_scheme_name = next_val
+                                break
+                        if raw_scheme_name:
+                            break
 
                     if not raw_scheme_name:
-                         logger.warning(f"[{sheet_name}] Scheme name NOT found. Skipping.")
-                         continue
+                        logger.warning(f"[{sheet_name}] Scheme name NOT found. Skipping.")
+                        continue
+
 
                     # Clean prefix "SCHEME NAME :"
                     scheme_name = re.sub(r'(?i)SCHEME NAME\s*:\s*', '', raw_scheme_name).strip()

@@ -95,8 +95,18 @@ class UTIExtractorV1(BaseExtractor):
 
                 # 4. Data Extraction
                 if current_scheme_info and header_idx != -1:
-                    # 4a. Check for end of current scheme to capture AUM
-                    if "TOTAL" in row_text or "GRAND TOTAL" in row_text or "NET ASSETS" in row_text:
+                    # 4a. Check for scheme grand total to capture AUM
+                    # Avoid section subtotals like TOTAL: EQUITY, TOTAL: DEBT, TOTAL: FUTURES, etc.
+                    is_subtotal = any(sub in row_text for sub in [
+                        "FUTURES", "DEBT", "MONEY MARKET", "OTHERS", "SHORT TERM", 
+                        "TREASURY", "COMMERCIAL", "CERTIFICATE", "DEPOSIT", "REPO", "CURRENT ASSET"
+                    ])
+                    is_scheme_total = (
+                        ("GRAND TOTAL" in row_text or "NET ASSET" in row_text) or
+                        ("TOTAL :" in row_text and any(term in row_text for term in ["UTI", current_scheme_info["scheme_name"].upper()[:15]]))
+                    ) and not is_subtotal
+                    
+                    if is_scheme_total:
                         candidates = []
                         for val in row.values:
                             f_val = self.safe_float(val)

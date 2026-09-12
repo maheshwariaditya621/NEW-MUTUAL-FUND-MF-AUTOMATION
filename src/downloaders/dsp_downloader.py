@@ -6,11 +6,14 @@ import json
 import shutil
 import zipfile
 import calendar
+import urllib.parse
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+
+import requests
+from bs4 import BeautifulSoup
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -19,13 +22,12 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class DSPDownloader(BaseDownloader):
@@ -33,7 +35,7 @@ class DSPDownloader(BaseDownloader):
     DSP Mutual Fund - Portfolio Downloader
     
     URL: https://www.dspim.com/mandatory-disclosures/portfolio-disclosures
-    Downloads consolidated ZIP file and extracts contents
+    Downloads consolidated ZIP file via requests/BeautifulSoup and extracts contents
     """
     
     MONTH_NAMES = {
@@ -41,6 +43,14 @@ class DSPDownloader(BaseDownloader):
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
+
+    DISCLOSURES_URL = "https://www.dspim.com/mandatory-disclosures/portfolio-disclosures"
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    ZIP_MAGIC = b"PK\x03\x04"
 
     def __init__(self):
         super().__init__("DSP Mutual Fund")
@@ -72,7 +82,6 @@ class DSPDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("DSP", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
@@ -96,7 +105,7 @@ class DSPDownloader(BaseDownloader):
                 
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -145,108 +154,107 @@ class DSPDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
-        url = "https://www.dspim.com/mandatory-disclosures/portfolio-disclosures"
+        """Fetch disclosures page via requests, locate Month End ZIP link, download and extract."""
+        session = requests.Session()
+        logger.info(f"Fetching disclosures page: {self.DISCLOSURES_URL}...")
+        resp = session.get(self.DISCLOSURES_URL, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
 
-        pw = None
-        browser = None
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Locate Month End Portfolio Disclosures <details> section
+        month_end_details = None
+        for det in soup.find_all("details", class_="pd-section-details"):
+            summary = det.find("summary")
+            if summary and "month end portfolio disclosures" in summary.get_text(strip=True).lower():
+                month_end_details = det
+                break
+
+        if not month_end_details:
+            logger.error("Could not find 'Month End Portfolio Disclosures' section in page")
+            return 0
+
+        # Pattern for target month: e.g. August or Aug and Year
+        month_abbr = calendar.month_abbr[target_month]
+        pattern = rf'\b({month_name}|{month_abbr})\b.*\b{target_year}\b'
+
+        matching_link = None
+        for a in month_end_details.find_all("a"):
+            href = a.get("href", "")
+            if not href or not href.endswith(".zip"):
+                continue
+            text = a.get_text(strip=True)
+            if re.search(pattern, text, re.IGNORECASE) or re.search(pattern, href, re.IGNORECASE):
+                matching_link = (text, href)
+                break
+
+        if not matching_link:
+            logger.warning(f"  [FAIL] Month End ZIP link not found for {month_name} {target_year}")
+            return 0
+
+        link_text, link_href = matching_link
+        zip_url = urllib.parse.urljoin(self.DISCLOSURES_URL, link_href)
+        logger.info(f"  [OK] Found record: '{link_text}'")
+        logger.info(f"  Downloading ZIP from: {zip_url}...")
+
+        zip_name = zip_url.split("/")[-1]
+        zip_path = download_folder / zip_name
+
         try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+            with session.get(zip_url, headers=self.HEADERS, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(zip_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Click "Month End Portfolio" section if it exists
-            logger.info("Opening 'Month End Portfolio' section...")
-            try:
-                month_end_btn = page.locator("*:has-text('Month End Portfolio')").filter(has_text="Disclosures").first
-                if month_end_btn.count() == 0:
-                    month_end_btn = page.get_by_text("Month End Portfolio").first
-                
-                if month_end_btn.count() > 0:
-                    month_end_btn.click()
-                    time.sleep(3)
-                    logger.info("  [OK] Section opened")
-            except:
-                logger.info("  → Section toggle not found, continuing...")
-
-            # Build the expected link text
-            last_day = calendar.monthrange(target_year, target_month)[1]
-            target_link_name = f"Portfolio Details as on {month_name} {last_day}, {target_year}"
-            
-            logger.info(f"Searching for: '{target_link_name}'...")
-            
-            # Try exact match first
-            download_link = page.get_by_role("link", name=target_link_name, exact=False)
-            
-            if download_link.count() == 0:
-                # Fallback: Filter by text components
-                download_link = page.locator("a").filter(has_text="Portfolio Details").filter(has_text=month_name).filter(has_text=str(target_year))
-                
-                # Try short month name
-                if download_link.count() == 0:
-                    short_month = month_name[:3]
-                    download_link = page.locator("a").filter(has_text="Portfolio Details").filter(has_text=short_month).filter(has_text=str(target_year))
-
-            if download_link.count() == 0:
-                logger.warning(f"  [FAIL] Link not found for {month_name} {target_year}")
+            file_size = zip_path.stat().st_size
+            if file_size < 1000:
+                zip_path.unlink(missing_ok=True)
+                logger.error(f"    [FAIL] Downloaded ZIP file too small ({file_size} bytes)")
                 return 0
 
-            actual_text = download_link.first.text_content().strip()
-            logger.info(f"  [OK] Found: '{actual_text}'")
-            
-            # Download the ZIP file
-            logger.info("Downloading ZIP file...")
-            with page.expect_download(timeout=120000) as download_info:
-                download_link.first.scroll_into_view_if_needed()
-                download_link.first.click()
-            
-            download = download_info.value
-            zip_name = download.suggested_filename or "portfolio.zip"
-            zip_path = download_folder / zip_name
-            download.save_as(zip_path)
-            logger.info(f"  [OK] Downloaded: {zip_name}")
+            # Magic bytes validation
+            with open(zip_path, "rb") as f_check:
+                magic = f_check.read(4)
+
+            if magic != self.ZIP_MAGIC:
+                zip_path.unlink(missing_ok=True)
+                logger.error(f"    [FAIL] Invalid ZIP signature: {magic.hex()}")
+                return 0
 
             # Extract ZIP contents
-            logger.info("Extracting ZIP contents...")
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(download_folder)
-                    file_count = len(zip_ref.namelist())
-                
-                logger.info(f"  [OK] Extracted {file_count} files")
-                
-                # Remove the ZIP file
-                zip_path.unlink()
-                logger.info("  [OK] Cleaned up ZIP file")
-                
-                return file_count
-                
-            except Exception as e:
-                logger.error(f"  [FAIL] Extraction failed: {e}")
-                return 0
+            logger.info(f"  Extracting ZIP ({file_size:,} bytes)...")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                bad_file = zip_ref.testzip()
+                if bad_file is not None:
+                    zip_path.unlink(missing_ok=True)
+                    logger.error(f"    [FAIL] Corrupted file in archive: {bad_file}")
+                    return 0
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+                zip_ref.extractall(download_folder)
+                file_count = len(zip_ref.namelist())
+
+            logger.info(f"  [OK] Extracted {file_count} files")
+
+            # Remove ZIP after successful extraction
+            zip_path.unlink(missing_ok=True)
+            logger.info("  [OK] Cleaned up ZIP file")
+
+            return file_count
+
+        except Exception as e:
+            logger.error(f"  [FAIL] Download or extraction failed: {e}")
+            if zip_path.exists():
+                zip_path.unlink(missing_ok=True)
+            return 0
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--month", type=int, required=True)
+    parser = argparse.ArgumentParser(description="DSP Mutual Fund Downloader")
+    parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2026)")
+    parser.add_argument("--month", type=int, required=True, help="Month (1-12)")
     args = parser.parse_args()
 
     downloader = DSPDownloader()

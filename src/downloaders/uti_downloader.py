@@ -7,9 +7,9 @@ import shutil
 import zipfile
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+
+import requests
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,22 +18,34 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class UTIDownloader(BaseDownloader):
     """
-    UTI Mutual Fund - Portfolio Downloader
-    
+    UTI Mutual Fund - Monthly Consolidated Portfolio Downloader
+
     URL: https://www.utimf.com/downloads/consolidate-all-portfolio-disclosure
+    API: GET https://www.utimf.com/api/get-consolidate-portfolio-disclosure
+    Features:
+    - Pure requests (no browser/Playwright required).
+    - Downloads the official consolidated ZIP archive.
+    - Extracts the master SEBI Exposure portfolio workbook (.xlsx / .xls).
+    - Idempotency via _SUCCESS.json and automatic consolidation into merged workbook.
     """
-    
+
+    API_URL = "https://www.utimf.com/api/get-consolidate-portfolio-disclosure"
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+    }
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
@@ -65,39 +77,35 @@ class UTIDownloader(BaseDownloader):
         if corrupt_target.exists():
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             corrupt_target = corrupt_target.parent / f"{corrupt_target.name}__{ts}"
-        
+
         logger.warning(f"UTI: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("UTI", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
-        
+
         logger.info("=" * 60)
         logger.info("UTI MUTUAL FUND DOWNLOADER STARTED")
         logger.info(f"Period: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
+
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"UTI: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "status": "skipped", 
+                    "status": "skipped",
                     "reason": "already_downloaded",
                     "duration": duration
                 }
@@ -114,19 +122,18 @@ class UTIDownloader(BaseDownloader):
                     return {"status": "success", "dry_run": True}
 
                 downloaded_path = self._run_download_flow(year, month, month_name, target_dir)
-                
+
                 if not downloaded_path:
                     logger.warning(f"UTI: No portfolio found for {month_name} {year}")
                     self.notifier.notify_not_published("UTI", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
                 self._create_success_marker(target_dir, year, month, 1)
-                
-                # Consolidate downloads
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("UTI", year, month, files_downloaded=1, duration=duration)
                 logger.success(f"[SUCCESS] UTI download completed: {downloaded_path.name}")
@@ -134,152 +141,121 @@ class UTIDownloader(BaseDownloader):
 
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                logger.error(f"Attempt {attempt + 1} failed: {last_error}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("UTI", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
+    def _discover_consolidated_record(self, session: requests.Session, year: int, month_name: str) -> Optional[Dict[str, Any]]:
+        api_url = f"{self.API_URL}?year={year}&month={month_name}"
+        logger.info(f"Calling UTI Consolidated Portfolio API: {api_url}")
+
+        resp = session.get(api_url, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
+
+        data = resp.json()
+        rows = data.get("rows", [])
+        logger.info(f"API returned {len(rows)} row(s)")
+
+        for row in rows:
+            cat = row.get("category", "")
+            rtype = row.get("type", "")
+            if cat == "Consolidate portfolio disclosure" and rtype.lower() == "zip":
+                return row
+
+        return None
+
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        url = "https://www.utimf.com/downloads/consolidate-all-portfolio-disclosure"
+        session = requests.Session()
+        record = self._discover_consolidated_record(session, target_year, month_name)
 
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+        if not record:
+            logger.warning(f"No matching consolidated portfolio record for {month_name} {target_year}")
+            return None
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, timeout=60000)
-            time.sleep(3)
-            logger.info("  [OK] Page loaded")
+        download_url = record.get("url") or record.get("doc")
+        name = record.get("name", f"Consolidated Portfolio {month_name} {target_year}")
+        logger.info(f"Found record: '{name}'")
+        logger.info(f"Download URL: {download_url}")
 
-            # 1) Select Year
-            logger.info(f"Selecting year: {target_year}...")
-            page.get_by_placeholder("Select Year").click()
-            time.sleep(1)
-            page.get_by_text(str(target_year), exact=True).click()
-            time.sleep(2)
-            logger.info(f"  [OK] Year {target_year} selected")
+        temp_zip = download_folder / f"temp_{month_name}_{target_year}.zip"
+        logger.info(f"Downloading ZIP archive...")
 
-            # 2) Select Month (with virtual scroll support)
-            logger.info(f"Selecting month: {month_name}...")
-            page.get_by_placeholder("select").nth(1).click()
-            time.sleep(1)
-            
-            # Try to click the month without scrolling first
-            try:
-                month_element = page.get_by_text(month_name, exact=True)
-                month_element.click(timeout=2000)
-                logger.info(f"  [OK] Month {month_name} selected (no scroll needed)")
-            except:
-                # Month not visible, need to scroll within dropdown
-                logger.info(f"  → Scrolling to find {month_name}...")
-                try:
-                    # Locate the virtual scroll viewport and scroll to bottom
-                    viewport = page.locator("cdk-virtual-scroll-viewport")
-                    viewport.evaluate("el => el.scrollTop = el.scrollHeight")
-                    time.sleep(0.5)
-                    
-                    # Now click the month
-                    page.get_by_text(month_name, exact=True).click()
-                    logger.info(f"  [OK] Month {month_name} selected (after scroll)")
-                except Exception as e:
-                    raise Exception(f"Could not select month: {str(e)[:100]}")
-            
-            time.sleep(2)
+        with session.get(download_url, headers=self.HEADERS, stream=True, timeout=120) as r:
+            r.raise_for_status()
+            with open(temp_zip, "wb") as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
 
-            # 3) Click Get Portfolio
-            logger.info("Clicking 'Get Portfolio' button...")
-            page.get_by_role("button", name="Get Portfolio").click()
-            time.sleep(5)
-            logger.info("  [OK] Button clicked")
+        zip_size = temp_zip.stat().st_size
+        logger.info(f"Downloaded ZIP size: {zip_size:,} bytes")
 
-            # 4) Download ZIP file
-            logger.info("Downloading ZIP file...")
-            with page.expect_download(timeout=60000) as download_info:
-                try:
-                    with page.expect_popup(timeout=5000) as page1_info:
-                        page.get_by_text("Consolidated Portfolio").click()
-                    page1 = page1_info.value
-                    page1.close()
-                except PlaywrightTimeout:
-                    pass
-            
-            download = download_info.value
-            
-            # Save ZIP to temp location
-            temp_zip = download_folder / f"temp_{month_name}_{target_year}.zip"
-            download.save_as(temp_zip)
-            logger.info(f"  [OK] ZIP downloaded")
+        # Validate ZIP archive integrity
+        with zipfile.ZipFile(temp_zip, "r") as z:
+            corrupt = z.testzip()
+            if corrupt is not None:
+                temp_zip.unlink(missing_ok=True)
+                raise ValueError(f"Corrupt file inside downloaded ZIP archive: {corrupt}")
 
-            # 5) Extract SEBI Exposure file from ZIP
-            logger.info("Extracting SEBI Exposure file...")
-            final_path = self._extract_sebi_file(temp_zip, download_folder, month_name, target_year)
-            
-            if not final_path:
-                raise Exception("SEBI Exposure file not found in ZIP")
-            
-            return final_path
+        # Extract master SEBI Exposure file
+        logger.info("Extracting SEBI Exposure file from ZIP...")
+        final_path = self._extract_sebi_file(temp_zip, download_folder, month_name, target_year)
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        if not final_path:
+            raise ValueError("SEBI Exposure file not found inside ZIP archive")
+
+        return final_path
 
     def _extract_sebi_file(self, zip_path: Path, target_folder: Path, month_name: str, year: int) -> Optional[Path]:
-        """Extract SEBI Exposure file from ZIP."""
+        """Extract SEBI Exposure file from ZIP and clean up archive."""
         temp_extract = target_folder / "temp_extract"
         temp_extract.mkdir(exist_ok=True)
-        
+
         try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_extract)
-            
+
             # Look for SEBI Exposure file
             found_file = None
             for root, dirs, files in os.walk(temp_extract):
                 for file in files:
                     normalized_name = file.lower().replace(" ", "")
-                    
-                    if (normalized_name.startswith("sebiexposure") or 
+
+                    if (normalized_name.startswith("sebiexposure") or
                         normalized_name.startswith("sebi_exposure")) and \
                        (file.endswith(".xlsx") or file.endswith(".xls")):
                         found_file = os.path.join(root, file)
                         break
                 if found_file:
                     break
-            
+
             if found_file:
-                # Use original filename from ZIP
                 original_name = Path(found_file).name
                 final_path = target_folder / original_name
-                
+
                 # Check for collision
                 if final_path.exists():
                     final_path = target_folder / f"{month_name}_{year}_{original_name}"
-                    
+
                 shutil.move(found_file, final_path)
                 logger.info(f"  [OK] Extracted: {final_path.name}")
                 return final_path
             else:
                 logger.warning("  [FAIL] SEBI Exposure file not found in ZIP")
                 return None
-                
+
         finally:
-            # Cleanup
-            if zip_path.exists(): zip_path.unlink()
-            if temp_extract.exists(): shutil.rmtree(temp_extract, ignore_errors=True)
+            # Cleanup temporary archive and folder
+            if zip_path.exists():
+                zip_path.unlink()
+            if temp_extract.exists():
+                shutil.rmtree(temp_extract, ignore_errors=True)
 
 
 if __name__ == "__main__":

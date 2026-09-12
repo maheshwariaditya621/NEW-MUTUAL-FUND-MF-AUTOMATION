@@ -1,15 +1,15 @@
 # src/downloaders/mirae_asset_downloader.py
 
 import os
+import re
 import time
 import json
 import shutil
-import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, List, Optional, Any, Tuple
+from urllib.parse import urljoin
+import requests
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,34 +18,64 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class MiraeAssetDownloader(BaseDownloader):
     """
-    Mirae Asset Mutual Fund - Portfolio Downloader
+    Mirae Asset Mutual Fund - Monthly Portfolio Downloader.
     
-    URL: https://www.miraeassetmf.co.in/downloads/portfolio
-    Uses search patterns in link text and numbered pagination.
+    Extracts monthly portfolio disclosure files directly from the Mirae Asset
+    GetDownloadsData REST API via lightweight HTTP requests without requiring
+    Playwright or browser automation.
     """
-    
+
+    BASE_URL = "https://www.miraeassetmf.co.in"
+    API_ENDPOINT = "https://www.miraeassetmf.co.in/AjaxService/GetDownloadsData"
+
+    DEFAULT_HEADERS = {
+        "Content-Type": "application/json; charset=UTF-8",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://www.miraeassetmf.co.in",
+        "Referer": "https://www.miraeassetmf.co.in/downloads/portfolio",
+    }
+
+    MONTH_MAP = {
+        "january": 1, "jan": 1,
+        "february": 2, "feb": 2,
+        "march": 3, "mar": 3,
+        "april": 4, "apr": 4,
+        "may": 5,
+        "june": 6, "jun": 6,
+        "july": 7, "jul": 7,
+        "august": 8, "aug": 8,
+        "september": 9, "sep": 9, "sept": 9,
+        "october": 10, "oct": 10,
+        "november": 11, "nov": 11,
+        "december": 12, "dec": 12,
+    }
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
-    
-    MONTH_ABBR = {
-        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
-        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
-        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
-    }
+
+    DATE_REGEX = re.compile(
+        r'as on\s+(?:(\d{1,2})(?:st|nd|rd|th)?\s+)?([A-Za-z]+)\s+(\d{4})',
+        re.IGNORECASE,
+    )
 
     def __init__(self):
         super().__init__("Mirae Asset Mutual Fund")
@@ -77,311 +107,240 @@ class MiraeAssetDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("MIRAE_ASSET", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
+    def _parse_title(self, title: str) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+        """Parses title to extract (year, month, scheme_name)."""
+        if not title:
+            return None, None, None
 
-    def download(self, year: int, month: int) -> Dict:
+        year = None
+        month = None
+        scheme_name = None
+
+        m = self.DATE_REGEX.search(title)
+        if m:
+            month_str = m.group(2).lower()
+            year_str = m.group(3)
+            month = self.MONTH_MAP.get(month_str)
+            try:
+                year = int(year_str)
+            except ValueError:
+                year = None
+
+        if " for " in title:
+            scheme_name = title.split(" for ", 1)[-1].strip()
+        elif " - " in title:
+            scheme_name = title.split(" - ", 1)[-1].strip()
+        else:
+            scheme_name = title.strip()
+
+        return year, month, scheme_name
+
+    def _get_monthly_portfolios(
+        self,
+        session: requests.Session,
+        year: int,
+        month: int,
+        pgsize: int = 100,
+        max_pages: int = 40,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves all monthly portfolio records for the given year and month.
+        Paginates through GetDownloadsData API until target records are collected
+        or older records are observed.
+        """
+        matched_records = []
+        pgno = 1
+        target_found = False
+
+        while pgno <= max_pages:
+            payload = {
+                "request": {
+                    "modulename": "portfolio_tab1",
+                    "pgno": pgno,
+                    "pgsize": pgsize,
+                }
+            }
+
+            resp = session.post(
+                self.API_ENDPOINT,
+                json=payload,
+                headers=self.DEFAULT_HEADERS,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            return_code = str(data.get("ReturnCode", ""))
+            if return_code != "0":
+                err_msg = data.get("ErrorMsg") or data.get("ReturnMsg")
+                logger.warning(f"MIRAE_ASSET API non-zero ReturnCode {return_code}: {err_msg}")
+                break
+
+            items = data.get("Data") or []
+            data_count = data.get("DataCount", 0)
+
+            if not items:
+                break
+
+            page_older = 0
+            for item in items:
+                title = item.get("Title") or ""
+                rec_year, rec_month, scheme_name = self._parse_title(title)
+
+                if rec_year == year and rec_month == month:
+                    target_found = True
+                    rel_url = item.get("URL") or ""
+                    full_url = urljoin(self.BASE_URL, rel_url)
+                    matched_records.append({
+                        "id": item.get("Id"),
+                        "title": title,
+                        "scheme_name": scheme_name,
+                        "url": full_url,
+                        "relative_url": rel_url,
+                    })
+                elif rec_year is not None and rec_month is not None:
+                    if (rec_year < year) or (rec_year == year and rec_month < month):
+                        page_older += 1
+
+            # Early termination: reverse chronological ordering
+            if target_found and page_older > 0:
+                logger.debug("Encountered records older than target month. Terminating pagination.")
+                break
+
+            if not target_found and page_older == len(items):
+                logger.debug("All records on page are older than target month. Not published.")
+                break
+
+            if pgno * pgsize >= data_count:
+                break
+
+            pgno += 1
+
+        return matched_records
+
+    def _is_valid_excel_content(self, content: bytes) -> bool:
+        """Validates that bytes represent a valid Excel file and not an HTML error page."""
+        if len(content) < 500:
+            return False
+        prefix = content[:200].lower()
+        if b"<html" in prefix or b"<!doctype html" in prefix or b"<head" in prefix:
+            return False
+        return content.startswith(b"PK\x03\x04") or content.startswith(b"\xd0\xcf\x11\xe0")
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
-        month_name = self.MONTH_NAMES[month]
-        month_abbr = self.MONTH_ABBR[month]
-        
+        month_name = self.MONTH_NAMES.get(month, f"Month-{month}")
+
         logger.info("=" * 60)
         logger.info(f"MIRAE ASSET MUTUAL FUND DOWNLOADER: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
-        # Idempotency
+
+        # 1) Idempotency Check
         if target_dir.exists():
-            if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
+            success_marker = target_dir / "_SUCCESS.json"
+            if success_marker.exists():
                 logger.info(f"Mirae Asset: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "status": "skipped", 
+                    "status": "skipped",
                     "reason": "already_downloaded",
-                    "duration": duration
+                    "duration": duration,
                 }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing success marker")
 
         self.ensure_directory(str(target_dir))
 
+        # 2) Download with retry
         last_error = ""
+        session = requests.Session()
+
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if DRY_RUN:
                     logger.info(f"MIRAE_ASSET: [DRY RUN] Would download {month_name} {year}")
                     return {"status": "success", "dry_run": True}
 
-                files_downloaded = self._run_download_flow(year, month, month_name, month_abbr, target_dir)
-                
-                if files_downloaded == 0:
-                    logger.warning(f"MIRAE_ASSET: No portfolios found for {month_name} {year}")
+                logger.info(f"Querying Mirae Asset API for {year}-{month:02d} portfolios...")
+                portfolios = self._get_monthly_portfolios(session, year, month)
+
+                if not portfolios:
+                    duration = time.time() - start_time
+                    logger.warning(f"MIRAE_ASSET: No portfolios found for {month_name} {year} (not yet published).")
                     self.notifier.notify_not_published("MIRAE_ASSET", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
-                    return {"status": "not_published"}
+                    if target_dir.exists() and not any(target_dir.iterdir()):
+                        shutil.rmtree(target_dir, ignore_errors=True)
+                    return {"status": "not_published", "amc": "MIRAE_ASSET", "year": year, "month": month}
+
+                logger.info(f"Discovered {len(portfolios)} portfolio records for {year}-{month:02d}. Starting download...")
+
+                files_downloaded = 0
+                for idx, item in enumerate(portfolios, 1):
+                    url = item["url"]
+                    orig_filename = os.path.basename(item["relative_url"].split("?")[0])
+                    if not orig_filename or "." not in orig_filename:
+                        safe_name = re.sub(r'[^\w\-_\.]', '_', item.get("scheme_name", f"scheme_{idx}"))
+                        orig_filename = f"{safe_name}.xlsx"
+
+                    dest_file = target_dir / orig_filename
+
+                    # Skip if file already exists and is valid
+                    if dest_file.exists() and dest_file.stat().st_size > 500:
+                        files_downloaded += 1
+                        continue
+
+                    # Download file
+                    resp = session.get(url, headers=self.DEFAULT_HEADERS, timeout=30)
+                    if resp.status_code != 200:
+                        logger.error(f"Download HTTP {resp.status_code} for {url}")
+                        continue
+
+                    content = resp.content
+                    if not self._is_valid_excel_content(content):
+                        logger.error(f"Invalid Excel or HTML response received for {url}")
+                        continue
+
+                    with open(dest_file, "wb") as f:
+                        f.write(content)
+
+                    files_downloaded += 1
+                    if idx % 10 == 0 or idx == len(portfolios):
+                        logger.info(f"Progress: {files_downloaded}/{len(portfolios)} files downloaded.")
+
+                if files_downloaded == 0:
+                    raise RuntimeError("Failed to download any valid portfolio files.")
 
                 # Success
                 self._create_success_marker(target_dir, year, month, files_downloaded)
-                
-                # Consolidate downloads
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("MIRAE_ASSET", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"[SUCCESS] MIRAE_ASSET download completed: {files_downloaded} files")
-                return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
+                logger.success(f"[SUCCESS] MIRAE_ASSET download completed: {files_downloaded} files in {duration:.2f}s")
+                return {
+                    "status": "success",
+                    "files_downloaded": files_downloaded,
+                    "duration": duration,
+                }
 
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                logger.error(f"Attempt {attempt + 1} failed: {last_error}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists() and not (target_dir / "_SUCCESS.json").exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("MIRAE_ASSET", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_abbr: str, download_folder: Path) -> int:
-        url = "https://www.miraeassetmf.co.in/downloads/portfolio"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to Mirae Asset Downloads page...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-
-            # Retry logic for data visibility
-            data_visible = False
-            for visibility_attempt in range(5):
-                # Use a specific container if possible for better performance
-                container = page.locator("#nav-portfolio-tab1")
-                if container.count() > 0 and container.locator("a").count() > 0:
-                    data_visible = True
-                    break
-                
-                logger.warning(f"MIRAE_ASSET: Data not visible (Attempt {visibility_attempt + 1}/5). Retrying in 15s...")
-                time.sleep(15)
-                page.reload(wait_until="load")
-                time.sleep(5)
-            
-            if not data_visible:
-                logger.error("MIRAE_ASSET: Data failed to load after 5 retries.")
-                raise Exception("Data visibility timeout: No portfolio links found in container.")
-
-            # Accept cookies
-            try:
-                accept_btn = page.get_by_role("link", name=re.compile("Accept", re.I)).first
-                if accept_btn.count() > 0 and accept_btn.is_visible(timeout=3000):
-                    accept_btn.click()
-                    time.sleep(1)
-            except:
-                pass
-
-            search_pattern = rf"{month_name}\s*,?\s*{target_year}"
-            logger.info(f"Searching for portfolios matching regex: {search_pattern}")
-            
-            downloaded_funds = set()
-            download_count = 0
-            page_number = 1
-            max_pages = 40 # Sanity limit
-            matching_found_once = False # To help decide when to stop
-
-            while page_number <= max_pages:
-                logger.info(f"Processing Page {page_number}...")
-                time.sleep(3)
-                
-                # Use a specific container if possible for better performance
-                container = page.locator("#nav-portfolio-tab1")
-                if container.count() > 0:
-                    all_links = container.locator("a").all()
-                else:
-                    all_links = page.get_by_role("link").all()
-                
-                download_links_metadata = []
-                newer_records_on_page = 0
-                older_records_on_page = 0
-                matches_on_page = 0
-                
-                # Date detection logic
-                months_list = ["January", "February", "March", "April", "May", "June", 
-                               "July", "August", "September", "October", "November", "December"]
-                target_month_idx = target_month - 1
-
-                for link in all_links:
-                    try:
-                        text = link.text_content()
-                        if not text or "Portfolio Details" not in text: continue
-                        
-                        text = text.strip()
-                        # Date detection logic
-                        is_older = False
-                        is_match = False
-                        
-                        if re.search(search_pattern, text, re.I):
-                            is_match = True
-                            matches_on_page += 1
-                            matching_found_once = True
-                        else:
-                            # Check if it's strictly older or newer
-                            year_match = re.search(r"(\d{4})", text)
-                            if year_match:
-                                yr = int(year_match.group(1))
-                                if yr < target_year:
-                                    is_older = True
-                                elif yr == target_year:
-                                    # Same year, check month
-                                    for idx, m in enumerate(months_list):
-                                        if re.search(rf"\b{m}\b", text, re.I):
-                                            if idx < target_month_idx:
-                                                is_older = True
-                                            break
-                        
-                        if is_match:
-                            # Extract fund name
-                            fund_name = "Unknown"
-                            if "for Mirae Asset " in text:
-                                fund_name = text.split("for Mirae Asset ")[1].strip()
-                            else:
-                                fund_name = text.strip()
-                            
-                            if fund_name not in downloaded_funds:
-                                download_links_metadata.append({"text": text, "fund_name": fund_name, "locator": link})
-                        elif is_older:
-                            older_records_on_page += 1
-                        else:
-                            newer_records_on_page += 1
-                            if page_number > 15: # Only log skip details on deeper pages to avoid spam
-                                logger.debug(f"    Skipping (Newer): {text[:60]}")
-                    except:
-                        continue
-                
-                logger.info(f"  Page {page_number} stats: Newer: {newer_records_on_page}, Matches: {matches_on_page}, Older: {older_records_on_page}")
-                
-                # Process downloads on this page
-                if download_links_metadata:
-                    logger.info(f"Found {len(download_links_metadata)} NEW portfolio links on page {page_number}")
-                    for meta in download_links_metadata:
-                        fund_name = meta["fund_name"]
-                        link_text = meta["text"]
-                        link = meta["locator"]
-                        
-                        logger.info(f"  Downloading: {fund_name[:60]}...")
-                        
-                        try:
-                            # Re-locate the link within the container to avoid detachment
-                            # We use a more specific selector to be sure
-                            try:
-                                with page.expect_download(timeout=60000) as download_info:
-                                    # Mirae Asset often triggers download AND opens a wrapper popup
-                                    try:
-                                        with page.expect_popup(timeout=8000) as popup_info:
-                                            link.click(force=True)
-                                        popup = popup_info.value
-                                        popup.close()
-                                    except:
-                                        # No popup, but expect_download is still waiting
-                                        pass
-                                
-                                download = download_info.value
-                                download_count += 1
-                                # Keep original filename but prefix with count for sorting
-                                safe_fund_name = fund_name[:30].replace(" ", "_").replace("/", "_")
-                                filename = f"{safe_fund_name}_{download.suggested_filename}"
-                                save_path = download_folder / filename
-                                
-                                download.save_as(save_path)
-                                logger.info(f"    [OK] Saved: {filename}")
-                                downloaded_funds.add(fund_name)
-                                time.sleep(1)
-                            except Exception as dl_inner:
-                                logger.debug(f"    Simplified download attempt for {fund_name}...")
-                                with page.expect_download(timeout=45000) as dl_info:
-                                    link.click(force=True)
-                                dl = dl_info.value
-                                dl_path = download_folder / dl.suggested_filename
-                                if not dl_path.exists():
-                                    dl.save_as(dl_path)
-                                downloaded_funds.add(fund_name)
-                                download_count += 1
-
-                        except Exception as e:
-                            logger.error(f"    [FAIL] Download failed for {fund_name}: {str(e)[:100]}")
-                # Decide if we can stop
-                if older_records_on_page >= 3:
-                     # We've reached the end of the target period records
-                    if matching_found_once:
-                        logger.info("Reached end of target period (older records detected). Stopping.")
-                        break
-                    else:
-                        # This should only happen if the target month was never published
-                        # but we saw older ones.
-                        logger.warning("Reached older records without finding any matches. Target month might be missing.")
-                        break
-
-                # Pagination
-                page_number += 1
-                try:
-                    # Look for next page number button specifically in the active tab's pagination
-                    page.mouse.wheel(0, 1000)
-                    time.sleep(2)
-
-                    pagination_container = container.locator(".pagination, .paging").first
-                    if pagination_container.count() == 0:
-                        pagination_container = page.locator(".pagination, .paging").first
-
-                    # Strategy: Try clicking page number directly
-                    num_btn = pagination_container.get_by_role("link", name=str(page_number), exact=True).first
-                    if num_btn.count() > 0 and num_btn.is_visible():
-                        logger.info(f"Navigating to page {page_number}...")
-                        num_btn.click()
-                        time.sleep(3)
-                    else:
-                        # Try "Next" or ">" button in the same container
-                        next_btn = pagination_container.get_by_role("link", name=re.compile(r"Next|>", re.I)).first
-                        if next_btn.count() > 0 and next_btn.is_visible():
-                            logger.info(f"Clicking 'Next' (>) to reveal more pages (Current max on UI: {page_number-1})...")
-                            next_btn.click()
-                            time.sleep(4)
-                            
-                            # Re-check if the number now appeared
-                            num_btn = pagination_container.get_by_role("link", name=str(page_number), exact=True).first
-                            if num_btn.count() > 0:
-                                num_btn.click()
-                                time.sleep(3)
-                        else:
-                            logger.info(f"No more pagination buttons for page {page_number} and no 'Next' button.")
-                            break
-                except Exception as e:
-                    logger.info(f"Pagination completed or interrupted: {e}")
-                    break
-
-            return download_count
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":
@@ -400,7 +359,7 @@ if __name__ == "__main__":
     elif status == "skipped":
         logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"[INFO]  Info: Month not yet published")
+        logger.info(f"[INFO] Info: Month not yet published")
     else:
         logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

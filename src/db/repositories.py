@@ -250,6 +250,42 @@ def upsert_amc(amc_name: str) -> int:
     return amc_id
 
 
+def normalize_scheme_key(name: str) -> str:
+    """
+    Normalizes minor cosmetic variations in scheme names:
+    - Trailing dots, asterisks, hyphens, and whitespace
+    - Standardizes compound words:
+      FLEXI CAP -> FLEXICAP
+      LARGE CAP -> LARGECAP
+      MID CAP -> MIDCAP
+      SMALL CAP -> SMALLCAP
+      MULTI CAP -> MULTICAP
+      MICRO CAP -> MICROCAP
+      MEGA CAP -> MEGACAP
+      MULTI ASSET -> MULTIASSET
+      LARGE & MID CAP / LARGE AND MID CAP -> LARGEMIDCAP
+    - Removes internal duplicate spaces and punctuation
+    """
+    if not name:
+        return ""
+    import re
+    n = name.upper().strip()
+    # Strip trailing punctuation (. * _ -)
+    n = re.sub(r'[\.\*\_\-\s]+$', '', n)
+    # Standardize compound keywords
+    n = re.sub(r'\bFLEXI\s+CAP\b', 'FLEXICAP', n)
+    n = re.sub(r'\bLARGE\s+CAP\b', 'LARGECAP', n)
+    n = re.sub(r'\bMID\s+CAP\b', 'MIDCAP', n)
+    n = re.sub(r'\bSMALL\s+CAP\b', 'SMALLCAP', n)
+    n = re.sub(r'\bMULTI\s+CAP\b', 'MULTICAP', n)
+    n = re.sub(r'\bMICRO\s+CAP\b', 'MICROCAP', n)
+    n = re.sub(r'\bMEGA\s+CAP\b', 'MEGACAP', n)
+    n = re.sub(r'\bLARGE\s*(&|AND)\s*MID\s*CAP\b', 'LARGEMIDCAP', n)
+    n = re.sub(r'\bMULTI\s*[-–—]?\s*ASSET\b', 'MULTIASSET', n)
+    # Remove all non-alphanumeric characters
+    return re.sub(r'[^A-Z0-9]', '', n)
+
+
 def upsert_scheme(
     amc_id: int,
     scheme_name: str,
@@ -261,12 +297,17 @@ def upsert_scheme(
 ) -> int:
     """
     Insert or get existing scheme with granular plan/option split.
-    Integrates 3-tier string resolution:
-    1. Explicit Mapping -> 2. Exact Match -> 3. Fuzzy Auto-Map (>95%)
+    Integrates 4-tier string resolution:
+    1. Scheme Aliases (Fast path)
+    2. Explicit Mapping (scheme_name_mappings)
+    3. Exact Match
+    4. Canonical Normalization Match & Strict Typo Auto-Map
     """
     cursor = get_cursor()
     original_name = scheme_name.upper().strip()
-    final_name = original_name
+    # Clean trailing dots or asterisks
+    cleaned_orig = original_name.rstrip('.* _-').strip()
+    final_name = cleaned_orig if cleaned_orig else original_name
     
     # Tier 0: Scheme Aliases (New Resolution Engine - Fast Path)
     cursor.execute(
@@ -282,39 +323,59 @@ def upsert_scheme(
         logger.info(f"Resolved '{original_name}' via ALIAS to scheme_id {alias[0]}")
         return alias[0]
 
-    # Tier 1: Legacy Mapping Validation (scheme_name_mappings)
+    # Tier 1: Explicit Mapping (scheme_name_mappings)
     cursor.execute(
         "SELECT canonical_name FROM scheme_name_mappings WHERE amc_id = %s AND source_name = %s LIMIT 1",
         (amc_id, original_name)
     )
     mapping = cursor.fetchone()
+    if not mapping and cleaned_orig != original_name:
+        cursor.execute(
+            "SELECT canonical_name FROM scheme_name_mappings WHERE amc_id = %s AND source_name = %s LIMIT 1",
+            (amc_id, cleaned_orig)
+        )
+        mapping = cursor.fetchone()
     
     if mapping:
         final_name = mapping[0]
     else:
         # Tier 2: Exact Match check
-        cursor.execute("SELECT 1 FROM schemes WHERE amc_id = %s AND scheme_name = %s LIMIT 1", (amc_id, original_name))
+        cursor.execute("SELECT 1 FROM schemes WHERE amc_id = %s AND scheme_name = %s LIMIT 1", (amc_id, final_name))
         is_exact = cursor.fetchone()
         
         if not is_exact:
-            # Tier 3: Fuzzy Auto-mapping (for minor typos > 95%)
-            cursor.execute("SELECT DISTINCT scheme_name FROM schemes WHERE amc_id = %s", (amc_id,))
+            # Tier 3: Canonical Normalization Match
+            orig_norm = normalize_scheme_key(final_name)
+            cursor.execute("SELECT scheme_name FROM schemes WHERE amc_id = %s", (amc_id,))
             existing_schemes = [row[0] for row in cursor.fetchall()]
             
-            if existing_schemes:
+            matched_canonical = None
+            for es in existing_schemes:
+                if normalize_scheme_key(es) == orig_norm:
+                    matched_canonical = es
+                    break
+            
+            if matched_canonical:
+                logger.info(f"Normalized scheme match: '{original_name}' -> '{matched_canonical}'")
+                final_name = matched_canonical
+            elif existing_schemes:
+                # Tier 4: Strict Levenshtein typo match (ratio >= 96% and same word count)
                 from rapidfuzz import fuzz
                 best_match = None
                 best_score = 0
+                orig_words = len(final_name.split())
                 for es in existing_schemes:
-                    score = fuzz.token_set_ratio(original_name, es)
-                    if score > 95 and score > best_score:
+                    # Require equal word count to prevent matching different fund categories
+                    if len(es.split()) != orig_words:
+                        continue
+                    score = fuzz.ratio(final_name, es)
+                    if score >= 96 and score > best_score:
                         best_score = score
                         best_match = es
                         
                 if best_match:
                     logger.info(f"Auto-mapping typo scheme '{original_name}' to '{best_match}' (Similarity: {best_score}%)")
                     final_name = best_match
-                    # Persist the mapping so it doesn't need to fuzzy match again
                     cursor.execute(
                         "INSERT INTO scheme_name_mappings (amc_id, source_name, canonical_name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                         (amc_id, original_name, best_match)

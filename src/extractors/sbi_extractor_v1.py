@@ -74,6 +74,8 @@ class SBIExtractorV1(BaseExtractor):
             for idx, row in df_raw.iterrows():
                 row_vals = [str(val).upper() if pd.notna(val) else "" for val in row.values]
                 row_text = " ".join(row_vals)
+                if any(bad in row_text for bad in ["TURNOVER", "AVERAGE NET ASSETS", "DEVIATION", "ILLIQUID"]):
+                    continue
                 if "GRAND TOTAL" in row_text or "NET ASSETS" in row_text or "TOTAL AUM" in row_text:
                     candidates = []
                     for val in row.values:
@@ -82,13 +84,20 @@ class SBIExtractorV1(BaseExtractor):
                             candidates.append(f_val)
                     
                     if candidates:
-                        if len(candidates) > 1:
-                            if abs(candidates[-1] - 100.0) < 0.01:
-                                raw_net_assets = candidates[-2]
+                        # 1. Look for 100.0 (% to NAV) and pick the preceding number
+                        found_100 = False
+                        for c_idx, c_val in enumerate(candidates):
+                            if abs(c_val - 100.0) < 0.05 and c_idx > 0:
+                                raw_net_assets = candidates[c_idx - 1]
+                                found_100 = True
+                                break
+                        if not found_100:
+                            # Filter out percentages (<= 100) and date stamps (>= 10,000,000)
+                            filtered = [c for c in candidates if c < 10000000 and abs(c - 100.0) > 0.1]
+                            if filtered:
+                                raw_net_assets = filtered[0]
                             else:
-                                raw_net_assets = candidates[-1]
-                        else:
-                            raw_net_assets = candidates[0]
+                                raw_net_assets = candidates[0]
                         
                     if raw_net_assets:
                         break

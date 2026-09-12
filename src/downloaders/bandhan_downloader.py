@@ -5,12 +5,19 @@ import time
 import json
 import shutil
 import re
-import calendar
+import random
+import base64
+import hashlib
+import hmac
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from typing import Dict, List, Optional, Any
+import requests
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding, hashes
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -19,32 +26,247 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class BandhanDownloader(BaseDownloader):
     """
     Bandhan Mutual Fund - Portfolio Downloader
     
-    URL: https://bandhanmutual.com/downloads/other-disclosures
+    Uses direct encrypted CMS API (AES-256-CBC + RSA-OAEP + HMAC-SHA256)
+    and downloads Excel portfolio workbooks directly from Google Cloud Storage.
+    No Playwright required.
     """
-    
+
+    API_URL = "https://pnservices.bandhanmutual.com/internal/investorservices/encdec/investor/v1/dashboard/cms-call"
+    API_KEY = "WtUbdIoA2i54d3q0zdm2ZUGMxrTuh57kzxOSeAoTInObKvAV"
+    STATIC_IV = b"fa1Z8M4DgI4BDQ=="  # 16 bytes
+
+    PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxZFiJZ5D9pLJcxq/1QJQ
+k4xxPLs6d5dtLzeago9iogRfgugKdAhPgS1fGNw0yNXzOm8bQeB/cZIq8yoo4sEre
+5EKehFeAGDlTLJjQo9yL1LrrYcmRPx9pYClTn9H2nVnOoRJ+ih9SGaf/6LrpYMx+
+sb8OMLOYyn5uoIf0sRNQcp+M/VadUuyJPU2/ohSHWvuKEcs6LVLvROG1knxxvfzIy
+RdzN1YDkIDlhpBrWx9IAF8zmjeibaUKuim7ogC5KuAQ3SyZMgZ98R9KtyfWsV8ht
+zem4mvaEf/ZwP1yQlJfIVCn0Fb8eA3Cp8+gc3YNM+j7t1awrWAf8TSol9C1i3sjw
+IDAQAB
+-----END PUBLIC KEY-----"""
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
 
-    def __init__(self):
+    def __init__(self, timeout: int = 60):
         super().__init__("Bandhan Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "bandhan"
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        })
+        self._cached_disclosures: Optional[Dict[str, Any]] = None
+
+    # -----------------------------------------------------------------------
+    # Cryptographic Methods (AES-256-CBC, RSA-OAEP, HMAC-SHA256)
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _generate_aes_key(length: int = 32) -> str:
+        charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+"
+        return "".join(random.choice(charset) for _ in range(length))
+
+    @staticmethod
+    def _generate_visitor_id(length: int = 32) -> str:
+        return "".join(random.choice("0123456789abcdef") for _ in range(length))
+
+    def _aes_encrypt(self, plaintext: str, key_str: str) -> str:
+        key_bytes = key_str.encode("utf-8")
+        data_bytes = plaintext.encode("utf-8")
+
+        padder = padding.PKCS7(128).padder()
+        padded_data = padder.update(data_bytes) + padder.finalize()
+
+        cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(self.STATIC_IV))
+        encryptor = cipher.encryptor()
+        ct = encryptor.update(padded_data) + encryptor.finalize()
+
+        b64 = base64.b64encode(ct).decode("ascii")
+        return b64.replace("+", "-").replace("/", "_").rstrip("=")
+
+    def _aes_decrypt(self, ciphertext: str, key_str: str) -> str:
+        key_bytes = key_str.encode("utf-8")
+        clean_text = ciphertext.strip().strip('"').strip("'")
+        part = clean_text.split("::")[0].replace("-", "+").replace("_", "/")
+        while len(part) % 4:
+            part += "="
+        raw = base64.b64decode(part)
+
+        cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(self.STATIC_IV))
+        decryptor = cipher.decryptor()
+        padded = decryptor.update(raw) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(128).unpadder()
+        return (unpadder.update(padded) + unpadder.finalize()).decode("utf-8")
+
+    def _rsa_encrypt(self, message: str) -> str:
+        pub_key = load_pem_public_key(self.PUBLIC_KEY_PEM)
+        ct = pub_key.encrypt(
+            message.encode("utf-8"),
+            asym_padding.OAEP(
+                mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return base64.b64encode(ct).decode("ascii")
+
+    def _hmac_sign(self, payload_json: str, visitor_id: str) -> str:
+        return hmac.new(
+            visitor_id.encode("utf-8"),
+            payload_json.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+    def call_cms_api(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Encrypts and sends a payload to the Bandhan CMS endpoint, decrypts and parses response.
+        """
+        aes_key = self._generate_aes_key(32)
+        visitor_id = self._generate_visitor_id(32)
+        timestamp = str(int(time.time() * 1000))
+
+        payload_json = json.dumps(payload, separators=(",", ":"))
+        encrypted_body = self._aes_encrypt(payload_json, aes_key)
+
+        rsa_envelope = f"{aes_key}::{encrypted_body[-32:]}"
+        client_signature = self._rsa_encrypt(rsa_envelope)
+        bandhan_signature = self._hmac_sign(payload_json, visitor_id)
+        sign_key_enc = self._aes_encrypt(json.dumps(visitor_id), aes_key)
+
+        headers = {
+            "Content-Type": "text/plain",
+            "x-api-key": self.API_KEY,
+            "x-custom-timestamp": timestamp,
+            "dt-platform": "web",
+            "x-client-signature": client_signature,
+            "x-bandhan-signature": bandhan_signature,
+            "x-bandhan-sign-key": sign_key_enc,
+            "x-internal-proxy": "True",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Origin": "https://bandhanmutual.com",
+            "Referer": "https://bandhanmutual.com/",
+        }
+
+        response = self.session.post(
+            self.API_URL,
+            data=encrypted_body,
+            headers=headers,
+            timeout=self.timeout
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Bandhan API returned HTTP {response.status_code}: {response.text[:200]}")
+
+        decrypted_text = self._aes_decrypt(response.text, aes_key)
+        return json.loads(decrypted_text)
+
+    # -----------------------------------------------------------------------
+    # Portfolio Discovery Methods
+    # -----------------------------------------------------------------------
+
+    def get_statutory_portfolios(self, year: int, month: int) -> List[Dict[str, Any]]:
+        """
+        Queries statutory scheme portfolios for a given year and month.
+        Endpoint: https://bandhanmutual.com/statutory-disclosures/scheme-portfolios/monthly-half-yearly
+        """
+        month_name = self.MONTH_NAMES.get(month, "")
+        payload = {
+            "type": "SCHEME_PORTFOLIOS",
+            "data": {
+                "subcategory": "monthly-and-half-yearly",
+                "page": 1,
+                "financial_year": str(year),
+                "month": month_name,
+                "posts_per_page": 100
+            }
+        }
+        res = self.call_cms_api(payload)
+        items = res.get("data", [])
+        files = []
+        for item in items:
+            acf = item.get("acf_fields", {})
+            doc_name = acf.get("document_name", "")
+            scheme_info = acf.get("funds_mapping", {})
+            scheme_name = scheme_info.get("post_title", "") if isinstance(scheme_info, dict) else ""
+
+            for df in acf.get("disclosure_files", []):
+                url = df.get("url", "")
+                if url:
+                    files.append({
+                        "scheme_name": scheme_name,
+                        "document_name": doc_name,
+                        "filename": df.get("filename", "") or os.path.basename(url),
+                        "url": url,
+                        "id": df.get("id")
+                    })
+        return files
+
+    def get_archive_portfolios(self, year: int, month: int) -> List[Dict[str, Any]]:
+        """
+        Queries consolidated disclosure archives for historical months.
+        """
+        if self._cached_disclosures is None:
+            self._cached_disclosures = self.call_cms_api({"type": "ADDITIONAL_DISCLOSOURES"})
+
+        month_name = self.MONTH_NAMES.get(month, "").lower()
+        short_month = month_name[:3]
+        year_str = str(year)
+        short_year = year_str[-2:]
+
+        matched = []
+        containers = self._cached_disclosures.get("data", [])
+        for c in containers:
+            acf = c.get("acf_fields", {})
+            if not isinstance(acf, dict):
+                continue
+
+            for df in acf.get("disclosure_files", []):
+                doc_name = df.get("document_name", "")
+                link_obj = df.get("document_link") or {}
+                url = link_obj.get("url", "")
+                filename = link_obj.get("filename", "")
+
+                if not url:
+                    continue
+
+                combined = f"{doc_name.lower()} {filename.lower()} {url.lower()}"
+                
+                # Check for month match
+                has_month = (month_name in combined) or (short_month in combined) or (f"-{month:02d}-" in combined)
+                # Check for year match
+                has_year = (year_str in combined) or (f"-{short_year}." in combined)
+
+                if has_month and has_year:
+                    matched.append({
+                        "scheme_name": doc_name,
+                        "document_name": doc_name,
+                        "filename": filename or os.path.basename(url),
+                        "url": url
+                    })
+
+        return matched
+
+    # -----------------------------------------------------------------------
+    # Downloader Lifecycle & Execution Flow
+    # -----------------------------------------------------------------------
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -71,7 +293,6 @@ class BandhanDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("BANDHAN", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
@@ -86,16 +307,13 @@ class BandhanDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Bandhan: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -122,10 +340,10 @@ class BandhanDownloader(BaseDownloader):
                     if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
-                # Success
+                # Success marker
                 self._create_success_marker(target_dir, year, month, total_downloaded)
                 
-                # Consolidate downloads
+                # Consolidate downloads into merged file
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -144,124 +362,67 @@ class BandhanDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> int:
+        """
+        Fetches portfolio files via statutory scheme portfolios API,
+        falling back to consolidated disclosure archives if needed,
+        and downloads all workbooks directly from Google Cloud Storage.
+        """
         month_name = self.MONTH_NAMES[target_month]
-        last_day = calendar.monthrange(target_year, target_month)[1]
-        exact_date_str = f"{last_day} {month_name} {target_year}"
-        
-        url = "https://bandhanmutual.com/downloads/other-disclosures"
+        logger.info(f"Querying Bandhan portfolios for {month_name} {target_year}...")
 
-        pw = None
-        browser = None
+        # 1. Try statutory scheme portfolios first (covers latest/active months e.g. July 2026)
+        files_to_download = []
         try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+            statutory_files = self.get_statutory_portfolios(target_year, target_month)
+            if statutory_files:
+                logger.info(f"Found {len(statutory_files)} statutory scheme portfolio files for {month_name} {target_year}.")
+                files_to_download = statutory_files
+        except Exception as e:
+            logger.warning(f"Statutory query encountered an issue: {e}")
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(3)
-            
-            # 1) Handle initial popups
+        # 2. Fall back to archived consolidated portfolios if statutory returned none
+        if not files_to_download:
             try:
-                maybe_later = page.get_by_role("button", name="May be later")
-                if maybe_later.is_visible(timeout=3000):
-                    maybe_later.click()
-                    logger.info("Closed 'May be later' popup.")
-            except: pass
+                archive_files = self.get_archive_portfolios(target_year, target_month)
+                if archive_files:
+                    logger.info(f"Found {len(archive_files)} archive portfolio files for {month_name} {target_year}.")
+                    files_to_download = archive_files
+            except Exception as e:
+                logger.warning(f"Archive query encountered an issue: {e}")
 
-            # 2) Deep Scroll to load all dynamic content
-            logger.info(f"Scrolling to load document list for {exact_date_str}...")
-            # For 2024/2025, 60-80 scrolls are usually enough to cover the massive history
-            for _ in range(80):
-                page.evaluate("window.scrollBy(0, 1500)")
-                time.sleep(0.3)
-            page.evaluate("window.scrollTo(0, 0)")
-            time.sleep(1)
+        if not files_to_download:
+            logger.warning(f"No portfolio disclosures found for {month_name} {target_year}.")
+            return 0
 
-            # 3) Scan for schemes matching the target month/year
-            # Only download month-end portfolios (last day of month), not fortnightly reports
-            date_patterns = [
-                f"{last_day} {month_name} {target_year}",  # "31 January 2025"
-            ]
-            
-            logger.info(f"Searching for month-end portfolios with date: {date_patterns[0]}")
-            
-            raw_schemes = page.evaluate(f"""() => {{
-                const patterns = {json.dumps(date_patterns)};
-                return Array.from(document.querySelectorAll('p.text-sky-950'))
-                    .filter(el => {{
-                        const text = el.textContent;
-                        return text.includes("Bandhan") && patterns.some(p => text.includes(p));
-                    }})
-                    .map(el => el.textContent.trim());
-            }}""")
+        # 3. Download files directly via HTTP GET
+        total_downloaded = 0
+        for i, item in enumerate(files_to_download):
+            url = item["url"]
+            filename = item["filename"]
+            scheme_name = item.get("scheme_name", "")
+            save_path = download_folder / filename
 
-            logger.info(f"Found {len(raw_schemes)} total scheme listings.")
-            
-            # 4) Deduplicate by normalizing fund names
-            fund_groups = {}
-            for scheme_text in raw_schemes:
-                date_match = re.search(r'(\d{1,2}\s+\w+\s+\d{4})', scheme_text)
-                date_part = date_match.group(1) if date_match else ""
-                
-                fund_name_only = re.sub(r'\d{1,2}\s+\w+\s+\d{4}', '', scheme_text)
-                normalized_name = re.sub(r'[^\w\s]', '', fund_name_only.lower())
-                normalized_name = re.sub(r'\s+', ' ', normalized_name).strip()
-                
-                unique_key = f"{normalized_name}|{date_part}"
-                
-                if unique_key not in fund_groups or len(scheme_text) > len(fund_groups[unique_key]):
-                    fund_groups[unique_key] = scheme_text
-            
-            target_schemes = list(fund_groups.values())
-            logger.info(f"After deduplication: {len(target_schemes)} unique funds.")
-            
-            if not target_schemes:
-                return 0
+            # Deduplicate filename if necessary
+            if save_path.exists():
+                stem, ext = os.path.splitext(filename)
+                safe_name = re.sub(r'[\\/*?:"<>|]', "", scheme_name[:25]).strip()
+                save_path = download_folder / f"{stem}_{safe_name}{ext}"
 
-            # 5) Batch Download
-            total_downloaded = 0
-            for i, scheme_text in enumerate(target_schemes):
-                logger.info(f"  [{i+1}/{len(target_schemes)}] Downloading: {scheme_text}")
-                
-                try:
-                    item_loc = page.get_by_text(scheme_text, exact=True).first
-                    item_loc.scroll_into_view_if_needed()
-                    time.sleep(0.5)
-                    
-                    with page.expect_download(timeout=45000) as download_info:
-                        item_loc.click(timeout=15000, force=True)
-                    
-                    download = download_info.value
-                    save_filename = download.suggested_filename
-                    save_path = download_folder / save_filename
-                    
-                    if save_path.exists():
-                        stem = os.path.splitext(save_filename)[0]
-                        ext = os.path.splitext(save_filename)[1]
-                        safe_scheme = re.sub(r'[\\/*?:"<>|]', "", scheme_text[:30]).strip()
-                        save_filename = f"{stem}_{safe_scheme}{ext}"
-                        save_path = download_folder / save_filename
+            logger.info(f"  [{i+1}/{len(files_to_download)}] Downloading: {filename} ({scheme_name})")
+            try:
+                res = self.session.get(url, stream=True, timeout=60)
+                res.raise_for_status()
 
-                    download.save_as(save_path)
-                    total_downloaded += 1
-                except Exception as e:
-                    logger.error(f"    [FAIL] Download failed for {scheme_text}: {str(e)[:100]}")
-            
-            return total_downloaded
+                with open(save_path, "wb") as f:
+                    for chunk in res.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+                total_downloaded += 1
+            except Exception as e:
+                logger.error(f"    [FAIL] Failed to download {url}: {e}")
+
+        return total_downloaded
 
 
 if __name__ == "__main__":
@@ -273,23 +434,17 @@ if __name__ == "__main__":
     parser.add_argument("--redo", action="store_true", help="Redo mode")
     args = parser.parse_args()
 
-    # Pass global config if needed (though Bandhan uses config.DRY_RUN)
-    # To keep it simple, we'll just run it. 
-    # The BandhanDownloader already uses config.DRY_RUN, but we can override locally if needed.
-    
     downloader = BandhanDownloader()
     result = downloader.download(args.year, args.month)
-    
-    # CRITICAL: Print JSON result for orchestrator to capture
     print(json.dumps(result))
 
     status = result["status"]
     if status == "success":
-        logger.success(f"[SUCCESS] Success: Downloaded {result.get('files_downloaded', 0)} file(s)")
+        logger.success(f"[SUCCESS] Downloaded {result.get('files_downloaded', 0)} file(s)")
     elif status == "skipped":
-        logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
+        logger.success(f"[SUCCESS] Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"[INFO]  Info: Month not yet published")
+        logger.info(f"[INFO] Month not yet published")
     else:
         logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

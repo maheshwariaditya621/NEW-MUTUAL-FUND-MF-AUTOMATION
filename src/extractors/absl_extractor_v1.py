@@ -202,15 +202,31 @@ class ABSLExtractorV1(BaseExtractor):
         return any(kw in sheet_lower for kw in skip_keywords)
 
     def _extract_scheme_name(self, df_full: pd.DataFrame, sheet_name: str) -> str:
-        """Extract scheme name from Row 0, Col 1 or fallback."""
+        """Extract scheme name by scanning the first few rows."""
         try:
+            # Scan first 3 rows for a valid scheme name
+            for row_idx in range(min(3, len(df_full))):
+                for col_idx in range(len(df_full.columns)):
+                    cell_val = df_full.iloc[row_idx, col_idx]
+                    if pd.notna(cell_val):
+                        val_str = str(cell_val).strip()
+                        val_upper = val_str.upper()
+                        # Scheme names usually contain AMC name or typical keywords
+                        if len(val_str) > 10 and (
+                            "ADITYA BIRLA SUN LIFE" in val_upper or 
+                            any(kw in val_upper for kw in ["FUND", "ETF", "INDEX", "PLAN", "YOJNA", "SCHEME", "FOF"])
+                        ):
+                            # Ensure it's not a generic header like "Name of the Instrument"
+                            if "INSTRUMENT" not in val_upper and "PORTFOLIO" not in val_upper:
+                                # Remove single quotes as requested (e.g. '95 Fund -> 95 Fund)
+                                return val_str.replace("'", "")
+            
+            # Fallback to old behavior
             if len(df_full.columns) > 1:
                 cell_val = df_full.iloc[0, 1]
                 if pd.notna(cell_val):
                     name = str(cell_val).strip()
-                    # Remove single quotes as requested (e.g. '95 Fund -> 95 Fund)
                     name = name.replace("'", "")
-                    # Clean up "SEBI " prefix if present in sheet name but not in Row 0
                     return name
             return sheet_name
         except:

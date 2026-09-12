@@ -5,11 +5,14 @@ import time
 import json
 import shutil
 import re
+import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+from urllib.parse import unquote
+
+import requests
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,24 +21,36 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class WhiteOakDownloader(BaseDownloader):
     """
-    WhiteOak Mutual Fund - Portfolio Downloader
-    
+    WhiteOak Mutual Fund - Monthly Scheme Portfolio Downloader
+
     URL: https://mf.whiteoakamc.com/regulatory-disclosures/scheme-portfolios
-    Uses pagination and a "Monthly" tab.
-    Downloads multiple files per month (one per scheme).
+    API: GET https://cms.whiteoakamc.com/api/scheme-portfolios
+    Features:
+    - Pure requests (no browser/Playwright required).
+    - Uses Strapi CMS JSON API with efficient pagination (pageSize=100).
+    - Scheme-level monthly portfolio disclosures (.xlsx).
+    - Idempotency via _SUCCESS.json and automatic consolidation into merged workbook.
     """
-    
+
+    API_URL = "https://cms.whiteoakamc.com/api/scheme-portfolios"
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    ZIP_MAGIC = b"PK\x03\x04"
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
@@ -67,40 +82,35 @@ class WhiteOakDownloader(BaseDownloader):
         if corrupt_target.exists():
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             corrupt_target = corrupt_target.parent / f"{corrupt_target.name}__{ts}"
-        
+
         logger.warning(f"WHITEOAK: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("WHITEOAK", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
-        month_short = month_name[:3]
-        
+
         logger.info("=" * 60)
         logger.info("WHITEOAK MUTUAL FUND DOWNLOADER STARTED")
         logger.info(f"Period: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
+
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"WhiteOak: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "status": "skipped", 
+                    "status": "skipped",
                     "reason": "already_downloaded",
                     "duration": duration
                 }
@@ -116,20 +126,18 @@ class WhiteOakDownloader(BaseDownloader):
                     logger.info(f"WHITEOAK: [DRY RUN] Would download {month_name} {year}")
                     return {"status": "success", "dry_run": True}
 
-                files_downloaded = self._run_download_flow(year, month, month_name, month_short, target_dir)
-                
+                files_downloaded = self._run_download_flow(year, month, month_name, target_dir)
+
                 if files_downloaded == 0:
                     logger.warning(f"WHITEOAK: No portfolios found for {month_name} {year}")
                     self.notifier.notify_not_published("WHITEOAK", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
-                # Success
                 self._create_success_marker(target_dir, year, month, files_downloaded)
-                
-                # Consolidate downloads
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("WHITEOAK", year, month, files_downloaded=files_downloaded, duration=duration)
                 logger.success(f"[SUCCESS] WHITEOAK download completed: {files_downloaded} files")
@@ -137,204 +145,140 @@ class WhiteOakDownloader(BaseDownloader):
 
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                logger.error(f"Attempt {attempt + 1} failed: {last_error}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("WHITEOAK", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_short: str, download_folder: Path) -> int:
-        url = "https://mf.whiteoakamc.com/regulatory-disclosures/scheme-portfolios"
+    def _discover_monthly_portfolios(self, session: requests.Session, year: int, month: int, month_name: str) -> List[Dict[str, Any]]:
+        logger.info(f"Querying WhiteOak CMS API for {month_name} {year} monthly disclosures...")
 
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
+        month_full = calendar.month_name[month]
+        month_abbr = calendar.month_abbr[month]
+        date_pattern = re.compile(rf"\b({month_full}|{month_abbr})\s*{year}\b", re.IGNORECASE)
+
+        matching_records = []
+        page = 1
+        page_count = 1
+        max_pages = 5
+
+        while page <= page_count and page <= max_pages:
+            params = {
+                "pagination[page]": page,
+                "pagination[pageSize]": 100,
+                "sort[0]": "published_date:desc",
+                "sort[1]": "id:desc",
+                "populate": "*",
+                "filters[period][$eq]": "monthly"
+            }
+
+            resp = session.get(self.API_URL, params=params, headers=self.HEADERS, timeout=30)
+            resp.raise_for_status()
+
+            body = resp.json()
+            items = body.get("data", [])
+            pagination = body.get("meta", {}).get("pagination", {})
+            page_count = pagination.get("pageCount", page_count)
+
+            found_on_page = 0
+            for item in items:
+                attrs = item.get("attributes", {})
+                scheme_name = (attrs.get("scheme_name") or "").strip()
+                doc_name = (attrs.get("doc_name") or "").strip()
+                published_date = (attrs.get("published_date") or "").strip()
+
+                doc_file = (attrs.get("doc_file") or {}).get("data") or {}
+                file_attrs = doc_file.get("attributes") or {}
+
+                file_url = (file_attrs.get("url") or "").strip()
+                file_name = (file_attrs.get("name") or "").strip()
+
+                if not file_url:
+                    continue
+
+                text_to_search = f"{doc_name} {file_name} {file_url}"
+                if date_pattern.search(text_to_search):
+                    matching_records.append({
+                        "scheme_name": scheme_name,
+                        "doc_name": doc_name,
+                        "published_date": published_date,
+                        "file_url": file_url,
+                        "file_name": file_name,
+                    })
+                    found_on_page += 1
+
+            page += 1
+            # If we found records on this page and none on next or past target, can stop
+            if matching_records and found_on_page == 0:
+                break
+
+        return matching_records
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
+        session = requests.Session()
+        records = self._discover_monthly_portfolios(session, target_year, target_month, month_name)
+
+        logger.info(f"Discovered {len(records)} monthly portfolio record(s) for {month_name} {target_year}")
+        if not records:
+            return 0
+
+        files_downloaded = 0
+        for idx, rec in enumerate(records, 1):
+            url = rec["file_url"]
+            scheme = rec["scheme_name"]
+            raw_filename = rec["file_name"] or Path(unquote(url.split("?")[0])).name
+
+            safe_scheme = re.sub(r"[^\w\-_.]", "_", scheme)[:40]
+            filename = f"{safe_scheme}_{raw_filename}"
+            target_path = download_folder / filename
+
+            logger.info(f"  [{idx}/{len(records)}] Downloading: {scheme}")
+            logger.info(f"      URL: {url}")
+            logger.info(f"      Saving to: {filename}")
+
             try:
-                browser = pw.chromium.launch(
-                    headless=HEADLESS,
-                    channel="chrome",
-                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars", "--disable-dev-shm-usage", "--disable-gpu"]
-                )
-            except:
-                browser = pw.chromium.launch(
-                    headless=HEADLESS,
-                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-                )
+                with session.get(url, headers=self.HEADERS, stream=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(target_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=65536):
+                            if chunk:
+                                f.write(chunk)
 
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True,
-                extra_http_headers={
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Referer": "https://mf.whiteoakamc.com/",
-                    "Connection": "keep-alive"
-                }
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+                file_size = target_path.stat().st_size
+                if file_size < 1000:
+                    target_path.unlink(missing_ok=True)
+                    logger.error(f"    [FAIL] File too small ({file_size} bytes)")
+                    continue
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
+                # Validate XLSX Magic Bytes
+                with open(target_path, "rb") as f:
+                    magic = f.read(4)
 
-            # 1. Selection of 'Monthly' filter
-            logger.info("Selecting 'Monthly' filter...")
-            monthly_filter = page.locator('label[for="monthly"]')
-            if monthly_filter.count() > 0:
-                monthly_filter.click()
-                # Wait for results to refresh (look for the results total updating if possible, or just sleep)
-                time.sleep(10) 
-                logger.info("  [OK] 'Monthly' filter clicked and waited for refresh")
-            else:
-                # Fallback to finding label by text
-                monthly_filter = page.locator('label').filter(has_text=re.compile("^Monthly$", re.I)).first
-                if monthly_filter.count() > 0:
-                    monthly_filter.click()
-                    time.sleep(10)
-                    logger.info("  [OK] 'Monthly' filter clicked (fallback)")
-                else:
-                    logger.warning("  ⚠ 'Monthly' filter button (label[for='monthly']) not found. Using default 'All Type' view...")
+                if magic != self.ZIP_MAGIC:
+                    logger.warning(f"    [WARN] Magic bytes {magic.hex()} (expected {self.ZIP_MAGIC.hex()})")
 
-            # 2. Iterate through pages
-            logger.info(f"Searching for {month_name} {target_year} portfolio links...")
-            
-            success_count = 0
-            processed_items = set() 
-            
-            page_num = 1
-            max_pages = 50 
-            
-            # Since Dec 2025 might be far back, we need a robust stopping condition
-            # We skip older months until we find our target month
-            # We keep going until we've found matches and then see an older month OR year.
-            # But the user says 19 files, so we scan until we find them.
-            
-            while page_num <= max_pages:
-                logger.info(f"  --- Scanning Page {page_num} ---")
-                
-                # Wait for any loader to disappear and content to stabilize
-                time.sleep(5)
-                
-                # Target the list items (li) which are the actual rows
-                rows = page.locator("li").all()
-                
-                if not rows:
-                    logger.info(f"  No disclosures (li) found on page {page_num}.")
-                    # Fallback to broader search if structure changed
-                    rows = page.locator("div.DisclosuresPage_flex, div.row").all()
-                
-                matches_on_page = 0
-                older_rows_on_page = 0
-                
-                months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-                target_month_idx = months_list.index(month_name)
+                # Validate openability
+                try:
+                    wb = openpyxl.load_workbook(target_path, read_only=True)
+                    sheet_count = len(wb.sheetnames)
+                    wb.close()
+                    logger.info(f"    [OK] Validated {filename}: {sheet_count} sheet(s), {file_size:,} bytes")
+                except Exception as e:
+                    logger.warning(f"    [WARN] openpyxl load check: {e} (keeping file)")
 
-                for row in rows:
-                    # Look for the name div within the li using partial class match for resilience
-                    name_el = row.locator("[class*='DisclosuresPage_name']").first
-                    if name_el.count() == 0:
-                        continue
-                        
-                    txt = name_el.inner_text().strip().replace('\n', ' ')
-                    if "Portfolio Disclosure" not in txt: continue
-                    
-                    # Pattern matching for Year and Month - handle "November2025" (no space)
-                    month_pattern = rf"{month_name}"
-                    year_pattern = rf"{target_year}"
-                    
-                    if re.search(month_pattern, txt, re.I) and re.search(year_pattern, txt):
-                        if txt in processed_items:
-                            continue
-                        
-                        logger.info(f"  [FOUND] {txt[:100]}...")
-                        
-                        try:
-                            # The download button is in a div with class containing 'download'
-                            download_btn = row.locator("[class*='DisclosuresPage_download']").first
-                            
-                            if download_btn.count() == 0:
-                                # Fallback to the last action button if specific download class not found
-                                download_btn = row.locator("[class*='DisclosuresPage_actionBtn']").last
+                files_downloaded += 1
 
-                            if download_btn.count() > 0:
-                                logger.info(f"    Triggering download...")
-                                try:
-                                    with page.expect_download(timeout=120000) as download_info:
-                                        # Use standard click first, force=True to bypass overlapping elements
-                                        download_btn.click(force=True, timeout=15000)
-                                    
-                                    download = download_info.value
-                                    original_filename = download.suggested_filename
-                                    save_path = download_folder / original_filename
-                                    
-                                    if save_path.exists():
-                                        logger.warning(f"    File already exists: {original_filename}")
-                                        success_count += 1
-                                        processed_items.add(txt)
-                                        continue
+            except Exception as e:
+                logger.error(f"    [FAIL] Error downloading {filename}: {e}")
+                if target_path.exists():
+                    target_path.unlink(missing_ok=True)
 
-                                    download.save_as(str(save_path))
-                                    logger.info(f"    [OK] Saved: {original_filename}")
-                                    success_count += 1
-                                    matches_on_page += 1
-                                    processed_items.add(txt)
-                                except Exception as inner_e:
-                                    logger.error(f"    [FAIL] Download capture failed: {str(inner_e)[:100]}")
-                            else:
-                                logger.warning(f"    [FAIL] Download button not found in row container.")
-                            
-                        except Exception as e:
-                            logger.error(f"    [FAIL] Row processing error: {str(e)[:100]}")
-                    
-                    # Check if this row is strictly OLDER than our target period to help decide when to stop
-                    is_older = False
-                    if any(re.search(rf"\b{yr}\b", txt) for yr in range(2000, target_year)):
-                        is_older = True
-                    elif re.search(rf"{target_year}", txt):
-                        # Same year, check if month is older
-                        for idx, m in enumerate(months_list):
-                            if idx < target_month_idx and re.search(rf"{m}", txt, re.I):
-                                is_older = True
-                                break
-                    
-                    if is_older:
-                        older_rows_on_page += 1
-
-                logger.info(f"  Summary Page {page_num}: Found {matches_on_page} matches. Total so far: {success_count}.")
-
-                # --- Pagination ---
-                # Fixed pagination logic based on aria-label
-                next_btn = page.locator('a[aria-label="Next page"]').first
-                
-                # Check if visible and not disabled
-                is_disabled = next_btn.count() > 0 and ("disabled" in (next_btn.get_attribute("class") or "").lower() or next_btn.get_attribute("aria-disabled") == "true")
-                
-                if next_btn.count() > 0 and next_btn.is_visible() and not is_disabled:
-                    # Stopping condition: Only stop if we've found files and now see significant older rows
-                    # Or if we've found any older rows at all (aggressive)
-                    if older_rows_on_page >= 3:
-                        logger.info("  Reached end of target period (older months/years detected). Stopping.")
-                        break
-                    
-                    logger.info("  Navigating to next page...")
-                    next_btn.click()
-                    page_num += 1
-                    time.sleep(3) # Short wait for next page to start loading
-                else:
-                    logger.info("  No 'Next' button available (or disabled). Stopping.")
-                    break
-
-            return success_count
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        return files_downloaded
 
 
 if __name__ == "__main__":

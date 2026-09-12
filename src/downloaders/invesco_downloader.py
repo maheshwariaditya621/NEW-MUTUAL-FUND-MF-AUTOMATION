@@ -1,15 +1,15 @@
 # src/downloaders/invesco_downloader.py
 
 import os
+import re
 import time
 import json
 import shutil
-import re
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, List, Optional, Any, Set
+import requests
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,51 +18,68 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class InvescoDownloader(BaseDownloader):
     """
-    Invesco Mutual Fund - Portfolio Downloader
+    Invesco Mutual Fund - Monthly Portfolio Downloader.
     
-    URL: https://invescomutualfund.com/literature-and-form?tab=Complete
-    Features:
-    - Persistent Session for efficiency.
-    - Iterates through 6 product categories.
-    - Column-based download link extraction (Jan=Col 2, Dec=Col 13).
-    - Gold Standard compliance.
+    Extracts monthly scheme portfolio files directly from the Invesco
+    CompleteMonthlyHoldings backend REST API via direct HTTP requests.
+    Supports ALL scheme classifications (Equity, Fixed Income / Debt,
+    Hybrid, ETF, Fund of Funds, Index Funds).
     """
-    
-    CATEGORIES = [
-        "Equity",
-        "Fixed income",
-        "Fund of funds",
-        "Exchange traded fund",
-        "Hybrid",
-        "Fixed maturity plans"
+
+    BASE_URL = "https://www.invescomutualfund.com"
+    HOLDINGS_API_URL = "https://www.invescomutualfund.com/api/CompleteMonthlyHoldings"
+    CLASSIFICATION_API_URL = "https://www.invescomutualfund.com/api/ClassificationCompleteMonthlyHoldings"
+
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    MONTH_FIELD_MAP = {
+        1: ("JanUrl", "JanName"),
+        2: ("FebUrl", "FebName"),
+        3: ("MarUrl", "MarName"),
+        4: ("AprUrl", "AprName"),
+        5: ("MayUrl", "MayName"),
+        6: ("JunUrl", "JunName"),
+        7: ("JulUrl", "JulName"),
+        8: ("AugUrl", "AugName"),
+        9: ("SepUrl", "SepName"),
+        10: ("OctUrl", "OctName"),
+        11: ("NovUrl", "NovName"),
+        12: ("DecUrl", "DecName"),
+    }
+
+    FALLBACK_CLASSIFICATIONS = [
+        {"name": "Equity", "value": "equity"},
+        {"name": "Fixed income", "value": "fixed-income"},
+        {"name": "Fund of funds", "value": "fund-of-funds"},
+        {"name": "Exchange traded fund", "value": "exchange-traded-fund"},
+        {"name": "Hybrid", "value": "hybrid"},
+        {"name": "Fixed maturity plans", "value": "fixed-maturity-plans"},
+        {"name": "Index funds", "value": "index-funds"},
     ]
-    
-    MONTH_TO_COLUMN = {
-        1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7,
-        7: 8, 8: 9, 9: 10, 10: 11, 11: 12, 12: 13
-    }
-    
-    MONTH_ABBR = {
-        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
-        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
-        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
-    }
 
     def __init__(self):
         super().__init__("Invesco Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "invesco"
+        self._cached_classifications: Optional[List[Dict[str, str]]] = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -89,29 +106,154 @@ class InvescoDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Invesco", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
+    def _get_classifications(self, session: requests.Session) -> List[Dict[str, str]]:
+        """Fetch all supported fund classifications dynamically from the backend."""
+        if self._cached_classifications:
+            return self._cached_classifications
 
-    def download(self, year: int, month: int) -> Dict:
+        try:
+            resp = session.get(self.CLASSIFICATION_API_URL, headers=self.DEFAULT_HEADERS, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                    classes = []
+                    for item in data:
+                        val = (item.get("FunClassificationValue") or "").strip()
+                        name = (item.get("FundClassification") or "").replace("&nbsp;", " ").strip()
+                        if val and val.lower() != "select":
+                            classes.append({"name": name, "value": val})
+                    if classes:
+                        self._cached_classifications = classes
+                        return classes
+        except Exception as e:
+            logger.warning(f"Failed to fetch dynamic classifications ({e}), using fallback list.")
+
+        return self.FALLBACK_CLASSIFICATIONS
+
+    def _get_monthly_portfolios(
+        self, session: requests.Session, year: int, month: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Query CompleteMonthlyHoldings API across ALL fund classifications for the given month/year.
+        """
+        if not (1 <= month <= 12):
+            raise ValueError(f"Invalid month: {month}")
+
+        url_key, name_key = self.MONTH_FIELD_MAP[month]
+        categories = self._get_classifications(session)
+
+        all_schemes: List[Dict[str, Any]] = []
+        seen_urls: Set[str] = set()
+
+        for cat in categories:
+            cat_val = cat["value"]
+            cat_name = cat.get("name", cat_val.capitalize())
+            params = {"year": int(year), "classification": cat_val}
+
+            try:
+                resp = session.get(
+                    self.HOLDINGS_API_URL,
+                    params=params,
+                    headers=self.DEFAULT_HEADERS,
+                    timeout=25,
+                )
+                if resp.status_code != 200:
+                    logger.warning(f"Invesco API returned status {resp.status_code} for category {cat_val}")
+                    continue
+
+                data = resp.json()
+                if not isinstance(data, list):
+                    continue
+
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+
+                    scheme_name = (item.get("Name") or "").strip()
+                    raw_url = (item.get(url_key) or "").strip()
+                    if not scheme_name or not raw_url:
+                        continue
+
+                    full_url = urllib.parse.urljoin(self.BASE_URL, raw_url)
+                    if full_url in seen_urls:
+                        continue
+                    seen_urls.add(full_url)
+
+                    all_schemes.append({
+                        "scheme": scheme_name,
+                        "url": full_url,
+                        "month_name": (item.get(name_key) or "").strip(),
+                        "classification": cat_val,
+                        "classification_name": cat_name,
+                    })
+
+            except Exception as e:
+                logger.error(f"Error querying Invesco API for category {cat_val}: {e}")
+                continue
+
+        return all_schemes
+
+    def _download_file(
+        self, session: requests.Session, url: str, target_path: Path
+    ) -> bool:
+        """Download file from URL and validate file signature."""
+        try:
+            resp = session.get(url, headers=self.DEFAULT_HEADERS, stream=True, timeout=30)
+            if resp.status_code != 200:
+                logger.warning(f"Failed to download {url}: HTTP {resp.status_code}")
+                return False
+
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if "text/html" in content_type:
+                logger.warning(f"Skipping HTML content received for {url}")
+                return False
+
+            with open(target_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+
+            file_size = target_path.stat().st_size
+            if file_size == 0:
+                target_path.unlink(missing_ok=True)
+                return False
+
+            # Magic bytes validation: OpenXML (PK\x03\x04) or OLE XLS (\xd0\xcf\x11\xe0)
+            with open(target_path, "rb") as f:
+                magic = f.read(8)
+
+            if not (magic.startswith(b"PK\x03\x04") or magic.startswith(b"\xd0\xcf\x11\xe0")):
+                logger.warning(f"Invalid magic bytes ({magic[:4]!r}) for {target_path.name}")
+                target_path.unlink(missing_ok=True)
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error downloading {url}: {e}")
+            if target_path.exists():
+                target_path.unlink(missing_ok=True)
+            return False
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
-        month_abbr = self.MONTH_ABBR[month]
+        month_abbr = self.MONTH_FIELD_MAP[month][1].replace("Name", "")
         
         logger.info("=" * 60)
-        logger.info(f"INVESCO MUTUAL FUND DOWNLOADER: {year}-{month:02d} ({month_abbr})")
+        logger.info(f"INVESCO MUTUAL FUND DOWNLOADER: {year}-{month:02d}")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
         
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Invesco: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -127,20 +269,50 @@ class InvescoDownloader(BaseDownloader):
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if DRY_RUN:
-                    logger.info(f"{self.AMC_NAME}: [DRY RUN] Would download {month_abbr} {year}")
+                    logger.info(f"{self.AMC_NAME}: [DRY RUN] Would download {month:02d}/{year}")
                     return {"status": "success", "dry_run": True}
 
-                files_downloaded = self._run_download_flow(year, month, month_abbr, target_dir)
+                session = requests.Session()
+                schemes = self._get_monthly_portfolios(session, year, month)
                 
-                if files_downloaded == 0:
-                    logger.warning(f"{self.AMC_NAME}: No portfolios found for {month_abbr} {year}")
+                if not schemes:
+                    logger.warning(f"{self.AMC_NAME}: No portfolios found for {month:02d}/{year}")
                     self.notifier.notify_not_published("Invesco", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
+
+                logger.info(f"Found {len(schemes)} scheme portfolios for Invesco {year}-{month:02d} across all categories.")
+
+                files_downloaded = 0
+                for idx, item in enumerate(schemes, 1):
+                    scheme_name = item["scheme"]
+                    clean_scheme = scheme_name.replace("Invesco India ", "").replace("Invesco ", "").strip()
+                    clean_scheme = re.sub(r'[\\/*?:"<>|]', "_", clean_scheme).replace(" ", "_").replace("&", "and")
+                    clean_category = item["classification"].replace("-", "_")
+
+                    # Extract original extension or default to .xlsx
+                    path_name = urllib.parse.urlparse(item["url"]).path
+                    ext = os.path.splitext(path_name)[1].lower()
+                    if ext not in (".xlsx", ".xls"):
+                        ext = ".xlsx"
+
+                    fname = f"{clean_scheme}_{clean_category}{ext}"
+                    save_path = target_dir / fname
+
+                    logger.info(f"  [{idx:2d}/{len(schemes)}] Downloading ({item['classification_name']}): {scheme_name[:40]}...")
+                    if self._download_file(session, item["url"], save_path):
+                        files_downloaded += 1
+                        logger.info(f"       [OK] Saved: {fname} ({save_path.stat().st_size:,} bytes)")
+                    else:
+                        logger.warning(f"       [FAIL] Failed: {fname}")
+
+                if files_downloaded == 0:
+                    raise RuntimeError("Failed to download any valid portfolio files.")
 
                 self._create_success_marker(target_dir, year, month, files_downloaded)
                 
-                # Consolidate downloads
+                # Consolidate all downloaded scheme files into merged Excel
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -151,120 +323,13 @@ class InvescoDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)])
 
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("Invesco", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, download_folder: Path) -> int:
-        url = "https://invescomutualfund.com/literature-and-form?tab=Complete"
-        files_downloaded = 0
-        col_idx = self.MONTH_TO_COLUMN[target_month]
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to Invesco Holdings page...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
-
-            for category in self.CATEGORIES:
-                logger.info(f"Processing Category: {category}")
-                try:
-                    # Click category
-                    cat_loc = page.locator("#ClassificationCompleteMonthlyHoldings").get_by_text(category, exact=True)
-                    if cat_loc.count() > 0:
-                        cat_loc.first.click()
-                        time.sleep(2)
-                    
-                    # Select Year (Year elements are <li> tags, not a dropdown)
-                    year_loc = page.locator("#ddlYearCompleteMonthlyHoldings li").filter(has_text=re.compile(rf"^{target_year}$"))
-                    if year_loc.count() > 0:
-                        year_loc.first.click()
-                        logger.info(f"  [OK] Selected Year: {target_year}")
-                        time.sleep(4)
-                    else:
-                        logger.warning(f"  [FAIL] Year {target_year} not found in selection list")
-                        continue
-
-                    # Find rows
-                    rows = page.locator("tbody tr").all()
-                    if not rows:
-                        logger.info(f"  No data for {category}")
-                        continue
-
-                    cat_files = 0
-                    for row in rows:
-                        try:
-                            # Check for download link in specific month column
-                            dl_link = row.locator(f"td:nth-child({col_idx}) > a")
-                            if dl_link.count() == 0: continue
-
-                            scheme_name = row.locator("td").first.text_content().strip()
-                            clean_scheme = scheme_name.replace("Invesco India ", "").replace("Invesco ", "").strip()
-                            clean_scheme = clean_scheme.replace(" ", "_").replace("/", "_").replace("&", "and")
-                            clean_category = category.replace(" ", "_").replace("/", "_")
-                            
-                            logger.info(f"    Downloading: {scheme_name[:40]}...")
-
-                            try:
-                                with page.expect_download(timeout=30000) as download_info:
-                                    # Handle potential popup
-                                    with page.expect_popup(timeout=5000) as popup_info:
-                                        dl_link.click()
-                                    try:
-                                        popup = popup_info.value
-                                        popup.close()
-                                    except: pass # Popup might not open or close instantly
-                                
-                                dl = download_info.value
-                                fname = dl.suggested_filename
-                                save_path = download_folder / fname
-                                
-                                # Handle duplicate suggested filenames across schemes/categories
-                                if save_path.exists():
-                                    stem = os.path.splitext(fname)[0]
-                                    ext = os.path.splitext(fname)[1]
-                                    fname = f"{stem}_{clean_scheme}_{clean_category}{ext}"
-                                    save_path = download_folder / fname
-                                
-                                dl.save_as(save_path)
-                                logger.info(f"      [OK] Saved: {fname}")
-                                files_downloaded += 1
-                                cat_files += 1
-                                time.sleep(0.5)
-                                
-                            except Exception as e:
-                                logger.error(f"      [FAIL] Failed to download: {e}")
-
-                        except Exception as e:
-                            continue
-                    
-                    logger.info(f"  Category Summary: {cat_files} files from {category}")
-
-                except Exception as e:
-                    logger.error(f"Error processing category {category}: {e}")
-                    continue
-            
-            return files_downloaded
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":
@@ -283,7 +348,7 @@ if __name__ == "__main__":
     elif status == "skipped":
         logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"[INFO]  Info: Month not yet published")
+        logger.info(f"[INFO] Info: Month not yet published")
     else:
         logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

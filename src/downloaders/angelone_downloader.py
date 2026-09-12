@@ -9,8 +9,8 @@ import requests
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+import calendar
+from bs4 import BeautifulSoup
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -31,8 +31,8 @@ class AngelOneDownloader(BaseDownloader):
     """
     Angel One Mutual Fund - Portfolio Downloader
     
-    Uses Playwright to extract Next.js state data and identify direct XLSX download links.
-    Supports persistent browser sessions and "no-refresh" multi-month logic.
+    Extracts direct monthly portfolio XLSX links from https://www.angelonemf.com/downloads
+    using requests and BeautifulSoup.
     """
     
     MONTH_NAMES = {
@@ -222,123 +222,107 @@ class AngelOneDownloader(BaseDownloader):
         }
 
     def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> List[Path]:
-        """Internal flow using Playwright to extract direct links from page state."""
+        """Internal flow using requests and BeautifulSoup to extract and download direct XLSX files."""
         month_name = self.MONTH_NAMES[target_month]
-        month_abbr = month_name[:3]
-        
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--window-size=1920,1080", "--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                ignore_https_errors=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+        target_period_str = f"{month_name} {target_year}".lower()
+        target_period_file_str = f"{month_name.lower()}-{target_year}"
 
-            url = "https://www.angelonemf.com/downloads"
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=120000)
-            
-            # Wait for content or a bit of delay for Next.js to populate window object
-            time.sleep(5)
+        url = "https://www.angelonemf.com/downloads"
+        logger.info(f"Fetching downloads page from {url}...")
 
-            # Extract Next.js state or search in script tags
-            logger.info("Extracting website internal state...")
-            scripts = page.locator("script").all_inner_texts()
-            full_content = "".join(scripts)
-            
-            # Fallback to window state if script tags are fragmented
-            if not full_content or "disclosuresData" not in full_content:
-                logger.debug("Falling back to window state evaluation...")
-                eval_res = page.evaluate("() => { try { return JSON.stringify(window.__next_f); } catch(e) { return null; } }")
-                if eval_res:
-                    full_content = eval_res
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
 
-            # Search for XLSX links matching the period
-            # Use stricter patterns with delimiters and word boundaries to avoid "Mar" vs "Market" collision
-            patterns = [
-                rf'https://cms\.angelonemf\.com/[^\s"]+[-/_]{month_abbr}\b[^\s"]*?{target_year}[^\s"]*\.xlsx',
-                rf'https://cms\.angelonemf\.com/[^\s"]+{target_year}[-/_]{month_abbr}\b[^\s"]*\.xlsx',
-                rf'https://cms\.angelonemf\.com/[^\s"]+[-/_]{month_name}\b[^\s"]*?{target_year}[^\s"]*\.xlsx',
-                rf'https://cms\.angelonemf\.com/[^\s"]+{target_year}[-/_]{month_name}\b[^\s"]*\.xlsx'
-            ]
-            
-            all_links = []
-            for p_str in patterns:
-                found = re.findall(p_str, full_content, re.IGNORECASE)
-                all_links.extend(found)
-            
-            # Clean and deduplicate by URL first
-            unique_links = []
-            seen_urls = set()
-            for link in all_links:
-                clean_link = link.replace('\\/', '/').replace('\\', '').replace('"', '').replace('u0026', '&')
-                if clean_link not in seen_urls:
-                    # Filter for Portfolio related files
-                    if any(x in clean_link for x in ["Portfolio", "Monthly", "Scheme"]):
-                        unique_links.append(clean_link)
-                        seen_urls.add(clean_link)
-            
-            if not unique_links:
-                logger.warning(f"No matching XLSX links found for {month_name} {target_year}")
-                return []
-            
-            # SMART DEDUPLICATION: Many links from CMS are just versions (e.g. -1, -2)
-            # We normalize the fund name and keep the "latest" one.
-            dedup_map = {} # normalized_name -> (dl_url, version_num)
-            
-            for dl_url in unique_links:
-                filename = dl_url.split("/")[-1]
-                # Extract fund name part and possible version suffix
-                # Example Match: ...Nifty-Total-Market-ETF-1.xlsx -> Name: ...ETF, Version: 1
-                match = re.search(r'^(.*?)(?:-(\d+))?\.xlsx$', filename, re.I)
-                if match:
-                    base_part = match.group(1)
-                    version = int(match.group(2)) if match.group(2) else 0
-                    
-                    # Store if new or if version is higher
-                    if base_part not in dedup_map or version > dedup_map[base_part][1]:
-                        dedup_map[base_part] = (dl_url, version)
-                else:
-                    # Non-standard name, keep it as is
-                    dedup_map[filename] = (dl_url, 0)
+        session = requests.Session()
+        session.headers.update(headers)
 
-            final_links = [v[0] for v in dedup_map.values()]
-            logger.info(f"Found {len(unique_links)} potential links. Decided on {len(final_links)} unique fund files.")
-            
-            downloaded_paths = []
-            for idx, dl_url in enumerate(final_links):
-                try:
-                    # Preserve original filename from URL
-                    clean_filename = dl_url.split("/")[-1]
-                    save_path = download_folder / clean_filename
-                    
-                    logger.info(f"Downloading ({idx+1}/{len(final_links)}): {clean_filename}")
-                    
-                    # Use requests for faster direct downloads
-                    response = requests.get(dl_url, stream=True, timeout=60)
-                    if response.status_code == 200:
-                        with open(save_path, 'wb') as f:
-                            for chunk in response.iter_content(chunk_size=8192):
-                                f.write(chunk)
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        all_links = []
+        seen_urls = set()
+
+        for a in soup.find_all("a", href=True):
+            href = a.get("href", "").strip()
+            if not href.lower().endswith(".xlsx"):
+                continue
+
+            parent = a.find_parent(["tr", "div", "li"])
+            context_text = parent.get_text(" ", strip=True) if parent else ""
+            combined_text = f"{context_text} {href}".lower()
+
+            if "monthly portfolio" not in combined_text and "monthly-portfolio" not in combined_text:
+                continue
+
+            if any(term in combined_text for term in ["aaum", "tracking-error", "tracking error", "distributor", "fortnightly", "half-yearly"]):
+                continue
+
+            if target_period_str not in combined_text and target_period_file_str not in combined_text:
+                continue
+
+            if href in seen_urls:
+                continue
+            seen_urls.add(href)
+            all_links.append(href)
+
+        if not all_links:
+            logger.warning(f"No matching monthly portfolio XLSX links found for {month_name} {target_year}")
+            return []
+
+        # SMART DEDUPLICATION: Keep highest version (e.g. -1, -2)
+        dedup_map = {}
+        for dl_url in all_links:
+            filename = dl_url.split("/")[-1]
+            match = re.search(r'^(.*?)(?:-(\d+))?\.xlsx$', filename, re.I)
+            if match:
+                base_part = match.group(1)
+                version = int(match.group(2)) if match.group(2) else 0
+                if base_part not in dedup_map or version > dedup_map[base_part][1]:
+                    dedup_map[base_part] = (dl_url, version)
+            else:
+                dedup_map[filename] = (dl_url, 0)
+
+        final_links = [v[0] for v in dedup_map.values()]
+        logger.info(f"Found {len(all_links)} candidate links. Decided on {len(final_links)} unique fund files.")
+
+        downloaded_paths = []
+        for idx, dl_url in enumerate(final_links):
+            try:
+                clean_filename = dl_url.split("/")[-1]
+                save_path = download_folder / clean_filename
+
+                logger.info(f"Downloading ({idx+1}/{len(final_links)}): {clean_filename}")
+
+                dl_resp = session.get(dl_url, stream=True, timeout=60)
+                if dl_resp.status_code == 200:
+                    with open(save_path, 'wb') as f:
+                        for chunk in dl_resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                    # Validate file signature
+                    with open(save_path, 'rb') as f:
+                        magic = f.read(4)
+
+                    if magic == b"PK\x03\x04":
                         downloaded_paths.append(save_path)
                     else:
-                        logger.error(f"Failed to download {dl_url}: HTTP {response.status_code}")
-                except Exception as e:
-                    logger.error(f"Error downloading {dl_url}: {e}")
+                        logger.error(f"Invalid XLSX signature for {clean_filename}, deleting...")
+                        save_path.unlink(missing_ok=True)
+                else:
+                    logger.error(f"Failed to download {dl_url}: HTTP {dl_resp.status_code}")
+            except Exception as e:
+                logger.error(f"Error downloading {dl_url}: {e}")
 
-            return downloaded_paths
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        return downloaded_paths
 
 
 if __name__ == "__main__":

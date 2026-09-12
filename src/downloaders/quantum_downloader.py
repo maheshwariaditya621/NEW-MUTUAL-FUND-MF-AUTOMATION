@@ -119,68 +119,123 @@ class QuantumDownloader(BaseDownloader):
             message=f"Incomplete download detected and moved to quarantine. Reason: {reason}"
         )
 
-    def _api_call_with_retry(self, year: int, month: int) -> dict:
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": "https://www.quantumamc.com/portfolio/combined/-1/1/0/0"
+    }
+    
+    MONTH_NAMES = {
+        1: "January", 2: "February", 3: "March", 4: "April",
+        5: "May", 6: "June", 7: "July", 8: "August",
+        9: "September", 10: "October", 11: "November", 12: "December"
+    }
+
+    MONTH_SHORT_NAMES = {
+        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+    }
+
+    def _api_call_with_retry(self, year: int, month: int) -> list:
         """
-        Make API call with retry logic.
+        Make API call with retry logic and pagination handling.
         
         Args:
             year: Year
             month: Month
             
         Returns:
-            Parsed JSON response
+            List of all portfolio records matching criteria
         """
-        params = {
-            "productSchemeId": -1,
-            "yearId": year,
-            "monthId": month,
-            "Frequency": 1,
-            "pageIndex": 1
-        }
+        all_records = []
+        page_index = 1
+        total_pages = 1
         
-        logger.info(f"Calling Quantum API: {year}-{month:02d}")
-        
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                resp = requests.get(self.API_URL, params=params, timeout=30)
-                resp.raise_for_status()
-                
-                response_data = resp.json()
-                # Validate response structure
-                if "objProductPortfolioList" not in response_data:
-                    logger.error(f"Malformed API response: missing 'objProductPortfolioList'")
-                    raise ValueError("API response missing required data key")
-                
-                return response_data
+        while page_index <= total_pages:
+            params = {
+                "productSchemeId": -1,
+                "yearId": year,
+                "monthId": month,
+                "Frequency": 1,
+                "pageIndex": page_index
+            }
             
-            except requests.Timeout:
-                if attempt < MAX_RETRIES:
-                    backoff = RETRY_BACKOFF[attempt]
-                    logger.warning(f"Timeout on attempt {attempt + 1}/{MAX_RETRIES + 1} for {year}-{month:02d}, retrying in {backoff}s...")
-                    time.sleep(backoff)
-                else:
-                    logger.error(f"Max retries exceeded for {year}-{month:02d}")
-                    raise
+            logger.info(f"Calling Quantum API: {year}-{month:02d} (page {page_index})")
             
-            except requests.HTTPError as e:
-                status_code = e.response.status_code
+            page_data = None
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    resp = requests.get(self.API_URL, params=params, headers=self.HEADERS, timeout=30)
+                    resp.raise_for_status()
+                    
+                    response_data = resp.json()
+                    if "objProductPortfolioList" not in response_data:
+                        logger.error(f"Malformed API response: missing 'objProductPortfolioList'")
+                        raise ValueError("API response missing required data key")
+                    
+                    page_data = response_data
+                    break
                 
-                # Never retry on 4xx errors
-                if 400 <= status_code < 500:
-                    logger.error(f"HTTP {status_code} error (non-retryable) for {year}-{month:02d}")
-                    raise
-                
-                # Retry on 5xx errors
-                if 500 <= status_code < 600:
+                except requests.Timeout:
                     if attempt < MAX_RETRIES:
                         backoff = RETRY_BACKOFF[attempt]
-                        logger.warning(f"HTTP {status_code} on attempt {attempt + 1}/{MAX_RETRIES + 1} for {year}-{month:02d}, retrying in {backoff}s...")
+                        logger.warning(f"Timeout on attempt {attempt + 1}/{MAX_RETRIES + 1} for {year}-{month:02d}, retrying in {backoff}s...")
                         time.sleep(backoff)
                     else:
                         logger.error(f"Max retries exceeded for {year}-{month:02d}")
                         raise
-                else:
-                    raise
+                
+                except requests.HTTPError as e:
+                    status_code = e.response.status_code
+                    if 400 <= status_code < 500:
+                        logger.error(f"HTTP {status_code} error (non-retryable) for {year}-{month:02d}")
+                        raise
+                    if 500 <= status_code < 600:
+                        if attempt < MAX_RETRIES:
+                            backoff = RETRY_BACKOFF[attempt]
+                            logger.warning(f"HTTP {status_code} on attempt {attempt + 1}/{MAX_RETRIES + 1} for {year}-{month:02d}, retrying in {backoff}s...")
+                            time.sleep(backoff)
+                        else:
+                            logger.error(f"Max retries exceeded for {year}-{month:02d}")
+                            raise
+                    else:
+                        raise
+
+            if page_data:
+                total_pages = page_data.get("totalPageCount", 1)
+                records = page_data.get("objProductPortfolioList", [])
+                all_records.extend(records)
+                page_index += 1
+            else:
+                break
+                
+        return all_records
+
+    def _select_combined_record(self, records: list, year: int, month: int) -> dict:
+        """
+        Selects strictly the COMBINED / ALL FUNDS portfolio record.
+        """
+        month_name = self.MONTH_NAMES.get(month, "").lower()
+        month_short = self.MONTH_SHORT_NAMES.get(month, "").lower()
+        
+        candidates = []
+        for r in records:
+            if r.get("SchemeId") != -1 or r.get("FactSheetFreq") != 1:
+                continue
+            combined_str = f"{r.get('OriginalFileName', '')} {r.get('SchemeName', '')} {r.get('FSMonth', '')}".lower()
+            if str(year) in combined_str and (month_name in combined_str or month_short in combined_str):
+                candidates.append(r)
+                
+        if candidates:
+            return candidates[0]
+            
+        fallback = [r for r in records if r.get("SchemeId") == -1 and r.get("FactSheetFreq") == 1]
+        if fallback:
+            return fallback[0]
+            
+        return None
 
     def download(self, year: int, month: int) -> Dict:
         """
@@ -203,11 +258,8 @@ class QuantumDownloader(BaseDownloader):
                 logger.warning(f"Incomplete month detected: {year}-{month:02d}")
                 self._move_to_corrupt(target_dir, year, month, "Missing _SUCCESS.json marker")
             else:
-                # Month already complete - check for missing consolidation
                 logger.info(f"Quantum: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -227,24 +279,17 @@ class QuantumDownloader(BaseDownloader):
 
         try:
             # API Call
-            response_data = self._api_call_with_retry(year, month)
-            portfolio_list = response_data.get("objProductPortfolioList", [])
+            portfolio_list = self._api_call_with_retry(year, month)
 
-            # Handle empty files list (not yet published)
-            if not portfolio_list:
-                logger.warning(f"Month not yet published: {year}-{month:02d}")
-                
-                # Emit not published event
-                self.notifier.notify_not_published(
-                    amc="Quantum",
-                    year=year,
-                    month=month
-                )
-                
-                # Remove empty/partial directory
+            # Select combined record
+            file_item = self._select_combined_record(portfolio_list, year, month)
+
+            # Handle empty/unmatched records (not yet published)
+            if not file_item:
+                logger.warning(f"Combined portfolio not yet published: {year}-{month:02d}")
+                self.notifier.notify_not_published(amc="Quantum", year=year, month=month)
                 if target_dir.exists():
                     shutil.rmtree(target_dir)
-                
                 return {
                     "amc": self.amc_name,
                     "year": year,
@@ -257,20 +302,27 @@ class QuantumDownloader(BaseDownloader):
             # Create directory
             self.ensure_directory(str(target_dir))
 
-            # Download single file (Quantum rule)
-            file_item = portfolio_list[0]
+            # Download single combined file
             url = file_item["FileUrl"]
             name = file_item["OriginalFileName"]
             path = target_dir / name
 
-            logger.info(f"Downloading: {name}")
-            r = requests.get(url, timeout=60)
-            r.raise_for_status()
+            logger.info(f"Downloading combined portfolio: {name}")
+            with requests.get(url, headers={"User-Agent": self.HEADERS["User-Agent"]}, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(path, "wb") as fp:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        if chunk:
+                            fp.write(chunk)
 
-            with open(path, "wb") as fp:
-                fp.write(r.content)
+            logger.info(f"Saved: {path.name} ({path.stat().st_size:,} bytes)")
 
-            logger.info(f"Saved: {path.name}")
+            # Validate XLSX structure
+            import openpyxl
+            wb = openpyxl.load_workbook(path, read_only=True)
+            sheet_count = len(wb.sheetnames)
+            wb.close()
+            logger.info(f"Validated Excel workbook: {sheet_count} sheet(s)")
 
             # File count sanity check
             self._check_file_count(1, year, month)

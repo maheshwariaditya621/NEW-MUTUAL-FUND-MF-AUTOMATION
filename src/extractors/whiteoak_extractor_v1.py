@@ -85,26 +85,48 @@ class WhiteOakExtractorV1(BaseExtractor):
                 # Clean columns: remove NaNs, strip spaces
                 df.columns = [str(c).strip() for c in df.columns]
 
-                # Identify columns by index/name approximation since names might vary slightly
-                # Based on inspection:
-                # Col 1: Name
-                # Col 3: ISIN
-                # Col 5: Quantity
-                # Col 6: Market Value
-                # Col 7: % NAV
-                
-                # Verify indices boundaries
-                if df.shape[1] < 8:
-                    logger.warning(f"Sheet {sheet_name} has insufficient columns: {df.shape[1]}")
+                # Identify columns dynamically by header name with fallback to positional index
+                col_name = None
+                col_isin = None
+                col_qty = None
+                col_mkt = None
+                col_pct = None
+                col_rating = None
+
+                for col in df.columns:
+                    c_upper = str(col).upper()
+                    if "ISIN" in c_upper and not col_isin:
+                        col_isin = col
+                    elif ("INSTRUMENT" in c_upper or "COMPANY" in c_upper or ("NAME" in c_upper and "UNNAMED" not in c_upper)) and not col_name:
+                        col_name = col
+                    elif ("QUANTITY" in c_upper or "QTY" in c_upper) and not col_qty:
+                        col_qty = col
+                    elif ("MARKET" in c_upper or "FAIR VALUE" in c_upper) and not col_mkt:
+                        col_mkt = col
+                    elif ("%" in c_upper or "NET ASSET" in c_upper or "NAV" in c_upper) and not col_pct:
+                        col_pct = col
+                    elif ("INDUSTRY" in c_upper or "RATING" in c_upper or "SECTOR" in c_upper) and not col_rating:
+                        col_rating = col
+
+                # Fallback to positional indices if headers could not be matched
+                cols = list(df.columns)
+                if not col_name and len(cols) > 1:
+                    col_name = cols[1]
+                if not col_isin and len(cols) > 3:
+                    col_isin = cols[3]
+                if not col_rating and len(cols) > 4:
+                    col_rating = cols[4]
+                if not col_qty and len(cols) > 5:
+                    col_qty = cols[5]
+                if not col_mkt and len(cols) > 6:
+                    col_mkt = cols[6]
+                if not col_pct and len(cols) > 7:
+                    col_pct = cols[7]
+
+                if not col_isin or not col_name:
+                    logger.warning(f"Sheet {sheet_name} missing essential columns (ISIN={col_isin}, Name={col_name})")
                     continue
 
-                # Get column names by index
-                col_name = df.columns[1]
-                col_isin = df.columns[3]
-                col_qty = df.columns[5]
-                col_mkt = df.columns[6]
-                col_pct = df.columns[7]
-                col_rating = df.columns[4] if len(df.columns) > 4 else None
 
                 sheet_holdings = []
                 for idx, row in df.iterrows():

@@ -50,29 +50,23 @@ class GrowwExtractorV1(BaseExtractor):
 
     def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
         """Find GRAND TOTAL or NET ASSETS row and extract value."""
-        # Scan from bottom up
-        for i in range(len(df)-1, -1, -1):
+        for i in range(len(df)):
             row = df.iloc[i]
-            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
-            
-            # Strict matching to avoid picking up descriptive notes like "2) Net Assets Value per unit (in Rs) are as follows :"
-            is_valid_marker = False
-            if "GRAND TOTAL" in row_text:
-                is_valid_marker = True
-            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENTAGE TO" not in row_text:
-                is_valid_marker = True
-                
-            if is_valid_marker:
-                candidates = []
-                for val in row:
-                    f_val = self.safe_float(val)
-                    # Filter out 1.0 or 100.0 (which represent 100% NAV) and 0s
-                    if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
-                        candidates.append(f_val)
-                
-                # The highest numeric value is likely the AUM, especially if multiple columns have numbers
-                if candidates:
-                    return self.normalize_currency(max(candidates), unit)
+            for c in range(min(5, len(row))):
+                val_str = str(row.iloc[c]).strip().upper().replace('_', ' ')
+                if len(val_str) > 35:
+                    continue
+                if any(bad in val_str for bad in ["EXPOSURE", "PERCENTAGE", "HEDGED", "FUTURES", "OPTIONS", "PER UNIT", "AGGREGATE"]):
+                    continue
+                if val_str in ["GRAND TOTAL", "NET ASSETS", "TOTAL NET ASSETS", "GRAND TOTAL (AUM)"] or val_str.startswith("GRAND TOTAL"):
+                    candidates = []
+                    for v in row:
+                        f_val = self.safe_float(v)
+                        # Filter out percentages (1.0 or 100.0) and date stamps (e.g. 31082026)
+                        if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 20000000:
+                            candidates.append(f_val)
+                    if candidates:
+                        return self.normalize_currency(candidates[0], unit)
         return 0.0
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:

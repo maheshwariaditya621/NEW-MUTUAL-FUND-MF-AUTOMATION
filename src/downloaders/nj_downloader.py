@@ -1,15 +1,15 @@
-# src/downloaders/nj_downloader.py
-
 import os
 import time
 import json
 import shutil
 import re
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Tuple, Any
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,13 +18,16 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
+
+
+BASE_PAGE_URL = "https://downloads.njmutualfund.com/njmf_download.php?nme=127"
+BASE_DOMAIN = "https://downloads.njmutualfund.com/"
 
 
 class NJDownloader(BaseDownloader):
@@ -32,7 +35,7 @@ class NJDownloader(BaseDownloader):
     NJ Mutual Fund - Portfolio Downloader
     
     URL: https://downloads.njmutualfund.com/njmf_download.php?nme=127
-    Uses accordion-based navigation with "lying" aria attributes.
+    Pure Python requests + BeautifulSoup implementation.
     """
     
     MONTH_NAMES = {
@@ -51,6 +54,17 @@ class NJDownloader(BaseDownloader):
         super().__init__("NJ Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "nj"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        logger.info("NJDownloader initialized (Pure requests + BeautifulSoup version)")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -61,7 +75,7 @@ class NJDownloader(BaseDownloader):
             "files_downloaded": file_count,
             "timestamp": datetime.now().isoformat()
         }
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker_data, f, indent=2)
         logger.info(f"Created completion marker: {marker_path.name}")
 
@@ -77,8 +91,173 @@ class NJDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("NJ", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
+    def _get_financial_year(self, year: int, month: int) -> Tuple[str, str, str]:
+        """
+        Calculates financial year strings.
+        Apr-Dec: FY starts in year, ends in year + 1 (e.g. 2026 -> 2026-2027)
+        Jan-Mar: FY starts in year - 1, ends in year (e.g. Jan 2026 -> 2025-2026)
+        """
+        if month >= 4:
+            fy_start = str(year)
+            fy_end = str(year + 1)
+        else:
+            fy_start = str(year - 1)
+            fy_end = str(year)
+        fy_end_short = fy_end[-2:]
+        return fy_start, fy_end, fy_end_short
 
-    def download(self, year: int, month: int) -> Dict:
+    def _validate_excel_file(self, file_path: Path) -> bool:
+        """Validate ZIP/XLS signature and openpyxl readable workbook."""
+        if not file_path.exists() or file_path.stat().st_size == 0:
+            return False
+
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+        if magic != b"PK\x03\x04" and magic != b"\xd0\xcf\x11\xe0":
+            logger.error(f"NJ: Invalid magic bytes for {file_path.name}: {magic.hex()}")
+            return False
+
+        if magic == b"PK\x03\x04":
+            try:
+                wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+                _ = wb.sheetnames
+                wb.close()
+                return True
+            except Exception as e:
+                logger.error(f"NJ: openpyxl validation failed for {file_path.name}: {e}")
+                return False
+
+        return True
+
+    def _fetch_page_soup(self) -> BeautifulSoup:
+        """Fetch the official downloads page and return BeautifulSoup."""
+        logger.info(f"NJ: Fetching official downloads page: {BASE_PAGE_URL}")
+        resp = self.session.get(BASE_PAGE_URL, timeout=30)
+        resp.raise_for_status()
+        if "Monthly Portfolio Disclosure" not in resp.text:
+            raise ValueError("Target text 'Monthly Portfolio Disclosure' not found on NJ downloads page.")
+        return BeautifulSoup(resp.text, "html.parser")
+
+    def _find_target_card(self, soup: BeautifulSoup, year: int, month: int) -> Optional[Any]:
+        """Find the accordion card for the given financial year."""
+        fy_start, fy_end, fy_end_short = self._get_financial_year(year, month)
+        cards = soup.find_all("div", class_="card")
+        
+        for card in cards:
+            hdr = card.find(["div", "h5", "a", "button"], class_=["card-header", "card-link", "btn-link"])
+            hdr_text = hdr.get_text(strip=True) if hdr else ""
+            if "monthly portfolio disclosure" in hdr_text.lower():
+                if fy_start in hdr_text and (fy_end in hdr_text or fy_end_short in hdr_text):
+                    logger.info(f"NJ: Found matching card: '{hdr_text}'")
+                    return card
+        return None
+
+    def _discover_links(self, soup: BeautifulSoup, year: int, month: int) -> List[Dict[str, str]]:
+        """Discover and filter scheme portfolio links for target period."""
+        month_name = self.MONTH_NAMES[month].lower()
+        month_abbr = self.MONTH_ABBR[month].lower()
+        year_str = str(year)
+        
+        target_card = self._find_target_card(soup, year, month)
+        search_containers = [target_card] if target_card else soup.find_all("div", class_="card")
+        
+        discovered = []
+        seen_urls = set()
+        
+        for container in search_containers:
+            hdr = container.find(["div", "h5", "a", "button"], class_=["card-header", "card-link", "btn-link"])
+            hdr_text = hdr.get_text(strip=True) if hdr else ""
+            if "monthly portfolio disclosure" not in hdr_text.lower():
+                continue
+                
+            for a_tag in container.find_all("a", href=True):
+                href = a_tag["href"].strip()
+                if "viewfile.php" not in href:
+                    continue
+                
+                title = a_tag.get_text(strip=True)
+                combined = f"{title} {href}".lower()
+                
+                # Exclude non-monthly disclosures
+                if any(excl in combined for excl in ["fortnightly", "half yearly", "factsheet", "annual"]):
+                    continue
+                
+                # Normalize delimiters
+                norm_combined = re.sub(r"[-_]+", " ", combined)
+                month_match = (month_name in norm_combined or month_abbr in norm_combined)
+                year_match = year_str in norm_combined
+                
+                if month_match and year_match:
+                    abs_url = urllib.parse.urljoin(BASE_DOMAIN, href)
+                    if abs_url in seen_urls:
+                        continue
+                    seen_urls.add(abs_url)
+                    
+                    discovered.append({
+                        "title": title,
+                        "href": href,
+                        "url": abs_url
+                    })
+                    
+        return discovered
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_abbr: str, download_folder: Path) -> int:
+        soup = self._fetch_page_soup()
+        links = self._discover_links(soup, target_year, target_month)
+        
+        if not links:
+            logger.warning(f"NJ: No portfolio links found for {month_name} {target_year}")
+            return 0
+            
+        logger.info(f"NJ: Found {len(links)} portfolio link(s) for {month_name} {target_year}.")
+        success_count = 0
+        
+        for idx, item in enumerate(links, 1):
+            url = item["url"]
+            title = item["title"]
+            
+            # Extract clean filename
+            parsed = urllib.parse.urlparse(url)
+            file_param = urllib.parse.parse_qs(parsed.query).get("file", [""])[0]
+            if file_param:
+                raw_filename = os.path.basename(file_param)
+            else:
+                clean_title = re.sub(r"[^\w\-_.]", "_", title)
+                raw_filename = f"{clean_title}.xlsx"
+                
+            target_path = download_folder / raw_filename
+            temp_path = target_path.with_name(target_path.stem + ".tmp.xlsx")
+            
+            logger.info(f"  [{idx}/{len(links)}] Downloading: {title}...")
+            try:
+                resp = self.session.get(url, stream=True, timeout=60)
+                if resp.status_code != 200:
+                    logger.error(f"    [FAIL] HTTP {resp.status_code} for {title}")
+                    continue
+                
+                with open(temp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=16384):
+                        if chunk:
+                            f.write(chunk)
+                
+                if self._validate_excel_file(temp_path):
+                    if target_path.exists():
+                        target_path.unlink()
+                    temp_path.rename(target_path)
+                    logger.info(f"    [OK] Saved: {target_path.name} ({target_path.stat().st_size:,} bytes)")
+                    success_count += 1
+                else:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    logger.error(f"    [FAIL] Validation failed for {title}")
+            except Exception as e:
+                if temp_path.exists():
+                    temp_path.unlink()
+                logger.error(f"    [FAIL] Error downloading {title}: {e}")
+                
+        return success_count
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
         month_abbr = self.MONTH_ABBR[month]
@@ -92,16 +271,13 @@ class NJDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"NJ: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -125,13 +301,14 @@ class NJDownloader(BaseDownloader):
                 if files_downloaded == 0:
                     logger.warning(f"NJ: No portfolios found for {month_name} {year}")
                     self.notifier.notify_not_published("NJ", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
                 self._create_success_marker(target_dir, year, month, files_downloaded)
                 
-                # Consolidate downloads
+                # Consolidate downloads into merged excels
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -142,172 +319,14 @@ class NJDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("NJ", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_abbr: str, download_folder: Path) -> int:
-        url = "https://downloads.njmutualfund.com/njmf_download.php?nme=127"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to NJ Downloads page...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(3)
-
-            # Multi-file threshold: Sept 2025
-            is_multi_file = False
-            if target_year > 2025:
-                is_multi_file = True
-            elif target_year == 2025 and target_month >= 9:
-                is_multi_file = True
-
-            # Expand Year Accordion
-            # NJ follows a Financial Year (FY) system: April to March.
-            # Jan-Mar [Year] belongs to FY [Year-1]-[Year]
-            # Apr-Dec [Year] belongs to FY [Year]-[Year+1]
-            if target_month in [1, 2, 3]:
-                fy_start = target_year - 1
-                fy_end_full = str(target_year)
-                fy_end_short = fy_end_full[-2:]
-            else:
-                fy_start = target_year
-                fy_end_full = str(target_year + 1)
-                fy_end_short = fy_end_full[-2:]
-            
-            # Pattern: "Disclosure 2025-2026" or "Disclosure 2025-26"
-            pattern = re.compile(rf"Disclosure\s+{fy_start}-({fy_end_full}|{fy_end_short})", re.I)
-            accordion = page.get_by_role("button", name=pattern)
-            
-            if accordion.count() == 0:
-                logger.info(f"Stricter pattern failed, trying 'Disclosure {fy_start}'")
-                # Broad match including non-breaking spaces (\s+)
-                accordion = page.get_by_role("button", name=re.compile(rf"Disclosure\s+{fy_start}", re.I))
-            
-            if accordion.count() == 0:
-                logger.warning(f"Could not find accordion for FY starting {fy_start}")
-                return 0
-            
-            # Take the last one if multiple (newer years are usually bottom)
-            best_accordion = accordion.last
-            
-            # DEBUG and AGGRESSIVE expansion
-            # Don't trust aria-expanded. Check 'collapsed' class instead.
-            classes = best_accordion.get_attribute("class") or ""
-            if "collapsed" in classes or "true" not in str(best_accordion.get_attribute("aria-expanded")).lower():
-                logger.info(f"Expanding accordion: {best_accordion.inner_text().strip()}")
-                best_accordion.click()
-                time.sleep(3)
-            else:
-                # Still click if links not visible later, but for now we trust visual state if not collapsed
-                logger.info("Accordion appears expanded (class not collapsed).")
-
-            success_count = 0
-            
-            if is_multi_file:
-                # Search for specific links
-                link_pattern = re.compile(rf"{month_name}.*{target_year}", re.I)
-                links = page.get_by_role("link", name=link_pattern)
-                
-                # If zero but we think it's open, try clicking again to be sure
-                if links.count() == 0:
-                    logger.info("No links found on first check. Re-clicking accordion just in case...")
-                    best_accordion.click()
-                    time.sleep(3)
-                    links = page.get_by_role("link", name=link_pattern)
-                
-                link_count = links.count()
-                if link_count == 0:
-                    logger.warning(f"No matching links for {month_name} {target_year}")
-                    return 0
-                
-                logger.info(f"Found {link_count} matching portfolio links.")
-                
-                # Collect texts
-                texts = []
-                for i in range(link_count):
-                    texts.append(links.nth(i).inner_text().strip())
-                
-                for i, txt in enumerate(texts):
-                    # Extract scheme name
-                    scheme_name = "NJ_Scheme"
-                    if "-" in txt:
-                        parts = txt.split("-")
-                        if len(parts) >= 3:
-                            scheme_name = parts[-1].strip().replace(" ", "_").replace("/", "_")
-                        else:
-                            scheme_name = parts[0].strip().replace(" ", "_")
-
-                    logger.info(f"  [{i+1}/{len(texts)}] Downloading: {txt[:60]}...")
-                    
-                    try:
-                        # Direct location
-                        target_lnk = page.get_by_role("link", name=txt, exact=True).first
-                        
-                        with page.expect_download(timeout=60000) as dinfo:
-                            # Force click to handle scroll/transparency
-                            target_lnk.click(force=True)
-                        
-                        dl = dinfo.value
-                        fname = dl.suggested_filename
-                        dl.save_as(download_folder / fname)
-                        logger.info(f"    [OK] Saved: {fname}")
-                        success_count += 1
-                        time.sleep(1)
-                    except Exception as e:
-                        logger.error(f"    [FAIL] {str(e)[:100]}")
-            else:
-                # Single-file mode
-                logger.info(f"Searching for single consolidated link for {month_name}...")
-                lnk = page.get_by_role("link", name=re.compile(rf"^{month_name}.*", re.I))
-                
-                # Re-click logic for single file too
-                if lnk.count() == 0:
-                    best_accordion.click()
-                    time.sleep(3)
-                    lnk = page.get_by_role("link", name=re.compile(rf"^{month_name}.*", re.I))
-
-                if lnk.count() == 0:
-                    logger.warning(f"Could not find single-file link for {month_name}")
-                    return 0
-                
-                txt = lnk.first.inner_text().strip()
-                logger.info(f"Found: {txt}")
-                
-                try:
-                    with page.expect_download(timeout=60000) as dinfo:
-                        lnk.first.click(force=True)
-                    
-                    dl = dinfo.value
-                    fname = dl.suggested_filename
-                    dl.save_as(download_folder / fname)
-                    logger.info(f"    [OK] Saved: {fname}")
-                    success_count = 1
-                except Exception as e:
-                    logger.error(f"    [FAIL] Download failed: {str(e)[:100]}")
-
-            return success_count
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":

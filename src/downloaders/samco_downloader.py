@@ -1,15 +1,17 @@
-# src/downloaders/samco_downloader.py
-
 import os
 import time
 import json
 import shutil
 import re
+import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+from urllib.parse import urljoin, unquote
+
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,13 +20,12 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class SamcoDownloader(BaseDownloader):
@@ -32,9 +33,16 @@ class SamcoDownloader(BaseDownloader):
     Samco Mutual Fund - Portfolio Downloader
     
     URL: https://www.samcomf.com/StatutoryDisclosure
-    Uses tabs for "Portfolio Disclosures" and "Monthly" portfolios.
-    Downloads multiple files per month (one per scheme).
+    Downloads scheme-level portfolio workbooks using pure requests + BeautifulSoup.
     """
+    
+    PAGE_URL = "https://www.samcomf.com/StatutoryDisclosure"
+    BASE_URL = "https://www.samcomf.com"
+    
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
     
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
@@ -72,7 +80,6 @@ class SamcoDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("SAMCO", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
@@ -87,11 +94,8 @@ class SamcoDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Samco: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -144,114 +148,136 @@ class SamcoDownloader(BaseDownloader):
         self.notifier.notify_error("SAMCO", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
+    def _extract_monthly_records(self, soup: BeautifulSoup, year: int, month: int, month_name: str) -> List[Dict[str, Any]]:
+        option2 = soup.find(id="option2")
+        if not option2:
+            logger.error("SAMCO: option2 section not found in HTML")
+            return []
+            
+        monthly_toggle = None
+        for a in option2.find_all("a", class_="toggle"):
+            if a.get_text(strip=True).lower() == "monthly":
+                monthly_toggle = a
+                break
+                
+        if not monthly_toggle:
+            logger.error("SAMCO: 'Monthly' toggle header not found")
+            return []
+            
+        monthly_div = monthly_toggle.find_next_sibling("div", class_="main_div")
+        if not monthly_div:
+            logger.error("SAMCO: main_div for Monthly section not found")
+            return []
+            
+        table = monthly_div.find("table")
+        if not table:
+            logger.error("SAMCO: Monthly table not found")
+            return []
+
+        last_day = calendar.monthrange(year, month)[1]
+        compact_date = f"{last_day:02d}{month:02d}{year}"
+        month_lower = month_name.lower()
+        year_str = str(year)
+        month_regex = rf"{month_lower}[_\s]*{year_str}"
+        
+        records = []
+        seen_urls = set()
+        
+        for row in table.find_all("tr"):
+            th_td = row.find_all(["th", "td"])
+            if len(th_td) < 2:
+                continue
+                
+            title = th_td[0].get_text(strip=True)
+            link_tags = th_td[1].find_all("a", href=True)
+            if not link_tags:
+                continue
+                
+            raw_hrefs = [a["href"].strip() for a in link_tags if a["href"].strip()]
+            if not raw_hrefs:
+                continue
+                
+            combined_text = f"{title} {' '.join(raw_hrefs)}".lower()
+            
+            is_month_match = bool(re.search(month_regex, combined_text, re.IGNORECASE))
+            is_date_match = compact_date in combined_text
+            
+            if not (is_month_match or is_date_match):
+                continue
+                
+            best_url = None
+            for href in raw_hrefs:
+                if "media1.samco.in" in href:
+                    best_url = href
+                    break
+            if not best_url:
+                best_url = urljoin(self.BASE_URL, raw_hrefs[0])
+                
+            if best_url in seen_urls:
+                continue
+            seen_urls.add(best_url)
+            
+            filename = Path(unquote(best_url.split("?")[0])).name
+            if not filename.endswith((".xlsx", ".xls")):
+                filename = f"{title}.xlsx"
+                
+            records.append({
+                "title": title,
+                "url": best_url,
+                "filename": filename
+            })
+            
+        return records
+
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
-        url = "https://www.samcomf.com/StatutoryDisclosure"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # 1. Select "Portfolio Disclosures"
-            logger.info("Navigating to 'Portfolio Disclosures'...")
-            pf_link = page.get_by_role("link", name="Portfolio Disclosures")
-            if pf_link.count() == 0:
-                pf_link = page.get_by_text("Portfolio Disclosures", exact=False)
+        session = requests.Session()
+        logger.info(f"Fetching SAMCO statutory disclosures page...")
+        resp = session.get(self.PAGE_URL, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
+        
+        soup = BeautifulSoup(resp.text, "html.parser")
+        records = self._extract_monthly_records(soup, target_year, target_month, month_name)
+        
+        logger.info(f"Discovered {len(records)} monthly portfolio record(s) for {month_name} {target_year}")
+        if not records:
+            return 0
             
-            if pf_link.count() > 0:
-                pf_link.first.click(force=True)
-                time.sleep(3)
-            else:
-                logger.error("  [FAIL] Portfolio Disclosures tab not found")
-                return 0
-
-            # 2. Select "Monthly"
-            logger.info("Selecting 'Monthly' sub-tab...")
-            m_link = page.get_by_role("link", name="Monthly")
-            if m_link.count() == 0:
-                 m_link = page.get_by_text("Monthly", exact=True)
+        success_count = 0
+        for idx, rec in enumerate(records, 1):
+            url = rec["url"]
+            filename = rec["filename"]
+            target_path = download_folder / filename
             
-            if m_link.count() > 0:
-                m_link.first.click(force=True)
-                time.sleep(5)
-            else:
-                logger.error("  [FAIL] Monthly sub-tab not found")
-                return 0
-
-            # 3. Find matching rows
-            logger.info(f"Searching for {month_name} {target_year} rows...")
-            row_selector = "tr"
-            all_rows = page.locator(row_selector).all()
-            
-            matching_rows_info = []
-            for row in all_rows:
-                txt = row.inner_text().strip().replace('\n', ' ')
-                if "MONTHLY_PORTFOLIO" in txt and month_name in txt and str(target_year) in txt:
-                    if "FORTNIGHTLY" not in txt.upper():
-                        matching_rows_info.append(row)
-            
-            logger.info(f"  [OK] Found {len(matching_rows_info)} potential rows")
-            
-            success_count = 0
-            downloaded_schemes = set()
-
-            for i, row in enumerate(matching_rows_info):
-                row_text = row.inner_text().strip().replace('\n', ' ')
-                
-                # Extract scheme name: e.g. "MONTHLY_PORTFOLIO_December_2025_SAMCO_Flexi_Cap_Fund"
-                scheme_name = "SAMCO_Scheme"
-                name_match = re.search(rf"{target_year}_?(.*)", row_text, re.IGNORECASE)
-                if name_match:
-                    scheme_name = name_match.group(1).strip().replace(' ', '_').replace('__', '_')
-                
-                scheme_name = re.sub(r'^_+', '', scheme_name)
-                
-                if scheme_name in downloaded_schemes:
+            logger.info(f"  [{idx}/{len(records)}] Downloading: {filename}")
+            try:
+                with session.get(url, headers={"User-Agent": self.HEADERS["User-Agent"]}, stream=True, timeout=45) as r:
+                    r.raise_for_status()
+                    with open(target_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=65536):
+                            if chunk:
+                                f.write(chunk)
+                                
+                file_size = target_path.stat().st_size
+                if file_size < 1000:
+                    target_path.unlink(missing_ok=True)
+                    logger.error(f"    [FAIL] File too small ({file_size} bytes)")
                     continue
-
-                logger.info(f"  [{i+1}/{len(matching_rows_info)}] Downloading: {scheme_name}")
-                
+                    
+                # Validate Excel
                 try:
-                    # Target link usually in 2nd column
-                    target_link = row.locator("td").nth(1).locator("a").last
-                    if not target_link.is_visible():
-                        target_link = row.locator("a").last
-
-                    with page.expect_download(timeout=60000) as download_info:
-                        target_link.click(force=True)
-                    
-                    download = download_info.value
-                    filename = download.suggested_filename
-                    
-                    download.save_as(download_folder / filename)
-                    logger.info(f"    [OK] Saved: {filename}")
+                    wb = openpyxl.load_workbook(target_path, read_only=True)
+                    sheet_count = len(wb.sheetnames)
+                    wb.close()
+                    logger.info(f"    [OK] Validated {filename}: {sheet_count} sheet(s), {file_size:,} bytes")
                     success_count += 1
-                    downloaded_schemes.add(scheme_name)
-                    
                 except Exception as e:
-                    logger.error(f"    [FAIL] Download failed for {scheme_name}: {str(e)[:100]}")
-
-            return success_count
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+                    logger.warning(f"    [WARN] openpyxl load check: {e} (keeping file)")
+                    success_count += 1
+                    
+            except Exception as e:
+                logger.error(f"    [FAIL] Failed to download {filename}: {e}")
+                
+        return success_count
 
 
 if __name__ == "__main__":

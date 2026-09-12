@@ -5,11 +5,15 @@ import time
 import json
 import shutil
 import zipfile
+import sys
+import requests
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List
+from urllib.parse import quote
+
+# Add project root to sys.path for direct CLI execution
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,33 +22,131 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
+
+# ---------------------------------------------------------------------------
+# Motilal API Constants & Helpers
+# ---------------------------------------------------------------------------
+
+API_URL  = "https://www.motilaloswalmf.com/content/aem-cloud-dept-backend-motilal-oswal/api/search-documents.json"
+BASE_URL = "https://www.motilaloswalmf.com"
+
+MONTH_NAMES = {
+    1: "January", 2: "February", 3: "March", 4: "April",
+    5: "May", 6: "June", 7: "July", 8: "August",
+    9: "September", 10: "October", 11: "November", 12: "December",
+}
+
+MONTH_ALIASES = {
+    1:  ["january", "jan"],
+    2:  ["february", "feb"],
+    3:  ["march", "mar"],
+    4:  ["april", "apr"],
+    5:  ["may"],
+    6:  ["june", "jun"],
+    7:  ["july", "jul"],
+    8:  ["august", "aug"],
+    9:  ["september", "sep", "sept"],
+    10: ["october", "oct"],
+    11: ["november", "nov"],
+    12: ["december", "dec"],
+}
+
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, */*",
+    "Referer": "https://www.motilaloswalmf.com/",
+}
+
+REQUEST_TIMEOUT  = 30
+DOWNLOAD_TIMEOUT = 120
+
+
+def _is_month_end_portfolio(title: str) -> bool:
+    """
+    Return True if document title represents a month-end portfolio.
+    Excludes fortnightly, half-yearly, and performance documents.
+    """
+    t = title.lower().strip()
+
+    if "fortnightly" in t or "forthnightly" in t:
+        return False
+    if "half yearly" in t or "half-yearly" in t:
+        return False
+    if "performance" in t and "portfolio" not in t:
+        return False
+
+    if "scheme portfolio details" in t:
+        return True
+    if "month end" in t and "portfolio" in t:
+        return True
+
+    return False
+
+
+def _title_matches_month_year(title: str, year: int, month: int) -> bool:
+    """Check if document title references target portfolio month and year."""
+    t = title.lower().strip()
+    if str(year) not in t:
+        return False
+    aliases = MONTH_ALIASES.get(month, [])
+    return any(alias in t for alias in aliases)
+
+
+def _build_download_url(path: str) -> str:
+    """Convert API path to absolute download URL with percent-encoded special characters."""
+    encoded = quote(path, safe="/:.-_")
+    return BASE_URL + encoded
+
+
+def _is_valid_excel(content: bytes) -> bool:
+    """Validate Excel magic bytes (XLSX, XLS, or valid binary data)."""
+    if len(content) < 4:
+        return False
+    if content[:2] == b"PK":              # XLSX / ZIP
+        return True
+    if content[:4] == b"\xd0\xcf\x11\xe0": # XLS OLE2
+        return True
+    try:
+        preview = content[:50].decode("utf-8", errors="ignore")
+        if "<html" in preview.lower() or "<!doctype" in preview.lower():
+            return False
+    except Exception:
+        pass
+    return len(content) > 1000
+
+
+# ---------------------------------------------------------------------------
+# Downloader Class
+# ---------------------------------------------------------------------------
 
 class MotilalDownloader(BaseDownloader):
     """
     Motilal Oswal Mutual Fund - Portfolio Downloader
-    
-    URL: https://www.motilaloswalmf.com/download/scheme-portfolio-details
-    Special Rule: Data for month N appears under month N+1 selection
+
+    Directly queries Motilal Oswal's AEM JSON backend API to discover
+    and download month-end portfolio disclosure Excel files.
+    No browser automation / Playwright required.
     """
-    
-    MONTH_NAMES = {
-        1: "January", 2: "February", 3: "March", 4: "April",
-        5: "May", 6: "June", 7: "July", 8: "August",
-        9: "September", 10: "October", 11: "November", 12: "December"
-    }
+
+    MONTH_NAMES = MONTH_NAMES
 
     def __init__(self):
         super().__init__("Motilal Oswal Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "motilal"
+        self.session = requests.Session()
+        self.session.headers.update(DEFAULT_HEADERS)
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -66,46 +168,167 @@ class MotilalDownloader(BaseDownloader):
         if corrupt_target.exists():
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             corrupt_target = corrupt_target.parent / f"{corrupt_target.name}__{ts}"
-        
+
         logger.warning(f"MOTILAL: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("MOTILAL", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def _get_next_month(self, month: int, year: int):
-        """Get the next month and year (for Motilal's offset quirk)."""
-        if month == 12:
-            return 1, year + 1
-        else:
-            return month + 1, year
+    def _call_api(self, year: int) -> List[Dict]:
+        """Query the Motilal AEM documents API for a specific publication year."""
+        params = {
+            "year": str(year),
+            "category": "month end portfolio",
+            "month": "",
+            "type": "mf",
+        }
+        last_exc = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                resp = self.session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
+                resp.raise_for_status()
+                data = resp.json()
+                count = data.get("count", 0)
+                logger.info(f"MOTILAL: API year={year} -> {count} records found")
+                return data.get("results", [])
+            except Exception as e:
+                last_exc = e
+                logger.warning(f"MOTILAL: API query attempt {attempt+1} failed: {e}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF)-1)])
+        if last_exc:
+            raise last_exc
+        raise RuntimeError(f"Failed to query Motilal API for year {year}")
 
+    def _get_portfolio_candidates(self, target_year: int, target_month: int) -> List[Dict]:
+        """Search API results for month-end portfolio documents matching year and month."""
+        query_years = [target_year]
+        # December disclosures publish in January of target_year + 1
+        if target_month == 12:
+            query_years.append(target_year + 1)
+
+        candidates = []
+        seen_paths = set()
+
+        for qyear in query_years:
+            records = self._call_api(qyear)
+            for rec in records:
+                path = rec.get("path", "")
+                if path in seen_paths:
+                    continue
+                title = rec.get("title", "")
+                if _is_month_end_portfolio(title) and _title_matches_month_year(title, target_year, target_month):
+                    seen_paths.add(path)
+                    candidates.append({
+                        "title": title.strip(),
+                        "path": path,
+                        "url": _build_download_url(path),
+                        "publish_date": rec.get("publishDate", ""),
+                    })
+
+        return candidates
+
+    def _process_downloaded_file(self, temp_path: Path, month_name: str, year: int, download_folder: Path, original_suggested_name: str) -> Optional[Path]:
+        """Process the downloaded file - extract if ZIP, preserve original name."""
+        try:
+            if temp_path.suffix.lower() == '.zip':
+                logger.info("ZIP file detected, extracting...")
+                temp_extract_dir = download_folder / f"temp_extract_{int(time.time())}"
+                temp_extract_dir.mkdir(exist_ok=True)
+
+                with zipfile.ZipFile(temp_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_extract_dir)
+
+                found_file = None
+                for file in temp_extract_dir.rglob('*'):
+                    if file.is_file() and file.suffix.lower() in ['.xlsx', '.xls', '.xlsb']:
+                        found_file = file
+                        break
+
+                if found_file:
+                    final_path = download_folder / found_file.name
+                    if final_path.exists():
+                        final_path = download_folder / f"{month_name}_{year}_{found_file.name}"
+
+                    shutil.move(str(found_file), str(final_path))
+                    temp_path.unlink(missing_ok=True)
+                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
+                    logger.info(f"MOTILAL: Extracted & saved: {final_path.name}")
+                    return final_path
+                else:
+                    temp_path.unlink(missing_ok=True)
+                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
+                    return None
+            else:
+                final_path = download_folder / original_suggested_name
+                shutil.move(str(temp_path), str(final_path))
+                logger.info(f"MOTILAL: Saved: {final_path.name}")
+                return final_path
+
+        except Exception as e:
+            logger.error(f"Error processing file: {e}")
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+            return None
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
+        """Discover portfolio via JSON API and download Excel file."""
+        candidates = self._get_portfolio_candidates(target_year, target_month)
+        if not candidates:
+            return None
+
+        # Select target document (first matching month-end portfolio)
+        doc = candidates[0]
+        url = doc["url"]
+        raw_filename = Path(doc["path"]).name
+        logger.info(f"MOTILAL: Discovered file: {doc['title']}")
+        logger.info(f"MOTILAL: Download URL: {url}")
+
+        temp_path = download_folder / f"temp_{raw_filename}"
+
+        resp = self.session.get(url, timeout=DOWNLOAD_TIMEOUT, allow_redirects=True)
+        resp.raise_for_status()
+        content = resp.content
+
+        if not _is_valid_excel(content):
+            preview = content[:100].decode("utf-8", errors="replace")
+            raise ValueError(f"Downloaded content is not valid Excel. Preview: {preview}")
+
+        with open(temp_path, "wb") as f:
+            f.write(content)
+
+        final_path = self._process_downloaded_file(
+            temp_path=temp_path,
+            month_name=month_name,
+            year=target_year,
+            download_folder=download_folder,
+            original_suggested_name=raw_filename
+        )
+        return final_path
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
-        
+
         logger.info("=" * 60)
         logger.info("MOTILAL OSWAL MUTUAL FUND DOWNLOADER STARTED")
         logger.info(f"Period: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
+
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Motilal: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
-                logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info("[SUCCESS] Month already complete - UPDATED")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "status": "skipped", 
+                    "status": "skipped",
                     "reason": "already_downloaded",
                     "duration": duration
                 }
@@ -122,19 +345,20 @@ class MotilalDownloader(BaseDownloader):
                     return {"status": "success", "dry_run": True}
 
                 downloaded_path = self._run_download_flow(year, month, month_name, target_dir)
-                
+
                 if not downloaded_path:
                     logger.warning(f"MOTILAL: No portfolio found for {month_name} {year}")
                     self.notifier.notify_not_published("MOTILAL", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
                 self._create_success_marker(target_dir, year, month, 1)
-                
+
                 # Consolidate downloads
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("MOTILAL", year, month, files_downloaded=1, duration=duration)
                 logger.success(f"[SUCCESS] MOTILAL download completed: {downloaded_path.name}")
@@ -143,201 +367,14 @@ class MotilalDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF)-1)])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("MOTILAL", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        url = "https://www.motilaloswalmf.com/download/scheme-portfolio-details"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            # Motilal quirk: Data for month N appears under month N+1 selection
-            selection_month, selection_year = self._get_next_month(target_month, target_year)
-            selection_month_name = self.MONTH_NAMES[selection_month]
-            
-            logger.info(f"Month offset: Selecting {selection_month_name} {selection_year} to get {month_name} {target_year} data")
-
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=60000)
-            time.sleep(3)
-            logger.info("  [OK] Page loaded")
-
-            # Close any popup/ad that may appear (e.g. NFO video popup)
-            logger.info("Checking for popups/ads...")
-            try:
-                # Try pressing Escape first (closes most modals)
-                page.keyboard.press("Escape")
-                time.sleep(1)
-                
-                # Try common close button selectors
-                close_selectors = [
-                    "button.close",
-                    "[class*='close']",
-                    "[class*='modal'] [aria-label='Close']",
-                    "[class*='popup'] button",
-                    "button[aria-label='close']",
-                    ".modal-close",
-                    "[data-dismiss='modal']",
-                ]
-                for sel in close_selectors:
-                    try:
-                        btn = page.locator(sel).first
-                        if btn.is_visible(timeout=1000):
-                            btn.click()
-                            logger.info(f"  [OK] Closed popup via selector: {sel}")
-                            time.sleep(1)
-                            break
-                    except Exception:
-                        continue
-                        
-                # Last resort: click outside the modal/popup
-                page.mouse.click(50, 50)
-                time.sleep(1)
-                logger.info("  [OK] Popup handling done")
-            except Exception as e:
-                logger.debug(f"Popup handling skipped: {e}")
-
-            # Select Year
-            logger.info(f"Selecting year: {selection_year}...")
-            page.locator(".css-19bb58m").first.click()
-            time.sleep(1)
-            page.get_by_role("option", name=str(selection_year)).click()
-            time.sleep(2)
-            logger.info(f"  [OK] Year {selection_year} selected")
-
-            # Select Month
-            logger.info(f"Selecting month: {selection_month_name}...")
-            page.locator(".css-13cymwt-control > .css-hlgwow > .css-19bb58m").click()
-            time.sleep(1)
-            page.get_by_role("option", name=selection_month_name).click()
-            time.sleep(2)
-            logger.info(f"  [OK] Month {selection_month_name} selected")
-
-            # Click document icon for Scheme Portfolio
-            # IMPORTANT: Use a precise row-level locator to avoid hitting the Fortnightly Report
-            # Strategy: find list item rows (li or tr or card-level div) that EXACTLY match
-            #   "Scheme Portfolio Details" + month_name. We look for the narrowest container.
-            logger.info("Locating Scheme Portfolio document icon...")
-            
-            # Method: find all elements that contain both phrases, pick the one with shortest text (most specific)
-            scheme_text = f"Scheme Portfolio Details {month_name}"
-            
-            # First try: locator matching inner text that ends with the scheme text (most precise)
-            row = page.locator(f"text=Scheme Portfolio Details {month_name} {str(selection_year)}").first
-            try:
-                row.wait_for(timeout=5000)
-                # Find the ancestor list item or card wrapper
-                card = row.locator("xpath=ancestor::*[self::li or self::tr or self::div][1]")
-                card.locator("img[src*='xls']").first.click()
-                logger.info("  [OK] XLS icon clicked via text-exact match")
-            except Exception:
-                # Fallback: iterate all matching rows and pick the one whose text exactly contains
-                # 'Scheme Portfolio Details' but NOT 'Fortnightly'
-                logger.info("  Falling back to filtered row search...")
-                all_rows = page.locator("div").all()
-                clicked = False
-                for row in all_rows:
-                    try:
-                        txt = row.inner_text(timeout=500).strip()
-                        if f"Scheme Portfolio Details" in txt and month_name in txt and "Fortnightly" not in txt:
-                            xls_icon = row.locator("img[src*='xls']")
-                            if xls_icon.count() > 0:
-                                xls_icon.first.click()
-                                logger.info(f"  [OK] XLS clicked in row: {txt[:80]}")
-                                clicked = True
-                                break
-                    except Exception:
-                        continue
-                if not clicked:
-                    raise Exception(f"Could not locate 'Scheme Portfolio Details {month_name}' row")
-            
-            time.sleep(2)
-            logger.info("  [OK] XLS icon clicked, waiting for popup")
-
-            # Download file from popup
-            logger.info("Downloading file from popup...")
-            with page.expect_download(timeout=60000) as download_info:
-                # The subagent verified get_by_role("link", name="Download") works
-                page.get_by_role("link", name="Download").click()
-
-            download = download_info.value
-            suggested = download.suggested_filename
-            ext = os.path.splitext(suggested)[1] if suggested else ".xlsx"
-
-            # Save to temp location first
-            temp_path = download_folder / f"temp_{suggested}"
-            download.save_as(temp_path)
-            logger.info(f"  [OK] Downloaded: {suggested}")
-
-            # Process the file (extract if ZIP, rename)
-            final_path = self._process_downloaded_file(temp_path, month_name, target_year, download_folder, suggested)
-            
-            return final_path
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
-
-    def _process_downloaded_file(self, temp_path: Path, month_name: str, year: int, download_folder: Path, original_suggested_name: str) -> Optional[Path]:
-        """Process the downloaded file - extract if ZIP, preserve original name."""
-        try:
-            if temp_path.suffix.lower() == '.zip':
-                logger.info("ZIP file detected, extracting...")
-                temp_extract_dir = download_folder / f"temp_extract_{int(time.time())}"
-                temp_extract_dir.mkdir(exist_ok=True)
-                
-                with zipfile.ZipFile(temp_path, 'r') as zip_ref:
-                    zip_ref.extractall(temp_extract_dir)
-                
-                # Look for Excel file
-                found_file = None
-                for file in temp_extract_dir.rglob('*'):
-                    if file.is_file() and file.suffix.lower() in ['.xlsx', '.xls']:
-                        found_file = file
-                        break
-                
-                if found_file:
-                    final_path = download_folder / found_file.name
-                    if final_path.exists():
-                        final_path = download_folder / f"{month_name}_{year}_{found_file.name}"
-                    
-                    shutil.move(str(found_file), str(final_path))
-                    temp_path.unlink()
-                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    logger.info(f"  [OK] Saved: {final_path.name}")
-                    return final_path
-                else:
-                    temp_path.unlink()
-                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    return None
-            else:
-                final_path = download_folder / original_suggested_name
-                shutil.move(str(temp_path), str(final_path))
-                logger.info(f"  [OK] Saved: {final_path.name}")
-                return final_path
-                
-        except Exception as e:
-            logger.error(f"Error processing file: {e}")
-            if temp_path.exists():
-                temp_path.unlink()
-            return None
 
 
 if __name__ == "__main__":
@@ -356,7 +393,7 @@ if __name__ == "__main__":
     elif status == "skipped":
         logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"[INFO]  Info: Month not yet published")
+        logger.info(f"[INFO] Info: Month not yet published")
     else:
         logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

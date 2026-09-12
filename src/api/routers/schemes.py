@@ -213,6 +213,33 @@ def _resolve_scheme_id(identifier: str, cur: cursor) -> tuple[int, str, str, str
     results = cur.fetchall()
     
     if not results:
+        # Fallback to multi-word match if exact phrase not found (e.g., 'whiteoak flexi cap' -> 'WHITEOAK CAPITAL FLEXI CAP FUND')
+        words = [w.strip() for w in identifier.split() if w.strip()]
+        if len(words) > 1:
+            word_conditions = " AND ".join(["s.scheme_name ILIKE %s" for _ in words])
+            word_placeholders = [f"%{w}%" for w in words]
+            cur.execute(
+                f"""
+                SELECT 
+                    s.scheme_id,
+                    s.scheme_name,
+                    a.amc_name,
+                    s.plan_type,
+                    s.option_type
+                FROM schemes s
+                JOIN amcs a ON s.amc_id = a.amc_id
+                WHERE {word_conditions}
+                ORDER BY 
+                    s.scheme_name,
+                    s.plan_type,
+                    s.option_type
+                LIMIT 2
+                """,
+                word_placeholders
+            )
+            results = cur.fetchall()
+
+    if not results:
         raise HTTPException(
             status_code=404, 
             detail=f"No scheme found matching '{identifier}'. Try searching first using /api/v1/schemes/search"

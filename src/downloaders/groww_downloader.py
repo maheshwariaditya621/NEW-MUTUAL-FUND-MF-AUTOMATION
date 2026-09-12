@@ -5,11 +5,13 @@ import time
 import json
 import shutil
 import re
+import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, Tuple, List
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,39 +20,63 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
+
+
+BASE_URL = "https://growwmf.in"
+PORTFOLIO_PAGE_URL = f"{BASE_URL}/statutory-disclosure/portfolio"
+
+MONTH_NAMES = {
+    "january": 1, "jan": 1,
+    "february": 2, "feb": 2,
+    "march": 3, "mar": 3,
+    "april": 4, "apr": 4,
+    "may": 5,
+    "june": 6, "jun": 6,
+    "july": 7, "jul": 7,
+    "august": 8, "aug": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
 
 
 class GrowwDownloader(BaseDownloader):
     """
     Groww Mutual Fund - Portfolio Downloader
     
-    URL: https://growwmf.in/statutory-disclosure/portfolio
-    Uses Financial Year (FY) system: Jan-Mar uses previous year, Apr-Dec uses current year
+    Direct requests-based scraper using Next.js statutory disclosure data:
+    https://growwmf.in/statutory-disclosure/portfolio
+    Downloads consolidated monthly portfolio disclosure Excel files.
     """
     
-    MONTH_NAMES = {
+    MONTH_MAP = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
-    }
-    
-    MONTH_SHORT = {
-        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
-        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
-        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
     }
 
     def __init__(self):
         super().__init__("Groww Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "groww"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        logger.info("GrowwDownloader initialized (Requests + Next.js API Version)")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -61,7 +87,7 @@ class GrowwDownloader(BaseDownloader):
             "files_downloaded": file_count,
             "timestamp": datetime.now().isoformat()
         }
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker_data, f, indent=2)
         logger.info(f"Created completion marker: {marker_path.name}")
 
@@ -77,22 +103,154 @@ class GrowwDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("GROWW", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def _calculate_fy(self, year: int, month: int) -> str:
-        """Calculate Financial Year based on month. Jan-Mar uses previous year, Apr-Dec uses current year."""
-        if month >= 1 and month <= 3:  # Jan, Feb, Mar
-            fy_start_year = year - 1
-        else:  # Apr to Dec
-            fy_start_year = year
-        
-        fy_end_year = fy_start_year + 1
-        # Groww uses "YYYY- YYYY" format with space after hyphen
-        return f"{fy_start_year}- {fy_end_year}"
+    def parse_month_year(self, text: str) -> Tuple[Optional[int], Optional[int]]:
+        """Extract month (1-12) and year (YYYY) from text or filename."""
+        text_clean = text.replace("-", " ").replace("_", " ").lower()
 
+        year_match = re.search(r"\b(20\d{2})\b", text_clean)
+        year = int(year_match.group(1)) if year_match else None
+
+        month = None
+        for name, num in MONTH_NAMES.items():
+            if re.search(rf"\b{name}\b", text_clean):
+                month = num
+                break
+
+        return month, year
+
+    def fetch_page_and_files_data(self) -> dict:
+        """Fetch statutory disclosure page and extract Next.js filesData."""
+        resp = self.session.get(PORTFOLIO_PAGE_URL, timeout=30)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        tag = soup.find("script", id="__NEXT_DATA__")
+        if not tag or not tag.string:
+            raise ValueError("Could not find __NEXT_DATA__ script tag on Groww portfolio page.")
+
+        next_data = json.loads(tag.string)
+        files_data = next_data.get("props", {}).get("pageProps", {}).get("filesData", {})
+
+        # If filesData not embedded in pageProps, query _next/data endpoint
+        if not files_data:
+            build_id = next_data.get("buildId", "")
+            if build_id:
+                api_url = f"{BASE_URL}/_next/data/{build_id}/statutory-disclosure/portfolio.json?pageName=portfolio"
+                api_resp = self.session.get(
+                    api_url,
+                    headers={**self.session.headers, "Accept": "application/json"},
+                    timeout=30
+                )
+                if api_resp.status_code == 200:
+                    files_data = api_resp.json().get("pageProps", {}).get("filesData", {})
+
+        return files_data
+
+    def extract_monthly_portfolios(self, files_data: dict) -> List[Dict]:
+        """
+        Traverse filesData and return all consolidated monthly portfolio records.
+        """
+        monthly_portfolios = []
+
+        def traverse(node: dict, current_path: str = ""):
+            name = node.get("name", "")
+            new_path = f"{current_path} / {name}" if current_path else name
+
+            for f in node.get("files", []):
+                fname = f.get("name", "")
+                fname_lower = fname.lower()
+                path_lower = new_path.lower()
+
+                # Must be under Portfolio (and not Exposure / Tracking / AUM)
+                if "portfolio" in path_lower and not any(x in path_lower for x in ["exposure", "tracking", "aum", "money market"]):
+                    if "fortnightly" not in fname_lower and ("monthly" in fname_lower or "monthly portfolio" in path_lower):
+                        m, y = self.parse_month_year(fname)
+                        if not y and current_path:
+                            _, y2 = self.parse_month_year(current_path)
+                            y = y or y2
+
+                        monthly_portfolios.append({
+                            "path": new_path,
+                            "filename": fname,
+                            "publicUrl": f.get("publicUrl", ""),
+                            "month": m,
+                            "year": y,
+                        })
+
+            for sub in node.get("folders", []):
+                traverse(sub, new_path)
+
+        traverse(files_data)
+        return monthly_portfolios
+
+    def _validate_excel_file(self, file_path: Path) -> bool:
+        """Validate ZIP signature and workbook opening via openpyxl."""
+        if not file_path.exists() or file_path.stat().st_size == 0:
+            return False
+
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+
+        if magic == b"PK\x03\x04":
+            try:
+                wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+                _ = wb.sheetnames
+                wb.close()
+                return True
+            except Exception as e:
+                logger.error(f"GROWW: openpyxl validation failed for {file_path.name}: {e}")
+                return False
+        elif magic == b"\xd0\xcf\x11\xe0":
+            return True  # Valid legacy Excel file (.xls)
+        else:
+            logger.error(f"GROWW: Invalid magic bytes for {file_path.name}: {magic.hex()}")
+            return False
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
+        logger.info(f"Fetching Groww disclosure catalog...")
+        files_data = self.fetch_page_and_files_data()
+        all_monthly = self.extract_monthly_portfolios(files_data)
+
+        logger.info(f"GROWW: Found {len(all_monthly)} monthly portfolio records across all financial years.")
+
+        target_record = None
+        for r in all_monthly:
+            if r["year"] == target_year and r["month"] == target_month:
+                target_record = r
+                break
+
+        if not target_record:
+            logger.warning(f"GROWW: No monthly portfolio file found for {month_name} {target_year}.")
+            return None
+
+        filename = target_record["filename"]
+        download_url = target_record["publicUrl"]
+        target_path = download_folder / filename
+
+        logger.info(f"Downloading {filename} from {download_url}...")
+        resp = self.session.get(download_url, stream=True, timeout=60)
+        if resp.status_code != 200:
+            logger.error(f"GROWW: Download failed with status {resp.status_code}")
+            return None
+
+        temp_path = target_path.with_name(f"{target_path.stem}.tmp{target_path.suffix}")
+        with open(temp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=16384):
+                if chunk:
+                    f.write(chunk)
+
+        if self._validate_excel_file(temp_path):
+            temp_path.replace(target_path)
+            logger.info(f"  [OK] Saved and validated: {target_path.name} ({target_path.stat().st_size:,} bytes)")
+            return target_path
+        else:
+            if temp_path.exists():
+                temp_path.unlink()
+            return None
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
-        month_name = self.MONTH_NAMES[month]
-        month_short = self.MONTH_SHORT[month]
+        month_name = self.MONTH_MAP.get(month, f"Month {month}")
         
         logger.info("=" * 60)
         logger.info("GROWW MUTUAL FUND DOWNLOADER STARTED")
@@ -104,16 +262,12 @@ class GrowwDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Groww: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -132,12 +286,13 @@ class GrowwDownloader(BaseDownloader):
                     logger.info(f"GROWW: [DRY RUN] Would download {month_name} {year}")
                     return {"status": "success", "dry_run": True}
 
-                downloaded_path = self._run_download_flow(year, month, month_short, target_dir)
+                downloaded_path = self._run_download_flow(year, month, month_name, target_dir)
                 
                 if not downloaded_path:
                     logger.warning(f"GROWW: No portfolio found for {month_name} {year}")
                     self.notifier.notify_not_published("GROWW", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
@@ -154,110 +309,14 @@ class GrowwDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("GROWW", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_short: str, download_folder: Path) -> Optional[Path]:
-        url = "https://growwmf.in/statutory-disclosure/portfolio"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="networkidle", timeout=60000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Calculate and select Financial Year
-            fy_text = self._calculate_fy(target_year, target_month)
-            logger.info(f"Selecting Financial Year: {fy_text}...")
-            
-            try:
-                inputs = page.locator('input')
-                if inputs.count() > 1:
-                    inputs.nth(1).click()
-                    time.sleep(1)
-                    
-                    # Robust selection handling both "2025-2026" and "2025- 2026"
-                    fy_parts = fy_text.split("-")
-                    fy_regex = f"{fy_parts[0].strip()}-\\s*{fy_parts[1].strip()}"
-                    
-                    year_options = page.locator("div, li, span").filter(has_text=re.compile(fy_regex))
-                    if year_options.count() > 0:
-                        # Find the one that actually matches the year range precisely
-                        found = False
-                        for i in range(year_options.count()):
-                            opt_text = year_options.nth(i).inner_text().strip()
-                            # Clean up spaces to compare: "2025- 2026" -> "2025-2026"
-                            clean_opt = re.sub(r"\s+", "", opt_text)
-                            clean_fy = re.sub(r"\s+", "", fy_text)
-                            if clean_opt == clean_fy:
-                                year_options.nth(i).click()
-                                logger.info(f"  [OK] Selected FY: {opt_text}")
-                                found = True
-                                break
-                        
-                        if not found:
-                             logger.warning(f"  [FAIL] FY {fy_text} matched by regex but no precise text match found")
-                             return None
-                        
-                        time.sleep(2)
-                    else:
-                        logger.warning(f"  [FAIL] FY regex '{fy_regex}' not found")
-                        return None
-            except Exception as e:
-                logger.warning(f"  [FAIL] Error selecting FY: {e}")
-                return None
-
-            # Find and download the portfolio link
-            link_pattern = f"Monthly Portfolio- {month_short}"
-            logger.info(f"Searching for link: '{link_pattern}'...")
-            
-            download_link = page.get_by_role("link", name=re.compile(rf"Monthly Portfolio- {month_short}", re.I))
-            
-            if download_link.count() == 0:
-                download_link = page.locator("a").filter(has_text=re.compile(rf"Portfolio.*{month_short}", re.I))
-
-            if download_link.count() == 0:
-                logger.warning(f"  [FAIL] Link not found for {month_short} {target_year}")
-                return None
-
-            link_text = download_link.first.inner_text().strip()
-            logger.info(f"  [OK] Found: '{link_text}'")
-
-            # Download the file
-            logger.info("Downloading file...")
-            with page.expect_download(timeout=60000) as download_info:
-                download_link.first.click()
-            
-            download = download_info.value
-            final_filename = download.suggested_filename
-            save_path = download_folder / final_filename
-            
-            download.save_as(save_path)
-            logger.info(f"  [OK] Saved: {final_filename}")
-            
-            return save_path
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":

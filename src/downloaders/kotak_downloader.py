@@ -5,9 +5,12 @@ import time
 import re
 import json
 import shutil
+import calendar
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
+import openpyxl
+from curl_cffi import requests as cffi_requests
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 
@@ -30,8 +33,35 @@ class KotakDownloader(BaseDownloader):
     """
     Kotak Mutual Fund - Portfolio Downloader
     
-    Uses Playwright (Stealth) to navigate forms/downloads and download monthly portfolios.
+    Downloads official monthly consolidated portfolio workbooks via direct CMS API and CDN storage,
+    with Playwright fallback if needed.
     """
+
+    API_BASE = "https://www.kotakmf.com/api/kotakapi/forms/user/getsubheaderList/417"
+    CDN_BASE = "https://vatseelabs-s3.kotakmf.com/"
+    PORTFOLIO_OPTION_ID = 51
+
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.kotakmf.com/Information/forms-and-downloads",
+        "Origin": "https://www.kotakmf.com",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    CDN_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.kotakmf.com/",
+        "Origin": "https://www.kotakmf.com",
+        "Accept": "*/*",
+    }
     
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
@@ -47,6 +77,106 @@ class KotakDownloader(BaseDownloader):
         self._browser = None
         self._context = None
         self._page = None
+
+    def _safe_api_get(self, session: cffi_requests.Session, url: str, headers: Dict[str, str], retries: int = 4, timeout: int = 30):
+        last_err = None
+        for attempt in range(retries):
+            try:
+                r = session.get(url, headers=headers, timeout=timeout)
+                if r.status_code == 200:
+                    return r
+                time.sleep(1)
+            except Exception as e:
+                last_err = e
+                time.sleep(1 + attempt * 0.5)
+        raise RuntimeError(f"API request failed after {retries} attempts: {last_err}")
+
+    def _download_via_api(self, target_year: int, target_month: int, download_folder: Path) -> Optional[Path]:
+        """Direct REST API + CDN download flow for Kotak without browser automation."""
+        try:
+            logger.info(f"KOTAK: Querying CMS API for {target_year}-{target_month:02d} monthly portfolio...")
+            session = cffi_requests.Session(impersonate="chrome124")
+
+            # 1. Fetch records with pagination
+            records = []
+            page = 1
+            page_size = 50
+
+            while True:
+                url = (
+                    f"{self.API_BASE}?option={self.PORTFOLIO_OPTION_ID}"
+                    f"&pagination=1&pageSize={page_size}&pageNumber={page}"
+                )
+                resp = self._safe_api_get(session, url, headers=self.DEFAULT_HEADERS)
+                data = resp.json()
+
+                items = data.get("subHeaderList", [])
+                total = data.get("total", 0)
+                if not items:
+                    break
+
+                records.extend(items)
+                if len(records) >= total:
+                    break
+                page += 1
+
+            # 2. Find target monthly portfolio record
+            target_month_name = calendar.month_name[target_month].lower()
+            year_str = str(target_year)
+            target_record = None
+
+            for r in records:
+                title = str(r.get("subHeaderTitle", "")).strip()
+                title_lower = title.lower()
+                fname = str(r.get("fileName", "")).lower()
+
+                if "fortnightly" in title_lower or "weekly" in title_lower or "fortnightly" in fname:
+                    continue
+
+                is_consolidated = "consolidated" in title_lower or "portfolio" in title_lower
+                has_month = target_month_name in title_lower or target_month_name in fname
+                has_year = year_str in title_lower or year_str in fname
+
+                if is_consolidated and has_month and has_year:
+                    if "15" not in title:
+                        target_record = r
+                        break
+
+            if not target_record:
+                logger.warning(f"KOTAK: No monthly portfolio record found in API for {target_year}-{target_month:02d}")
+                return None
+
+            content_path = target_record.get("content", "")
+            file_name = target_record.get("fileName") or f"ConsolidatedSEBIPortfolio_{target_year}_{target_month:02d}.xlsx"
+            if not content_path:
+                logger.error("KOTAK: Target record missing 'content' path")
+                return None
+
+            download_url = f"{self.CDN_BASE}{content_path.lstrip('/')}"
+            dest_path = download_folder / file_name
+
+            logger.info(f"KOTAK: Downloading {dest_path.name} from {download_url}...")
+            resp = self._safe_api_get(session, download_url, headers=self.CDN_HEADERS, timeout=60)
+            content = resp.content
+
+            if not content.startswith(b"PK\x03\x04"):
+                logger.error(f"KOTAK: Downloaded file has invalid magic bytes: {content[:4]}")
+                return None
+
+            with open(dest_path, "wb") as f:
+                f.write(content)
+
+            # Validate openpyxl readable
+            wb = openpyxl.load_workbook(dest_path, read_only=True)
+            sheet_count = len(wb.sheetnames)
+            wb.close()
+
+            logger.info(f"KOTAK: Downloaded and verified {dest_path.name} ({len(content):,} bytes, {sheet_count} sheets)")
+            return dest_path
+
+        except Exception as e:
+            logger.error(f"KOTAK: Direct API download failed: {e}")
+            return None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -180,7 +310,13 @@ class KotakDownloader(BaseDownloader):
                     logger.info("=" * 60)
                     return {"amc": "Kotak", "year": year, "month": month, "status": "success", "dry_run": True}
 
-                file_path = self._download_via_playwright(year, month_name, target_dir, page=self._page)
+                # 1) Try fast direct API/CDN download
+                file_path = self._download_via_api(year, month, target_dir)
+
+                # 2) Fallback to Playwright if needed and session is active
+                if not file_path and self._page:
+                    logger.info("KOTAK: Falling back to Playwright flow...")
+                    file_path = self._download_via_playwright(year, month_name, target_dir, page=self._page)
                 
                 if not file_path:
                     # Not Published Handling

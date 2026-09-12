@@ -4,12 +4,16 @@ import os
 import time
 import json
 import shutil
+import re
 import calendar
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Tuple, Any
+from urllib.parse import urljoin, unquote
+
+import requests
+import openpyxl
+import pandas as pd
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,33 +22,43 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True  # Default to True for production
 
 
 class TrustDownloader(BaseDownloader):
     """
-    Trust Mutual Fund - Portfolio Downloader
-    
-    URL: https://www.trustmf.com/disclosures?active=Tab%3Dportfolio-disclosures&activeTab=portfolio-disclosures
+    Trust Mutual Fund - Monthly Portfolio Downloader
+
+    URL: https://www.trustmf.com/disclosures?activeTab=portfolio-disclosures
     Features:
-    - Persistent Session for efficiency.
-    - Logic for Link Text Calculation (Last day of month).
-    - Exact selectors from user script.
-    - Gold Standard compliance.
+    - Pure requests (no browser/Playwright required).
+    - API-driven via POST https://www.trustmf.com/api/api/Trust/GetData
+    - Consolidated monthly portfolio workbooks (.xlsx / .xls).
+    - Idempotency via _SUCCESS.json and automatic consolidation check.
     """
-    
+
+    API_URL = "https://www.trustmf.com/api/api/Trust/GetData"
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Content-Type": "application/json; charset=UTF-8",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    ZIP_MAGIC = b"PK\x03\x04"
+    OLE_MAGIC = b"\xD0\xCF\x11\xE0"
+
     MONTH_ABBR = {
         1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
         5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
         9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
     }
-    
+
     MONTH_FULL = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
@@ -76,38 +90,34 @@ class TrustDownloader(BaseDownloader):
         if corrupt_target.exists():
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             corrupt_target = corrupt_target.parent / f"{corrupt_target.name}__{ts}"
-        
+
         logger.warning(f"{self.AMC_NAME}: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Trust", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
-
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
         month_abbr = self.MONTH_ABBR[month]
         month_full = self.MONTH_FULL[month]
-        
+
         logger.info("=" * 60)
         logger.info(f"TRUST MUTUAL FUND DOWNLOADER: {year}-{month:02d} ({month_abbr})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
+
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Trust: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "status": "skipped", 
+                    "status": "skipped",
                     "reason": "already_downloaded",
                     "duration": duration
                 }
@@ -124,18 +134,17 @@ class TrustDownloader(BaseDownloader):
                     return {"status": "success", "dry_run": True}
 
                 files_downloaded = self._run_download_flow(year, month, month_abbr, month_full, target_dir)
-                
+
                 if files_downloaded == 0:
                     logger.warning(f"{self.AMC_NAME}: No portfolios found for {month_abbr} {year}")
                     self.notifier.notify_not_published("Trust", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 self._create_success_marker(target_dir, year, month, files_downloaded)
-                
-                # Consolidate downloads
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("Trust", year, month, files_downloaded=files_downloaded, duration=duration)
                 logger.success(f"[SUCCESS] {self.AMC_NAME} download completed: {files_downloaded} files")
@@ -143,121 +152,125 @@ class TrustDownloader(BaseDownloader):
 
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if self._page:
-                     try:
-                        self._page.screenshot(path=f"trust_debug_{year}_{month}_attempt_{attempt}.png")
-                     except: pass
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                logger.error(f"Attempt {attempt + 1} failed: {last_error}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("Trust", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
-    def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
-        url = "https://www.trustmf.com/disclosures?active=Tab%3Dportfolio-disclosures&activeTab=portfolio-disclosures"
-        
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=False,
-                channel="chrome",
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+    def _discover_monthly_record(self, session: requests.Session, year: int, month: int, month_abbr: str, month_full: str) -> Optional[Dict[str, Any]]:
+        payload = {
+            "systemQueryFileName": "disclosuresweb.xml",
+            "tagName": "GetDisclosureByType",
+            "searchField": "",
+            "searchValue": "",
+            "sortField": "uploaddate",
+            "sortDirection": "DESC",
+            "replaceField": "_slug_",
+            "replaceValue": "portfolio-monthly-disclosure"
+        }
 
-            logger.info("Navigating to Trust Mutual Fund website...")
-            page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            
-            # User script waits 8 seconds for stabilization
-            logger.info("Waiting 8 seconds for page to stabilize...")
-            time.sleep(8)
-            
-            # 1. Open 'Monthly Disclosure' section
-            logger.info("Opening 'Monthly Disclosure' section...")
-            
-            # Use a more robust selector for the sidebar Monthly Disclosure
-            sidebar_link = page.locator("div.cursor-pointer").get_by_text("Monthly Disclosure", exact=True)
-            
-            if sidebar_link.count() > 0:
-                sidebar_link.first.click()
-                time.sleep(3)
-                logger.info("Section opened via sidebar")
+        logger.info("Querying Trust AMC disclosures API for monthly portfolios...")
+        resp = session.post(self.API_URL, json=payload, headers=self.HEADERS, timeout=30)
+        resp.raise_for_status()
+
+        data = resp.json()
+        records = data.get("resultSetArray", [])
+        logger.info(f"Retrieved {len(records)} monthly records from API")
+
+        matching = []
+        for r in records:
+            title = r.get("title", "").strip()
+            title_lower = title.lower()
+
+            if "monthly" not in title_lower:
+                continue
+
+            if any(skip in title_lower for skip in ["fortnightly", "quarterly", "half yearly", "half-yearly"]):
+                continue
+
+            m = re.search(r"(\d{1,2})[./-](\d{1,2})[./-](\d{4})", title)
+            if m:
+                m_val = int(m.group(2))
+                y_val = int(m.group(3))
+                if y_val == year and m_val == month:
+                    matching.append(r)
             else:
-                # Fallback to general text match
-                monthly_disclosure = page.get_by_text("Monthly Disclosure").nth(1)
-                if monthly_disclosure.count() > 0:
-                    monthly_disclosure.click()
-                    time.sleep(3)
-                    logger.info("Section opened via fallback")
-                else:
-                    logger.error("Monthly Disclosure section not found")
-                    return 0
-            
-            # 2. Search for portfolio report
-            # Construct link text: "TRUSTMF Monthly Portfolio Report as on {dd}.{mm}.{yyyy}"
-            last_day = calendar.monthrange(target_year, target_month)[1]
-            date_str = f"{last_day:02d}.{target_month:02d}.{target_year}"
-            target_link_text = f"TRUSTMF Monthly Portfolio Report as on {date_str}"
-            
-            logger.info(f"Searching for link: '{target_link_text}'")
-            
-            # Use a more general locator that handles both <a> and <button>
-            report_link = page.get_by_text(target_link_text)
-            
-            if report_link.count() == 0:
-                logger.warning(f"Report not found for {target_link_text}")
-                
-                # Debug: log available links
-                logger.info("Checking available reports:")
-                all_reports = page.get_by_text("TRUSTMF Monthly Portfolio Report")
-                for i in range(min(5, all_reports.count())):
-                    try:
-                        text = all_reports.nth(i).text_content()
-                        logger.info(f"  Available: {text}")
-                    except: pass
-                return 0
-            
-            # 3. Download
-            logger.info("Found link, initiating download...")
-            try:
-                with page.expect_download(timeout=60000) as download_info:
-                    # User script handles popup
-                    try:
-                        with page.expect_popup(timeout=10000) as popup_info:
-                            report_link.click()
-                        popup = popup_info.value
-                        popup.close()
-                    except:
-                        # Fallback if no popup
-                        report_link.click()
-                
-                dl = download_info.value
-                fname = dl.suggested_filename
-                
-                # Prefix with identifier if filename is generic
-                if fname.lower() in ["portfolio.pdf", "monthly_portfolio.pdf", "download.pdf", "portfolio.xlsx", "report.xlsx"]:
-                    fname = f"TRUST_{month_abbr}_{target_year}_{fname}"
-                    
-                dl.save_as(download_folder / fname)
-                logger.info(f"  [OK] Saved: {fname}")
-                return 1
+                if str(year) in title and (month_full.lower() in title_lower or month_abbr.lower() in title_lower):
+                    matching.append(r)
 
-            except Exception as e:
-                logger.error(f"Download interaction failed: {e}")
+        if not matching:
+            return None
+
+        # Return the latest record if multiple
+        return matching[0]
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_abbr: str, month_full: str, download_folder: Path) -> int:
+        session = requests.Session()
+        record = self._discover_monthly_record(session, target_year, target_month, month_abbr, month_full)
+
+        if not record:
+            logger.warning(f"No monthly portfolio report found for {month_full} {target_year}")
+            return 0
+
+        title = record.get("title", "").strip()
+        fileurl = record.get("fileurl", "").strip()
+        upload_date = record.get("uploaddate", "").strip()
+
+        logger.info(f"Found record: '{title}'")
+        logger.info(f"Upload Date: {upload_date}")
+        logger.info(f"File URL: {fileurl}")
+
+        ext = ".xlsx" if ".xlsx" in fileurl.lower() else ".xls"
+        filename = f"TRUSTMF_Monthly_Portfolio_Report_{target_year}_{target_month:02d}{ext}"
+        target_path = download_folder / filename
+
+        logger.info(f"Downloading file to {filename}...")
+        try:
+            with session.get(fileurl, headers={"User-Agent": self.HEADERS["User-Agent"]}, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(target_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+
+            file_size = target_path.stat().st_size
+            if file_size < 1000:
+                target_path.unlink(missing_ok=True)
+                logger.error(f"File too small ({file_size} bytes)")
                 return 0
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+            # Validate magic bytes
+            with open(target_path, "rb") as f:
+                magic = f.read(8)
+
+            is_xlsx = magic.startswith(self.ZIP_MAGIC)
+            is_xls = magic.startswith(self.OLE_MAGIC)
+
+            if not is_xlsx and not is_xls:
+                logger.warning(f"Unusual magic bytes: {magic[:4].hex()}")
+
+            # Validate openability
+            sheet_count = 0
+            if is_xlsx:
+                wb = openpyxl.load_workbook(target_path, read_only=True)
+                sheet_count = len(wb.sheetnames)
+                wb.close()
+            else:
+                xls_file = pd.ExcelFile(target_path)
+                sheet_count = len(xls_file.sheet_names)
+
+            logger.info(f"[OK] Validated {filename}: {sheet_count} sheet(s), {file_size:,} bytes")
+            return 1
+
+        except Exception as e:
+            logger.error(f"Error downloading or validating {filename}: {e}")
+            if target_path.exists():
+                target_path.unlink(missing_ok=True)
+            raise
 
 
 if __name__ == "__main__":

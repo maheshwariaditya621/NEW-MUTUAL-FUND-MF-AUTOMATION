@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+import re
 import pandas as pd
 from src.config import logger
 from src.extractors.base_extractor import BaseExtractor
@@ -6,12 +7,18 @@ from src.extractors.base_extractor import BaseExtractor
 class SamcoExtractorV1(BaseExtractor):
     """
     Dedicated extractor for Samco Mutual Fund.
-    File structure (observed from CONSOLIDATED_SAMCO_2025_12.xlsx):
-    - Row 0, Col 1: Scheme Name
-    - Row 3: Column Headers
-    - Market Value: In Rs. in Lakhs
-    - NAV %: In decimal format (e.g. 0.0691 -> 6.91%)
+
+    File structure variants:
+    - v1 (up to Mar 2026): Row 0, Col 1 = Scheme Name
+    - v2 (Apr 2026 onwards): Row 0, Col 1 = "SAMCO MUTUAL FUND" (AMC name),
+      Row 2, Col 1 = "MONTHLY PORTFOLIO STATEMENT OF <FUND NAME> AS ON <DATE>"
+    - Header: Row 4
+    - Market Value: Rs. in Lakhs
+    - NAV %: Decimal format (e.g. 0.0691 -> 6.91%)
     """
+
+    # When Row 0, Col 1 equals this string, it is the AMC name — not a scheme name.
+    _AMC_NAME_MARKERS = {"SAMCO MUTUAL FUND"}
 
     def __init__(self):
         super().__init__(amc_name="Samco Mutual Fund", version="v1")
@@ -30,27 +37,22 @@ class SamcoExtractorV1(BaseExtractor):
 
     def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
         """Find Grand Total or Net Assets row and extract value."""
-        # Scan from bottom up
-        for i in range(len(df)-1, -1, -1):
+        for i in range(len(df)):
             row = df.iloc[i]
-            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
-            
-            is_valid_marker = False
-            if "GRAND TOTAL" in row_text:
-                is_valid_marker = True
-            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENT" not in row_text:
-                is_valid_marker = True
-                
-            if is_valid_marker:
-                candidates = []
-                for val in row:
-                    f_val = self.safe_float(val)
-                    # Filter out percentages (like 1.0 or 100.0)
-                    if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
-                        candidates.append(f_val)
-                
-                if candidates:
-                    return self.normalize_currency(max(candidates), unit)
+            for c in range(min(5, len(row))):
+                val_str = str(row.iloc[c]).strip().upper().replace('_', ' ')
+                if len(val_str) > 35:
+                    continue
+                if any(bad in val_str for bad in ["EXPOSURE", "PERCENTAGE", "HEDGED", "FUTURES", "OPTIONS", "PER UNIT", "AGGREGATE"]):
+                    continue
+                if val_str in ["GRAND TOTAL", "NET ASSETS", "TOTAL NET ASSETS", "GRAND TOTAL (AUM)"] or val_str.startswith("GRAND TOTAL"):
+                    candidates = []
+                    for v in row:
+                        f_val = self.safe_float(v)
+                        if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 20000000:
+                            candidates.append(f_val)
+                    if candidates:
+                        return self.normalize_currency(candidates[0], unit)
         return 0.0
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -78,21 +80,43 @@ class SamcoExtractorV1(BaseExtractor):
                     logger.warning(f"[{sheet_name}] Header not found. Skipping.")
                     continue
 
-                # 2. Extract Scheme Name (Expected at Row 0, Col 1)
+                # 2. Extract Scheme Name
+                # v1 format (up to Mar 2026): Row 0, Col 1 = actual scheme name
+                # v2 format (Apr 2026+):      Row 0, Col 1 = "SAMCO MUTUAL FUND" (AMC name)
+                #                             Row 2, Col 1 = portfolio statement containing fund name
                 raw_scheme_name = "N/A"
                 if len(df_raw) > 0 and len(df_raw.columns) > 1:
                     raw_scheme_name = str(df_raw.iloc[0, 1]).strip()
-                
-                # Fallback / Scan if Row 0 is empty
-                if not raw_scheme_name or raw_scheme_name.lower() == "nan":
-                    for i in range(5):
-                        potential = str(df_raw.iloc[i, 1]).strip() if len(df_raw.columns) > 1 else str(df_raw.iloc[i, 0]).strip()
-                        if potential and potential.lower() != "nan" and len(potential) > 5:
-                            raw_scheme_name = potential
-                            break
 
-                if raw_scheme_name == "N/A":
+                # Detect v2 format: Row 0 is just the AMC name, not a scheme name
+                if raw_scheme_name.upper() in self._AMC_NAME_MARKERS or raw_scheme_name.lower() == "nan" or not raw_scheme_name:
+                    # Try Row 2, Col 1 — contains portfolio statement in v2 format
+                    parsed_from_statement = None
+                    if len(df_raw) > 2 and len(df_raw.columns) > 1:
+                        stmt_text = str(df_raw.iloc[2, 1]).strip()
+                        # Pattern: "MONTHLY PORTFOLIO STATEMENT OF <FUND NAME> AS ON <DATE>"
+                        match = re.search(
+                            r'(?:MONTHLY\s+PORTFOLIO\s+STATEMENT\s+OF\s+)(.*?)(?:\s+AS\s+ON\b)',
+                            stmt_text, re.IGNORECASE | re.DOTALL
+                        )
+                        if match:
+                            # Normalise internal whitespace (the text can have double spaces)
+                            parsed_from_statement = ' '.join(match.group(1).split())
+
+                    if parsed_from_statement:
+                        raw_scheme_name = parsed_from_statement
+                        logger.debug(f"[{sheet_name}] v2 format detected. Scheme name parsed from portfolio statement: '{raw_scheme_name}'")
+                    else:
+                        # Last-resort: scan first 5 rows for any non-trivial text
+                        for i in range(5):
+                            potential = str(df_raw.iloc[i, 1]).strip() if len(df_raw.columns) > 1 else str(df_raw.iloc[i, 0]).strip()
+                            if potential and potential.lower() != "nan" and len(potential) > 5 and potential.upper() not in self._AMC_NAME_MARKERS:
+                                raw_scheme_name = potential
+                                break
+
+                if raw_scheme_name == "N/A" or raw_scheme_name.upper() in self._AMC_NAME_MARKERS:
                     raw_scheme_name = sheet_name
+                    logger.warning(f"[{sheet_name}] Could not parse scheme name; falling back to sheet name.")
 
                 scheme_info = self.parse_verbose_scheme_name(raw_scheme_name)
                 logger.info(f"Processing scheme: {scheme_info['scheme_name']} (from '{raw_scheme_name}')")
@@ -105,6 +129,19 @@ class SamcoExtractorV1(BaseExtractor):
                 
                 # 3. Process Data
                 headers = [str(h).replace('\n', ' ').strip().upper() for h in df_raw.iloc[header_idx]]
+
+                # Deduplicate headers to avoid silent column-drop in to_dict('records')
+                seen_headers = {}
+                deduped_headers = []
+                for h in headers:
+                    if h in seen_headers:
+                        seen_headers[h] += 1
+                        deduped_headers.append(f"{h}_{seen_headers[h]}")
+                    else:
+                        seen_headers[h] = 0
+                        deduped_headers.append(h)
+                headers = deduped_headers
+
                 df_data = pd.read_excel(xls, sheet_name=sheet_name, skiprows=header_idx + 1, header=None)
                 df_data.columns = headers
 
@@ -115,7 +152,7 @@ class SamcoExtractorV1(BaseExtractor):
                         if pattern.upper() in str(col).upper():
                             mapped_cols[col] = canonical
                             break
-                
+
                 df_data = df_data.rename(columns=mapped_cols)
                 
                 if "isin" not in df_data.columns:

@@ -1,4 +1,3 @@
-
 # src/downloaders/capitalmind_downloader.py
 
 import os
@@ -8,9 +7,11 @@ import shutil
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Tuple
+from urllib.parse import urljoin
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -19,24 +20,43 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
+
+
+BASE_URL = "https://www.capitalmindmf.com"
+DISCLOSURES_URL = f"{BASE_URL}/statutory-disclosures.html"
+
+MONTH_NAMES = {
+    "january": 1, "jan": 1,
+    "february": 2, "feb": 2,
+    "march": 3, "mar": 3,
+    "april": 4, "apr": 4,
+    "may": 5,
+    "june": 6, "jun": 6,
+    "july": 7, "jul": 7,
+    "august": 8, "aug": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
 
 
 class CapitalMindDownloader(BaseDownloader):
     """
     CapitalMind Mutual Fund - Portfolio Downloader
     
-    URL: https://capitalmindmf.com/statutory-disclosures.html
-    Uses accordion-style navigation with FY groupings.
+    Direct requests + BeautifulSoup scraper.
+    URL: https://www.capitalmindmf.com/statutory-disclosures.html
+    Parses Monthly Portfolio tab content and downloads scheme-level XLSX files.
     """
     
-    MONTH_NAMES = {
+    MONTH_MAP = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
@@ -46,11 +66,17 @@ class CapitalMindDownloader(BaseDownloader):
         super().__init__("CapitalMind Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "capitalmind"
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
-        logger.info("CapitalMindDownloader initialized (Fixed Version 2.0)")
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        logger.info("CapitalMindDownloader initialized (Requests + BS4 Version)")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -61,7 +87,7 @@ class CapitalMindDownloader(BaseDownloader):
             "files_downloaded": file_count,
             "timestamp": datetime.now().isoformat()
         }
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker_data, f, indent=2)
         logger.info(f"Created completion marker: {marker_path.name}")
 
@@ -77,66 +103,190 @@ class CapitalMindDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("CAPITALMIND", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def open_session(self):
-        """Open a persistent browser session."""
-        if self._page:
-            return
+    def parse_month_year(self, text: str) -> Tuple[Optional[int], Optional[int]]:
+        """Extract month (1-12) and year (YYYY) from text or filename."""
+        text_lower = text.lower()
+        
+        year_match = re.search(r'\b(20\d{2})\b', text)
+        year = int(year_match.group(1)) if year_match else None
+        
+        month = None
+        for name, num in MONTH_NAMES.items():
+            if re.search(rf'\b{name}\b', text_lower):
+                month = num
+                break
+        return month, year
+
+    def fetch_disclosures_html(self, url: str = DISCLOSURES_URL) -> str:
+        """Fetch disclosures page HTML."""
+        resp = self.session.get(url, timeout=30)
+        resp.raise_for_status()
+        return resp.text
+
+    def extract_monthly_portfolio_links(self, html_content: str) -> List[Dict]:
+        """
+        Parse disclosures HTML and return all monthly portfolio records.
+        """
+        soup = BeautifulSoup(html_content, "html.parser")
+        
+        # Find Monthly Portfolio tab button dynamically
+        target_panel_id = None
+        for btn in soup.find_all(["button", "a"]):
+            btn_text = btn.get_text(strip=True).lower()
+            if "monthly portfolio" in btn_text and not ("overlap" in btn_text or "fortnightly" in btn_text):
+                target_panel_id = btn.get("data-bs-target") or btn.get("href")
+                if target_panel_id and target_panel_id.startswith("#"):
+                    break
+        
+        panel = None
+        if target_panel_id:
+            panel = soup.select_one(target_panel_id)
+        if not panel:
+            panel = soup.select_one("#v-pills-tabContent2")
             
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=HEADLESS,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-        )
-        self._context = self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            accept_downloads=True
-        )
-        self._page = self._context.new_page()
-        Stealth().apply_stealth_sync(self._page)
-        logger.info("Persistent Chrome session opened for CapitalMind.")
+        if not panel:
+            for div in soup.select(".tab-pane"):
+                if "monthly portfolio" in div.get_text(strip=True).lower():
+                    panel = div
+                    break
 
-    def close_session(self):
-        """Close the persistent browser session."""
-        if self._page: self._page.close()
-        if self._browser: self._browser.close()
-        if self._playwright: self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
-        logger.info("Persistent Chrome session closed for CapitalMind.")
+        if not panel:
+            logger.error("CAPITALMIND: Failed to find Monthly Portfolio tab content panel in HTML.")
+            return []
 
-    def calculate_fy(self, month: int, year: int) -> str:
-        """Calculate Financial Year string: e.g. FY 2024 - 2025"""
-        if month >= 4:
-            fy_start = year
-        else:
-            fy_start = year - 1
-        fy_end = fy_start + 1
-        return f"FY {fy_start} - {fy_end}"
+        results = []
+        accordion_items = panel.select(".accordion-item")
+        
+        for item in accordion_items:
+            header_el = item.select_one(".accordion-header") or item.select_one(".accordion-button")
+            scheme_name = header_el.get_text(strip=True) if header_el else "Unknown Scheme"
+            
+            for li in item.select("li"):
+                span_el = li.select_one("span")
+                displayed_title = span_el.get_text(strip=True) if span_el else ""
+                
+                a_el = li.select_one("a[href]")
+                if not a_el:
+                    continue
+                
+                href = a_el["href"].strip()
+                if not href:
+                    continue
+                
+                filename = os.path.basename(href.split("?")[0])
+                month, year = self.parse_month_year(displayed_title)
+                if not month or not year:
+                    m2, y2 = self.parse_month_year(filename)
+                    month = month or m2
+                    year = year or y2
+                
+                abs_url = urljoin(BASE_URL, href)
+                
+                results.append({
+                    "scheme_name": scheme_name,
+                    "displayed_title": displayed_title,
+                    "month": month,
+                    "year": year,
+                    "href": href,
+                    "download_url": abs_url,
+                    "filename": filename,
+                })
+
+        return results
+
+    def _validate_excel_file(self, file_path: Path) -> bool:
+        """Validate ZIP signature and workbook opening via openpyxl."""
+        if not file_path.exists() or file_path.stat().st_size == 0:
+            return False
+            
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+        if magic != b"PK\x03\x04":
+            logger.error(f"CAPITALMIND: Invalid magic bytes for {file_path.name}: {magic.hex()}")
+            return False
+            
+        try:
+            wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+            _ = wb.sheetnames
+            wb.close()
+            return True
+        except Exception as e:
+            logger.error(f"CAPITALMIND: openpyxl validation failed for {file_path.name}: {e}")
+            return False
+
+    def _download_file(self, url: str, target_path: Path) -> bool:
+        """Download file and validate integrity."""
+        try:
+            resp = self.session.get(url, stream=True, timeout=60)
+            if resp.status_code != 200:
+                logger.error(f"CAPITALMIND: Download failed with HTTP {resp.status_code} for {url}")
+                return False
+                
+            temp_path = target_path.with_name(f"{target_path.stem}.tmp{target_path.suffix}")
+            with open(temp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=16384):
+                    if chunk:
+                        f.write(chunk)
+                        
+            if self._validate_excel_file(temp_path):
+                temp_path.replace(target_path)
+                logger.info(f"  [OK] Downloaded and validated: {target_path.name} ({target_path.stat().st_size:,} bytes)")
+                return True
+            else:
+                if temp_path.exists():
+                    temp_path.unlink()
+                return False
+        except Exception as e:
+            logger.error(f"CAPITALMIND: Download error for {url}: {e}")
+            return False
+
+    def _run_download_flow(self, target_year: int, target_month: int, download_folder: Path) -> List[Path]:
+        """Fetch disclosures HTML, find files for target period, and download."""
+        html = self.fetch_disclosures_html()
+        all_links = self.extract_monthly_portfolio_links(html)
+        
+        target_links = [
+            item for item in all_links
+            if item["year"] == target_year and item["month"] == target_month
+        ]
+        
+        if not target_links:
+            logger.warning(f"CAPITALMIND: No portfolio files found for {target_year}-{target_month:02d}")
+            return []
+            
+        logger.info(f"CAPITALMIND: Found {len(target_links)} portfolio files for {target_year}-{target_month:02d}")
+        
+        downloaded_paths = []
+        for item in target_links:
+            target_path = download_folder / item["filename"]
+            logger.info(f"Downloading {item['scheme_name']} -> {item['filename']}...")
+            if self._download_file(item["download_url"], target_path):
+                downloaded_paths.append(target_path)
+            else:
+                logger.error(f"Failed to download/validate {item['filename']}")
+                
+        return downloaded_paths
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
-        month_name = self.MONTH_NAMES[month]
-        target_fy = self.calculate_fy(month, year)
+        month_name = self.MONTH_MAP.get(month, f"Month {month}")
         
         logger.info("=" * 60)
         logger.info("CAPITALMIND MUTUAL FUND DOWNLOADER STARTED")
-        logger.info(f"Period: {year}-{month:02d} ({month_name}) | FY: {target_fy}")
+        logger.info(f"Period: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
         
-        # Idempotency
+        # Idempotency check
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Capitalmind: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -155,194 +305,38 @@ class CapitalMindDownloader(BaseDownloader):
                     logger.info(f"CAPITALMIND: [DRY RUN] Would download {month_name} {year}")
                     return {"status": "success", "dry_run": True}
 
-                files_downloaded = self._run_download_flow(year, month, month_name, target_fy, target_dir)
+                downloaded_files = self._run_download_flow(year, month, target_dir)
                 
-                if files_downloaded == 0:
+                if not downloaded_files:
                     logger.warning(f"CAPITALMIND: No portfolios found for {month_name} {year}")
                     self.notifier.notify_not_published("CAPITALMIND", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
-                self._create_success_marker(target_dir, year, month, files_downloaded)
+                file_count = len(downloaded_files)
+                self._create_success_marker(target_dir, year, month, file_count)
                 
                 # Consolidate downloads
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
-                self.notifier.notify_success("CAPITALMIND", year, month, files_downloaded=files_downloaded, duration=duration)
-                logger.success(f"[SUCCESS] CAPITALMIND download completed: {files_downloaded} files")
-                return {"status": "success", "files_downloaded": files_downloaded, "duration": duration}
+                self.notifier.notify_success("CAPITALMIND", year, month, files_downloaded=file_count, duration=duration)
+                logger.success(f"[SUCCESS] CAPITALMIND download completed: {file_count} files")
+                return {"status": "success", "files_downloaded": file_count, "duration": duration}
 
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("CAPITALMIND", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, target_fy: str, download_folder: Path) -> int:
-        close_needed = False
-        if not self._page:
-            self.open_session()
-            close_needed = True
-
-        page = self._page
-        url = "https://capitalmindmf.com/statutory-disclosures.html#"
-        try:
-            logger.info(f"Navigating to {url}...")
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            except Exception as e:
-                logger.warning(f"Navigation warning: {e}")
-            
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Handle US Person Declaration
-            logger.info("Handling declaration modal...")
-            selectors = [
-                "button:has-text('I AM NOT A US PERSON')",
-                "button.blue-button",
-                ".modal-footer button",
-                "button:has-text('RESIDENT OF CANADA')"
-            ]
-            for sel in selectors:
-                btn = page.locator(sel).first
-                if btn.count() > 0 and btn.is_visible():
-                    btn.click()
-                    logger.info(f"  [OK] Clicked modal button via selector: {sel}")
-                    try:
-                        page.locator(".modal-backdrop").wait_for(state="hidden", timeout=5000)
-                    except:
-                        pass
-                    time.sleep(2)
-                    break
-
-            # Click on "Monthly Portfolio" tab
-            logger.info("Selecting Monthly Portfolio tab...")
-            monthly_tab = page.locator("#v-pills-home-tab4, button[role='tab']:has-text('Monthly Portfolio')").first
-            try:
-                monthly_tab.click(force=True, timeout=10000)
-                time.sleep(3)
-            except:
-                page.mouse.click(179, 772) # Fallback pixel click if needed
-                time.sleep(3)
-            logger.info("  [OK] Tab selected")
-
-            # Discover schemes
-            logger.info("Discovering schemes...")
-            tab_content = page.locator("#v-pills-tabContent4").first
-            scheme_items = tab_content.locator(".accordion-item").all()
-            
-            scheme_info = []
-            for item in scheme_items:
-                btn = item.locator("button.accordion-button").first
-                if btn.count() > 0:
-                    name = btn.text_content().strip()
-                    name = " ".join(name.split())
-                    if "Capitalmind" in name:
-                        scheme_info.append({
-                            "name": name,
-                            "button": btn,
-                            "panel": item.locator(".accordion-collapse").first
-                        })
-            
-            logger.info(f"  [OK] Found {len(scheme_info)} schemes")
-
-            total_downloaded = 0
-            
-            for idx, s in enumerate(scheme_info, 1):
-                scheme_name = s["name"]
-                s_btn = s["button"]
-                s_panel = s["panel"]
-                
-                logger.info(f"  [{idx}/{len(scheme_info)}] {scheme_name}")
-                
-                try:
-                    # Expand scheme accordion
-                    if s_btn.get_attribute("aria-expanded") != "true":
-                        s_btn.click(force=True)
-                        time.sleep(2)
-
-                    # Find FY heading/button
-                    logger.info(f"    Searching for {target_fy} section...")
-                    
-                    # Prioritize Button (Interactive)
-                    fy_btn = s_panel.locator("button").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
-                    if fy_btn.count() == 0:
-                        # Fallback: Try year range without FY prefix
-                        year_range = target_fy.replace("FY ", "")
-                        fy_btn = s_panel.locator("button").filter(has_text=re.compile(re.escape(year_range), re.I)).first
-
-                    if fy_btn.count() > 0:
-                        if fy_btn.get_attribute("aria-expanded") != "true":
-                            logger.info(f"    Expanding {target_fy} section...")
-                            fy_btn.click(force=True)
-                            time.sleep(2)
-                        search_area = s_panel
-                    else:
-                        # Fallback to Header (Static)
-                        fy_heading = s_panel.locator("h6").filter(has_text=re.compile(re.escape(target_fy), re.I)).first
-                        if fy_heading.count() > 0:
-                            search_area = s_panel
-                            logger.info(f"    [OK] Found FY heading (Static)")
-                        else:
-                            logger.warning(f"    [FAIL] FY section '{target_fy}' not found for {scheme_name}")
-                            continue
-
-                    # Find Month row
-                    logger.info(f"    Searching for {month_name} row...")
-                    month_row = search_area.locator("div.about-text").filter(has=page.locator("h6").filter(has_text=re.compile(f"^{month_name}( {target_year})?$", re.I))).first
-                    
-                    if month_row.count() == 0:
-                        month_row = search_area.locator("div.about-text").filter(has=page.locator("h6").filter(has_text=re.compile(month_name, re.I))).first
-                    
-                    if month_row.count() > 0:
-                        d_link = month_row.locator("a").filter(has_text=re.compile("Download", re.I)).first
-                        
-                        if d_link.count() > 0:
-                            # Ensure link is visible
-                            d_link.scroll_into_view_if_needed()
-                            time.sleep(0.5)
-                            try:
-                                with page.expect_download(timeout=60000) as download_info:
-                                    try:
-                                        with page.expect_popup(timeout=5000) as popup_info:
-                                            d_link.click(force=True)
-                                        popup = popup_info.value
-                                        popup.close()
-                                    except:
-                                        d_link.click(force=True)
-                                
-                                download = download_info.value
-                                filename = download.suggested_filename
-                                save_path = download_folder / filename
-                                download.save_as(save_path)
-                                
-                                logger.info(f"    [OK] Downloaded: {filename}")
-                                total_downloaded += 1
-                                time.sleep(1)
-                                
-                            except Exception as d_err:
-                                logger.error(f"    [FAIL] Download failed: {str(d_err)[:80]}")
-                        else:
-                            logger.warning(f"    [FAIL] Download link not found in row for {month_name}")
-                    else:
-                        logger.warning(f"    [FAIL] Month '{month_name}' row not found")
-                        
-                except Exception as scheme_err:
-                    logger.error(f"    [FAIL] Error processing scheme: {str(scheme_err)[:100]}")
-                    continue
-
-            return total_downloaded
-
-        finally:
-            if close_needed:
-                self.close_session()
 
 
 if __name__ == "__main__":

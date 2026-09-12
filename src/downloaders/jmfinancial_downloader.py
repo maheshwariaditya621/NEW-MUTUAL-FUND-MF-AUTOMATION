@@ -1,16 +1,17 @@
 # src/downloaders/jmfinancial_downloader.py
 
 import os
+import re
 import time
 import json
 import shutil
-import re
-import requests
+import base64
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List, Tuple
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+import requests
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -19,32 +20,74 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class JMFinancialDownloader(BaseDownloader):
     """
-    JM Financial Mutual Fund - Portfolio Downloader
-    
-    URL: https://www.jmfinancialmf.com/downloads/Portfolio-Disclosure/Monthly-Portfolio-of-Schemes
+    JM Financial Mutual Fund - Monthly Portfolio Downloader.
+
+    Downloads monthly portfolio disclosures via the official reverse-engineered
+    AES-encrypted API without browser automation (Playwright/Selenium).
+
+    API:
+        POST https://jmmfapi.jmfinancialmf.com/api/GetDownloadNew
+        Payload: {"IICategoryID": "2", "IISubCategoryID": "4", "IVSearch": ""}
     """
-    
+
+    AMC_NAME = "jmfinancial"
+    API_BASE_URL = "https://jmmfapi.jmfinancialmf.com/api/"
+    API_GET_DOWNLOAD_NEW = f"{API_BASE_URL}GetDownloadNew"
+    WEB_BASE_URL = "https://www.jmfinancialmf.com/"
+
+    # Hardcoded frontend crypto keys from React ServiceProvider context
+    AES_KEY = "6fa979f20126cb08aa645a8f495f6d85"
+    AES_IV = "I8zyA4lVhMCaJ5Kg"
+
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Origin": "https://www.jmfinancialmf.com",
+        "Referer": "https://www.jmfinancialmf.com/downloads/Portfolio-Disclosure",
+    }
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
         9: "September", 10: "October", 11: "November", 12: "December"
     }
 
-    def __init__(self):
+    MONTH_PATTERNS = {
+        1: r"(?:january|jan)",
+        2: r"(?:february|feb)",
+        3: r"(?:march|mar)",
+        4: r"(?:april|apr)",
+        5: r"(?:may)",
+        6: r"(?:june|jun)",
+        7: r"(?:july|jul)",
+        8: r"(?:august|aug)",
+        9: r"(?:september|sept|sep)",
+        10: r"(?:october|oct)",
+        11: r"(?:november|nov)",
+        12: r"(?:december|dec)",
+    }
+
+    def __init__(self, timeout: int = 30):
         super().__init__("JM Financial Mutual Fund")
         self.notifier = get_notifier()
-        self.AMC_NAME = "jmfinancial"
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update(self.DEFAULT_HEADERS)
+        self._cached_catalog: Optional[List[Dict[str, Any]]] = None
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -66,41 +109,174 @@ class JMFinancialDownloader(BaseDownloader):
         if corrupt_target.exists():
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             corrupt_target = corrupt_target.parent / f"{corrupt_target.name}__{ts}"
-        
+
         logger.warning(f"JM_FINANCIAL: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("JM_FINANCIAL", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
+    def _decrypt_payload(self, encrypted_b64: str) -> Any:
+        """Decrypts base64 AES-256-CBC ciphertext into Python data structure."""
+        key_bytes = self.AES_KEY.encode("utf-8")
+        iv_bytes = self.AES_IV.encode("utf-8")
+        ciphertext = base64.b64decode(encrypted_b64)
 
-    def download(self, year: int, month: int) -> Dict:
+        cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv_bytes))
+        decryptor = cipher.decryptor()
+        padded = decryptor.update(ciphertext) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(128).unpadder()
+        decrypted = unpadder.update(padded) + unpadder.finalize()
+
+        try:
+            text = decrypted.decode("utf-8")
+        except UnicodeDecodeError:
+            text = decrypted.decode("latin-1")
+
+        return json.loads(text)
+
+    def _fetch_catalog(self) -> List[Dict[str, Any]]:
+        """Fetches and decrypts the monthly portfolio disclosure catalog."""
+        if self._cached_catalog is not None:
+            return self._cached_catalog
+
+        payload = {
+            "IICategoryID": "2",
+            "IISubCategoryID": "4",
+            "IVSearch": "",
+        }
+        logger.info(f"Querying catalog from {self.API_GET_DOWNLOAD_NEW}...")
+        resp = self.session.post(
+            self.API_GET_DOWNLOAD_NEW,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+
+        resp_json = resp.json()
+        raw_data = resp_json.get("data")
+        if not raw_data:
+            raise ValueError("No encrypted data received from JM Financial catalog API")
+
+        records = self._decrypt_payload(raw_data)
+        if not isinstance(records, list):
+            raise ValueError(f"Expected list of records, got {type(records)}")
+
+        logger.info(f"Successfully decrypted catalog with {len(records)} records")
+        self._cached_catalog = records
+        return records
+
+    def _filter_records_by_period(
+        self, records: List[Dict[str, Any]], year: int, month: int
+    ) -> List[Dict[str, Any]]:
+        """Filters portfolio records for target year and month."""
+        if month not in self.MONTH_PATTERNS:
+            raise ValueError(f"Invalid month: {month}. Must be 1-12.")
+
+        pattern = self.MONTH_PATTERNS[month]
+        year_str = str(year)
+        matched = []
+
+        for item in records:
+            title = item.get("Title", "")
+            fn = item.get("FileName", "")
+            combined = f"{title} {fn}".lower()
+
+            if year_str not in combined:
+                continue
+
+            # Check month pattern followed by optional day digits or word boundary
+            if re.search(r"\b" + pattern + r"(?:\d{1,2}|\b)", combined):
+                matched.append(item)
+
+        return matched
+
+    def _run_download_flow(
+        self, target_year: int, target_month: int, month_name: str, download_folder: Path
+    ) -> int:
+        catalog = self._fetch_catalog()
+        matched = self._filter_records_by_period(catalog, target_year, target_month)
+
+        if not matched:
+            logger.warning(f"No portfolio records found in catalog for {month_name} {target_year}")
+            return 0
+
+        # Check if consolidated file exists; otherwise use scheme files
+        consolidated = [
+            r for r in matched
+            if any(k in r.get("Title", "").lower() for k in ["consolidated", "all fund", "all-fund", "all schemes"])
+        ]
+
+        to_download = consolidated if consolidated else matched
+        logger.info(f"Identified {len(to_download)} files to download for {month_name} {target_year}")
+
+        count = 0
+        for idx, rec in enumerate(to_download):
+            title = rec.get("Title", "").strip()
+            file_name_rel = rec.get("FileName", "").strip()
+
+            if not file_name_rel:
+                continue
+
+            file_url = self.WEB_BASE_URL + file_name_rel.lstrip("/")
+            base_name = os.path.basename(file_name_rel)
+            clean_name = re.sub(r'[\\/*?:"<>|]', "_", base_name)
+            save_path = download_folder / clean_name
+
+            logger.info(f"  [{idx+1}/{len(to_download)}] Downloading: {title}")
+            try:
+                r = self.session.get(file_url, timeout=60)
+                r.raise_for_status()
+
+                content = r.content
+                if len(content) == 0:
+                    logger.error(f"    0 bytes received for {title}")
+                    continue
+
+                # Validate magic bytes
+                is_xlsx = content.startswith(b"PK\x03\x04")
+                is_xls = content.startswith(b"\xd0\xcf\x11\xe0")
+                if not (is_xlsx or is_xls):
+                    logger.error(f"    Invalid spreadsheet format for {title}: {content[:16]}")
+                    continue
+
+                with open(save_path, "wb") as f:
+                    f.write(content)
+
+                count += 1
+                logger.info(f"    Saved: {clean_name} ({len(content):,} bytes)")
+
+            except Exception as e:
+                logger.error(f"    Failed to download {title}: {e}")
+
+        return count
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
-        month_name = self.MONTH_NAMES[month]
-        
+        month_name = self.MONTH_NAMES.get(month, f"Month {month}")
+
         logger.info("=" * 60)
         logger.info("JM FINANCIAL MUTUAL FUND DOWNLOADER STARTED")
         logger.info(f"Period: {year}-{month:02d} ({month_name})")
         logger.info("=" * 60)
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
-        
+
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"JM Financial: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
-                    "status": "skipped", 
+                    "status": "skipped",
                     "reason": "already_downloaded",
-                    "duration": duration
+                    "duration": duration,
                 }
             else:
                 self._move_to_corrupt(target_dir, year, month, "Missing success marker")
@@ -115,19 +291,20 @@ class JMFinancialDownloader(BaseDownloader):
                     return {"status": "success", "dry_run": True}
 
                 file_count = self._run_download_flow(year, month, month_name, target_dir)
-                
+
                 if file_count == 0:
                     logger.warning(f"JM_FINANCIAL: No portfolio found for {month_name} {year}")
                     self.notifier.notify_not_published("JM_FINANCIAL", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
                 self._create_success_marker(target_dir, year, month, file_count)
-                
-                # Consolidate downloads
+
+                # Consolidate individual scheme downloads into single merged workbook
                 self.consolidate_downloads(year, month)
-                
+
                 duration = time.time() - start_time
                 self.notifier.notify_success("JM_FINANCIAL", year, month, files_downloaded=file_count, duration=duration)
                 logger.success(f"[SUCCESS] JM_FINANCIAL download completed. Total files: {file_count}")
@@ -136,151 +313,19 @@ class JMFinancialDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("JM_FINANCIAL", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
-        url = "https://www.jmfinancialmf.com/downloads/Portfolio-Disclosure/Monthly-Portfolio-of-Schemes"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to {url}...")
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            except:
-                logger.warning("  ⚠ Navigation timed out, proceeding anyway...")
-            
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Scan through pages to find target month
-            all_links = []
-            page_num = 1
-            max_pages = 50  # Reasonable limit
-            
-            logger.info(f"Scanning for {month_name} {target_year}...")
-            
-            while page_num <= max_pages:
-                # Wait for items to be visible
-                try:
-                    page.wait_for_selector(".downlode-box", timeout=10000)
-                except:
-                    logger.warning(f"  No items found on page {page_num}")
-                    break
-                
-                items = page.locator(".downlode-box").all()
-                found_for_month = False
-                
-                for item in items:
-                    try:
-                        # Title is usually the second <p>
-                        title_elem = item.locator("p").nth(1)
-                        title = title_elem.inner_text()
-                        
-                        # Check if title matches target month and year
-                        if month_name.lower() in title.lower() and str(target_year) in title:
-                            found_for_month = True
-                            # Find the download link
-                            download_btn = item.locator("a").filter(has_text="Download")
-                            if download_btn.count() > 0:
-                                data_head = download_btn.get_attribute("data-head")
-                                if data_head:
-                                    full_url = f"https://www.jmfinancialmf.com/{data_head}"
-                                    full_url = full_url.replace("com//", "com/").replace(" ", "%20")
-                                    all_links.append((title, full_url))
-                    except:
-                        continue
-                
-                if found_for_month:
-                    logger.info(f"  Page {page_num}: Found {len(all_links)} files so far")
-                elif len(all_links) > 0:
-                    # Found links before but not on this page - probably past the month
-                    logger.info(f"  Page {page_num}: Month ended, stopping scan")
-                    break
-                
-                # Try to go to next page
-                try:
-                    next_btn = page.locator(".rc-pagination-next")
-                    if next_btn.count() > 0 and next_btn.get_attribute("aria-disabled") != "true":
-                        next_btn.click()
-                        time.sleep(2)
-                        page_num += 1
-                    else:
-                        logger.info(f"  No more pages")
-                        break
-                except:
-                    break
-
-            if not all_links:
-                logger.warning(f"  [FAIL] No files found for {month_name} {target_year}")
-                return 0
-
-            # Deduplicate
-            unique_links = []
-            seen = set()
-            for title, link in all_links:
-                if link not in seen:
-                    unique_links.append((title, link))
-                    seen.add(link)
-
-            logger.info(f"Downloading {len(unique_links)} files...")
-            
-            # Download files using requests
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            
-            count = 0
-            for idx, (title, link) in enumerate(unique_links):
-                try:
-                    # Extract filename from URL
-                    original_name = link.split("/")[-1].replace("%20", " ")
-                    if not original_name:
-                        # Fallback to title if URL is weird
-                        clean_title = re.sub(r'[^\w\-_\. ]', '_', title).replace(' ', '_')
-                        original_name = f"JM_{clean_title}.xlsx"
-                    
-                    save_path = download_folder / original_name
-                    
-                    logger.info(f"  [{idx+1}/{len(unique_links)}] {original_name[:60]}...")
-                    
-                    response = requests.get(link, headers=headers, stream=True, timeout=30)
-                    if response.status_code == 200:
-                        with open(save_path, 'wb') as f:
-                            for chunk in response.iter_content(chunk_size=8192):
-                                f.write(chunk)
-                        count += 1
-                    else:
-                        logger.warning(f"    [FAIL] Failed (HTTP {response.status_code})")
-                except Exception as e:
-                    logger.error(f"    [FAIL] Error: {str(e)[:50]}")
-
-            return count
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, required=True)

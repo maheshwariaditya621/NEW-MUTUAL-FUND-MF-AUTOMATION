@@ -46,11 +46,18 @@ class ZerodhaExtractorV1(BaseExtractor):
                 df_header = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=10)
                 raw_scheme_name = sheet_name
                 
-                # Check first 5 rows for scheme name patterns
+                # Check first 5 rows for scheme name patterns.
+                # We need a specific enough name (not just the generic "ZERODHA MUTUAL FUND" header).
+                GENERIC_ZERODHA_NAMES = {"ZERODHA MUTUAL FUND", "ZERODHA"}
                 for r in range(min(5, len(df_header))):
                     for c in range(min(10, len(df_header.columns))):
-                        val = str(df_header.iloc[r, c])
+                        val = str(df_header.iloc[r, c]).strip()
                         if "ZERODHA" in val.upper():
+                            # Skip the generic AMC header row (e.g., "ZERODHA MUTUAL FUND")
+                            # which appears before the actual fund-specific title
+                            if val.upper() in GENERIC_ZERODHA_NAMES:
+                                continue
+
                             # Pattern 1: Inside brackets (ZERODHA...)
                             matches = re.findall(r'\(([^)]+)\)', val)
                             for m in matches:
@@ -59,8 +66,14 @@ class ZerodhaExtractorV1(BaseExtractor):
                                     break
                             
                             if raw_scheme_name == sheet_name:
-                                # Pattern 2: "PORTFOLIO OF [NAME] FOR [MONTH]"
-                                match = re.search(r'PORTFOLIO OF (.*?) FOR', val, re.IGNORECASE)
+                                # Pattern 2: "PORTFOLIO [STATEMENT] OF [NAME] [FOR] [MONTH]"
+                                # Handles both:
+                                #   "MONTHLY PORTFOLIO STATEMENT OF ZERODHA BSE SENSEX INDEX FUND FOR JULY 2026"
+                                #   "PORTFOLIO OF ZERODHA NIFTY 50 INDEX FUND FOR NOVEMBER 2025"
+                                match = re.search(
+                                    r'PORTFOLIO\s+(?:STATEMENT\s+)?OF\s+(ZERODHA.*?)(?:\s+FOR\s+|$)',
+                                    val, re.IGNORECASE
+                                )
                                 if match:
                                     raw_scheme_name = match.group(1).strip()
                                 elif "ZERODHA" in val.upper() and len(val) > 15:
@@ -77,9 +90,8 @@ class ZerodhaExtractorV1(BaseExtractor):
                     # Surgical extraction of full fund name
                     # Clean up common header junk first
                     name = raw_scheme_name
-                    name = re.sub(r'(?i).*?STATEMENTS?\s+OF\s+', '', name)
-                    name = re.sub(r'(?i).*?PORTFOLIO\s+OF\s+', '', name)
-                    name = re.sub(r'(?i).*?SCHEME\s+PORTFOLIO\s+OF\s+', '', name)
+                    # Handle both "MONTHLY PORTFOLIO STATEMENT OF" and "PORTFOLIO OF" and "SCHEME PORTFOLIO OF"
+                    name = re.sub(r'(?i).*?(?:MONTHLY\s+)?(?:SCHEME\s+)?PORTFOLIO\s+(?:STATEMENT\s+)?OF\s+', '', name)
                     
                     # Remove "FOR [MONTH] [YEAR]" or standalone "[MONTH] [YEAR]" at the end
                     months_pattern = r'JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER'
@@ -138,6 +150,28 @@ class ZerodhaExtractorV1(BaseExtractor):
                 if equity_df.empty:
                     continue
 
+                # Extract Total AUM (Net Assets)
+                normalized_net_assets = None
+                for r_i in range(len(df_data)):
+                    r_vals = df_data.iloc[r_i]
+                    for c_i in range(min(5, len(r_vals))):
+                        v_str = str(r_vals.iloc[c_i]).strip().upper().replace('_', ' ')
+                        if len(v_str) > 35:
+                            continue
+                        if any(bad in v_str for bad in ["EXPOSURE", "PERCENTAGE", "HEDGED", "FUTURES", "OPTIONS", "PER UNIT", "AGGREGATE"]):
+                            continue
+                        if "GRAND TOTAL" in v_str or v_str in ["NET ASSETS", "TOTAL NET ASSETS"]:
+                            candidates = []
+                            for val in r_vals:
+                                f_val = self.safe_float(val)
+                                if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 20000000:
+                                    candidates.append(f_val)
+                            if candidates:
+                                normalized_net_assets = self.normalize_currency(candidates[0], "LAKHS")
+                                break
+                    if normalized_net_assets:
+                        break
+
                 for _, row in equity_df.iterrows():
                     isin = str(row.get("isin", "")).strip()
                     name = str(row.get("company_name", "")).strip()
@@ -164,7 +198,8 @@ class ZerodhaExtractorV1(BaseExtractor):
                         "quantity": qty,
                         "market_value_inr": market_value,
                         "percent_of_nav": percent_of_nav,
-                        "sector": self.clean_company_name(sector)
+                        "sector": self.clean_company_name(sector),
+                        "total_net_assets": normalized_net_assets
                     })
 
             except Exception as e:

@@ -113,6 +113,28 @@ class ShriramExtractorV1(BaseExtractor):
                     logger.info(f"[{sheet_name}] No equity ISINs found — skipping.")
                     continue
 
+                # Extract Total AUM (Net Assets)
+                normalized_net_assets = None
+                for r_i in range(len(df_data)):
+                    r_vals = df_data.iloc[r_i]
+                    for c_i in range(min(5, len(r_vals))):
+                        v_str = str(r_vals.iloc[c_i]).strip().upper().replace('_', ' ')
+                        if len(v_str) > 35:
+                            continue
+                        if any(bad in v_str for bad in ["EXPOSURE", "PERCENTAGE", "HEDGED", "FUTURES", "OPTIONS", "PER UNIT", "AGGREGATE"]):
+                            continue
+                        if "GRAND TOTAL" in v_str or v_str in ["NET ASSETS", "TOTAL NET ASSETS"]:
+                            candidates = []
+                            for val in r_vals:
+                                f_val = self.safe_float(val)
+                                if f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 20000000:
+                                    candidates.append(f_val)
+                            if candidates:
+                                normalized_net_assets = self.normalize_currency(candidates[0], "LAKHS")
+                                break
+                    if normalized_net_assets:
+                        break
+
                 # ── 6. Build holdings list ────────────────────────────────────
                 sheet_holdings: List[Dict[str, Any]] = []
                 for _, row in equity_df.iterrows():
@@ -144,6 +166,7 @@ class ShriramExtractorV1(BaseExtractor):
                             "market_value_inr": market_value,
                             "percent_of_nav": pct_nav,
                             "sector": self.clean_company_name(sector) if sector else "N/A",
+                            "total_net_assets": normalized_net_assets
                         }
                         sheet_holdings.append(holding)
                     except Exception as row_err:

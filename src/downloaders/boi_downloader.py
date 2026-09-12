@@ -5,11 +5,15 @@ import time
 import json
 import shutil
 import re
+import socket
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Any
+import requests
+import urllib3.util.connection as urllib_conn
+
+# Force urllib3 to use IPv4 only (bypasses Azure Front Door IPv6 RST bug)
+urllib_conn.allowed_gai_family = lambda: socket.AF_INET
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -31,7 +35,7 @@ class BOIDownloader(BaseDownloader):
     """
     Bank of India Mutual Fund - Portfolio Downloader
     
-    URL: https://www.boimf.in/investor-corner#t2
+    Uses AjaxService.asmx/GetDocuments API to fetch and download consolidated monthly portfolios.
     """
     
     MONTH_NAMES = {
@@ -143,110 +147,96 @@ class BOIDownloader(BaseDownloader):
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> Optional[Path]:
-        url = "https://www.boimf.in/investor-corner#t2"
+        api_url = "https://www.boimf.in/AjaxService.asmx/GetDocuments"
+        logger.info(f"Querying BOI GetDocuments API for {month_name} {target_year}...")
 
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "*/*",
+        })
 
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="networkidle", timeout=60000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
+        headers = {
+            "Content-Type": "application/json; charset=UTF-8",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        payload = {
+            "pagno": 0,
+            "category": None,
+            "fromDate": None,
+            "toDate": None,
+            "LibraryName": "InvestorCorner",
+            "CategoryValue": "no",
+            "folderName": "MONTHLY PORTFOLIO"
+        }
 
-            # 1) Ensure Monthly Portfolio tab is active
-            logger.info("Ensuring 'Monthly Portfolio' tab is active...")
-            try:
-                page.get_by_role("link", name="Monthly Portfolio").click()
-                time.sleep(2)
-                logger.info("  [OK] Tab activated")
-            except:
-                logger.info("  → Tab already active")
+        resp = session.post(api_url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
 
-            # 2) Search for portfolio link across pages
-            month_upper = month_name.upper()
-            logger.info(f"Searching for {month_upper} {target_year} portfolio...")
-            
-            found = False
-            page_num = 1
-            max_pages = 20
-            
-            while not found and page_num <= max_pages:
-                logger.info(f"  → Checking page {page_num}...")
-                
-                # Pattern: MONTHLY-PORTFOLIO - 31-DECEMBER-2025
-                link_pattern = rf"MONTHLY-PORTFOLIO.*{month_upper}"
-                links = page.get_by_role("link", name=re.compile(link_pattern, re.IGNORECASE)).all()
-                
-                for link in links:
-                    if link.is_visible():
-                        link_text = link.text_content().strip()
-                        
-                        # Verify year is in the link text if possible
-                        if str(target_year) in link_text or not re.search(r'\d{4}', link_text):
-                            logger.info(f"  [OK] Found: {link_text}")
-                            
-                            # Download the file
-                            logger.info("Starting download...")
-                            try:
-                                with page.expect_download(timeout=60000) as download_info:
-                                    with page.expect_popup() as popup_info:
-                                        link.click()
-                                
-                                download = download_info.value
-                                final_filename = download.suggested_filename
-                                save_path = download_folder / final_filename
-                                
-                                download.save_as(save_path)
-                                logger.info(f"  [OK] Saved: {final_filename}")
-                                
-                                found = True
-                                return save_path
-                            except Exception as e:
-                                logger.warning(f"  [FAIL] Download error: {str(e)[:100]}")
-                                continue
-                
-                if found:
-                    break
-                
-                # Navigate to next page
-                logger.info(f"  → Not found on page {page_num}, checking next page...")
-                next_btn = page.locator("#pagination-demo-t2 .page-item.next .page-link")
-                
-                if next_btn.count() > 0 and next_btn.is_visible():
-                    next_btn.click()
-                    time.sleep(3)
-                    page_num += 1
-                else:
-                    # Try clicking by page number
-                    next_page_num = str(page_num + 1)
-                    next_page_btn = page.get_by_role("link", name=next_page_num, exact=True)
-                    if next_page_btn.count() > 0 and next_page_btn.is_visible():
-                        next_page_btn.click()
-                        time.sleep(3)
-                        page_num += 1
-                    else:
-                        logger.warning(f"  [FAIL] No more pages to search")
-                        break
-            
-            if not found:
-                logger.warning(f"  [FAIL] Portfolio not found after searching {page_num} pages")
-                return None
+        outer_json = resp.json()
+        raw_d = outer_json.get("d", "")
+        if not raw_d:
+            logger.warning("Empty 'd' response from GetDocuments API")
+            return None
 
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        nested_json = json.loads(raw_d)
+        documents = nested_json.get("Documents", [])
+        if not documents:
+            logger.warning("No documents returned in GetDocuments catalog")
+            return None
+
+        month_upper = month_name.upper()
+        pattern = f"{month_upper}-{target_year}"
+
+        target_doc = None
+        for doc in documents:
+            doc_name = (doc.get("DocName") or "").upper()
+            folder_url = (doc.get("FolderUrl") or "").upper()
+            if pattern in doc_name or pattern in folder_url:
+                target_doc = doc
+                break
+
+        if not target_doc:
+            logger.warning(f"No monthly portfolio document found matching {pattern}")
+            return None
+
+        dl_url = target_doc.get("FolderUrl", "").strip()
+        if not dl_url:
+            logger.warning(f"Document {target_doc.get('DocName')} has empty FolderUrl")
+            return None
+
+        clean_filename = dl_url.split("/")[-1].split("?")[0]
+        if not clean_filename.endswith(".xlsx"):
+            clean_filename = f"monthly-portfolio---{month_name.lower()}-{target_year}.xlsx"
+
+        save_path = download_folder / clean_filename
+        logger.info(f"Downloading: {clean_filename} from {dl_url}...")
+
+        dl_resp = session.get(dl_url, stream=True, timeout=60)
+        if dl_resp.status_code != 200:
+            logger.error(f"Failed to download {dl_url}: HTTP {dl_resp.status_code}")
+            return None
+
+        with open(save_path, "wb") as f:
+            for chunk in dl_resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # Validate magic bytes
+        with open(save_path, "rb") as f:
+            magic = f.read(8)
+
+        if not magic.startswith(b"PK\x03\x04"):
+            logger.error(f"Invalid XLSX signature for {clean_filename}, deleting...")
+            save_path.unlink(missing_ok=True)
+            return None
+
+        logger.info(f"Downloaded and verified successfully: {clean_filename} ({save_path.stat().st_size:,} bytes)")
+        return save_path
 
 
 if __name__ == "__main__":

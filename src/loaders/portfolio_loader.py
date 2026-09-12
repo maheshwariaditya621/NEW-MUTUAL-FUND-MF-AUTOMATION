@@ -133,9 +133,6 @@ class PortfolioLoader:
                 # 1. Resolve/Upsert Scheme (Granular)
                 # Before upsert, check if name is brand new for this AMC
                 cursor = get_cursor()
-                cursor.execute("SELECT scheme_id FROM schemes WHERE amc_id = %s AND scheme_name = %s", (amc_id, data["info"]["scheme_name"].upper().strip()))
-                exists = cursor.fetchone()
-                
                 scheme_id = upsert_scheme(
                     amc_id=amc_id,
                     scheme_name=data["info"]["scheme_name"],
@@ -144,8 +141,12 @@ class PortfolioLoader:
                     is_reinvest=data["info"].get("is_reinvest", False)
                 )
 
-                if not exists:
-                    # Brand new scheme name detected! Run 4-Layer Resolution Quarantine
+                # Check if this resolved scheme is truly brand new (no prior snapshots)
+                cursor.execute("SELECT 1 FROM scheme_snapshots WHERE scheme_id = %s LIMIT 1", (scheme_id,))
+                has_history = cursor.fetchone()
+
+                if not has_history:
+                    # Brand new scheme detected! Run 4-Layer Resolution Quarantine
                     match = find_potential_scheme_renames(
                         amc_id=amc_id,
                         new_name=data["info"]["scheme_name"],

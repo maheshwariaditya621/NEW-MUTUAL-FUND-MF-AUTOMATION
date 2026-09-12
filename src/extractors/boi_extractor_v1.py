@@ -24,8 +24,25 @@ class BOIExtractorV1(BaseExtractor):
         all_holdings = []
         
         with pd.ExcelFile(file_path) as xls:
+            # Build index map from Index sheet if available
+            index_map = {}
+            for s in xls.sheet_names:
+                if s.strip().lower() == 'index':
+                    try:
+                        df_idx = pd.read_excel(xls, sheet_name=s, header=None)
+                        for _, row in df_idx.iterrows():
+                            code = str(row[0]).strip()
+                            name = str(row[1]).strip() if pd.notna(row[1]) else ""
+                            if code and name and name.lower() != "scheme names":
+                                clean_name = re.sub(r'\(.*?\)', '', name, flags=re.DOTALL).strip()
+                                clean_name = re.sub(r'\s+', ' ', clean_name)
+                                index_map[code.upper()] = clean_name
+                    except Exception as e:
+                        logger.warning(f"Error parsing BOI Index sheet: {e}")
+                    break
+
             for sheet_name in xls.sheet_names:
-                if sheet_name.lower() == 'index':
+                if sheet_name.strip().lower() in ['index', 'f & o']:
                     continue
                 
                 logger.info(f"Processing sheet: {sheet_name}")
@@ -59,13 +76,21 @@ class BOIExtractorV1(BaseExtractor):
                     continue
 
                 # 4. Scheme Info
-                # BOI usually has scheme name in Row 0
-                raw_scheme_text = str(df_raw.iloc[0, 1]).strip() if df_raw.shape[1] > 1 else str(sheet_name)
-                if pd.isna(raw_scheme_text) or raw_scheme_text.lower() == 'nan':
+                # Priority: 1. Index Sheet mapping | 2. Row 1 Col 1 | 3. Row 0 Col 1 | 4. Sheet Name
+                raw_scheme_text = index_map.get(sheet_name.strip().upper())
+                if not raw_scheme_text:
+                    for r_idx in [1, 0, 2]:
+                        if df_raw.shape[0] > r_idx and df_raw.shape[1] > 1:
+                            val = str(df_raw.iloc[r_idx, 1]).strip()
+                            if val and val.lower() != 'nan' and not val.lower().startswith('name of mutual fund'):
+                                raw_scheme_text = val
+                                break
+                if not raw_scheme_text:
                     raw_scheme_text = str(sheet_name)
                 
-                # Clean up "Monthly Portfolio Statement" if it's in the text
-                raw_scheme_text = re.sub(r'\(.*?\)', '', raw_scheme_text).strip()
+                # Clean up parenthetical descriptions
+                raw_scheme_text = re.sub(r'\(.*?\)', '', raw_scheme_text, flags=re.DOTALL).strip()
+                raw_scheme_text = re.sub(r'\s+', ' ', raw_scheme_text)
                 
                 scheme_info = self.parse_verbose_scheme_name(raw_scheme_text)
                 

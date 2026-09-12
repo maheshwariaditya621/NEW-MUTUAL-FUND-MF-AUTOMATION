@@ -31,29 +31,22 @@ class NJExtractorV1(BaseExtractor):
 
     def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
         """Find Net Assets row and extract value."""
-        # Scan from bottom up
-        for i in range(len(df)-1, -1, -1):
+        for i in range(len(df)):
             row = df.iloc[i]
-            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
-            # Normalize underscores
-            row_text = row_text.replace("_", " ")
-            
-            is_valid_marker = False
-            if "GRAND TOTAL" in row_text:
-                is_valid_marker = True
-            elif "NET ASSETS" in row_text and "PER UNIT" not in row_text and "PERCENT" not in row_text:
-                is_valid_marker = True
-                
-            if is_valid_marker:
-                candidates = []
-                for val in row:
-                    f_val = self.safe_float(val)
-                    # Filter out percentages (like 1.0 or 100.0)
-                    if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
-                        candidates.append(f_val)
-                
-                if candidates:
-                    return self.normalize_currency(max(candidates), unit)
+            for c in range(min(5, len(row))):
+                val_str = str(row.iloc[c]).strip().upper().replace('_', ' ')
+                if len(val_str) > 35:
+                    continue
+                if any(bad in val_str for bad in ["EXPOSURE", "PERCENTAGE", "HEDGED", "FUTURES", "OPTIONS", "PER UNIT", "AGGREGATE"]):
+                    continue
+                if val_str in ["GRAND TOTAL", "NET ASSETS", "TOTAL NET ASSETS", "GRAND TOTAL (AUM)"] or val_str.startswith("GRAND TOTAL"):
+                    candidates = []
+                    for v in row:
+                        f_val = self.safe_float(v)
+                        if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 20000000:
+                            candidates.append(f_val)
+                    if candidates:
+                        return self.normalize_currency(candidates[0], unit)
         return 0.0
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -81,18 +74,20 @@ class NJExtractorV1(BaseExtractor):
                     logger.warning(f"[{sheet_name}] Header not found. Skipping.")
                     continue
 
-                # 2. Extract Scheme Name (Expected at Row 1, Col 1)
+                # 2. Extract Scheme Name (Expected at Row 1, Col 1 or Col 0)
                 raw_scheme_name = "N/A"
-                if len(df_raw) > 1 and len(df_raw.columns) > 1:
-                    raw_scheme_name = str(df_raw.iloc[1, 1]).strip()
-                
-                if not raw_scheme_name or raw_scheme_name.lower() == "nan" or "MUTUAL FUND" in raw_scheme_name.upper():
-                    # Scan for it
-                    for i in range(1, 5):
-                        potential = str(df_raw.iloc[i, 1]).strip() if len(df_raw.columns) > 1 else str(df_raw.iloc[i, 0]).strip()
-                        if potential and potential.lower() != "nan" and len(potential) > 5 and "MUTUAL FUND" not in potential.upper():
-                            raw_scheme_name = potential
-                            break
+                for r in range(1, 5):
+                    if r >= len(df_raw):
+                        break
+                    # Check col 0 and col 1
+                    for c in [0, 1]:
+                        if c < len(df_raw.columns):
+                            val = str(df_raw.iloc[r, c]).strip()
+                            if val and val.lower() != "nan" and len(val) > 4 and "MUTUAL FUND" not in val.upper():
+                                raw_scheme_name = val
+                                break
+                    if raw_scheme_name != "N/A":
+                        break
 
                 if raw_scheme_name == "N/A":
                     raw_scheme_name = sheet_name

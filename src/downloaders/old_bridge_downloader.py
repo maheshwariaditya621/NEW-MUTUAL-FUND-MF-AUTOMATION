@@ -1,15 +1,15 @@
-# src/downloaders/old_bridge_downloader.py
-
 import os
 import time
 import json
 import shutil
 import re
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, List
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+from typing import Dict, Optional, List, Tuple, Any
+import requests
+from bs4 import BeautifulSoup
+import openpyxl
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,22 +18,25 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
+
+
+BASE_PAGE_URL = "https://www.oldbridgemf.com/statutory-disclosures.html"
+BASE_DOMAIN = "https://www.oldbridgemf.com"
 
 
 class OldBridgeDownloader(BaseDownloader):
     """
     Old Bridge Mutual Fund - Portfolio Downloader
     
-    URL: https://www.oldbridgemf.com/statutory-disclosures.html#
-    Transitions from Single Consolidated File to Multi-Scheme Files in Nov 2025.
-    Uses FY system: Jan-Mar belongs to previous year's FY grouping.
+    URL: https://www.oldbridgemf.com/statutory-disclosures.html
+    Pure Python requests + BeautifulSoup implementation.
+    Strictly excludes Portfolio Overlap and discovers scheme-level monthly portfolios.
     """
     
     MONTH_NAMES = {
@@ -52,6 +55,17 @@ class OldBridgeDownloader(BaseDownloader):
         super().__init__("Old Bridge Mutual Fund")
         self.notifier = get_notifier()
         self.AMC_NAME = "old_bridge"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        logger.info("OldBridgeDownloader initialized (Pure requests + BeautifulSoup version)")
 
     def _create_success_marker(self, target_dir: Path, year: int, month: int, file_count: int):
         marker_path = target_dir / "_SUCCESS.json"
@@ -62,7 +76,7 @@ class OldBridgeDownloader(BaseDownloader):
             "files_downloaded": file_count,
             "timestamp": datetime.now().isoformat()
         }
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker_data, f, indent=2)
         logger.info(f"Created completion marker: {marker_path.name}")
 
@@ -78,8 +92,206 @@ class OldBridgeDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("Old Bridge", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
+    def _get_financial_year(self, year: int, month: int) -> Tuple[str, str, str]:
+        """
+        Calculates financial year strings.
+        Apr-Dec: FY starts in year, ends in year + 1 (e.g. 2026 -> 2026-2027)
+        Jan-Mar: FY starts in year - 1, ends in year (e.g. Jan 2026 -> 2025-2026)
+        """
+        if month >= 4:
+            fy_start = str(year)
+            fy_end = str(year + 1)
+        else:
+            fy_start = str(year - 1)
+            fy_end = str(year)
+        fy_end_short = fy_end[-2:]
+        return fy_start, fy_end, fy_end_short
 
-    def download(self, year: int, month: int) -> Dict:
+    def _validate_excel_file(self, file_path: Path) -> bool:
+        """Validate ZIP/XLS signature and openpyxl readable workbook."""
+        if not file_path.exists() or file_path.stat().st_size == 0:
+            return False
+
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+        if magic != b"PK\x03\x04" and magic != b"\xd0\xcf\x11\xe0":
+            logger.error(f"Old Bridge: Invalid magic bytes for {file_path.name}: {magic.hex()}")
+            return False
+
+        if magic == b"PK\x03\x04":
+            try:
+                wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+                _ = wb.sheetnames
+                wb.close()
+                return True
+            except Exception as e:
+                logger.error(f"Old Bridge: openpyxl validation failed for {file_path.name}: {e}")
+                return False
+
+        return True
+
+    def _fetch_page_soup(self) -> BeautifulSoup:
+        """Fetch the official statutory disclosures page."""
+        logger.info(f"Old Bridge: Fetching disclosures page: {BASE_PAGE_URL}")
+        resp = self.session.get(BASE_PAGE_URL, timeout=30)
+        resp.raise_for_status()
+        return BeautifulSoup(resp.text, "html.parser")
+
+    def _locate_monthly_portfolio_pane(self, soup: BeautifulSoup) -> Any:
+        """Dynamically finds the Monthly Portfolio tab button and resolves its tab-pane."""
+        buttons = soup.find_all("button", class_="nav-link")
+        target_tab_id = None
+        for btn in buttons:
+            if btn.get_text(strip=True).lower() == "monthly portfolio":
+                target_tab_id = (
+                    btn.get("data-bs-target") or
+                    btn.get("data-target") or
+                    btn.get("aria-controls")
+                )
+                if target_tab_id:
+                    target_tab_id = target_tab_id.lstrip("#")
+                break
+                
+        if not target_tab_id:
+            pane = soup.find(id="v-pills-tabContent2")
+            if pane:
+                return pane
+            raise RuntimeError("Could not find Monthly Portfolio tab or pane.")
+            
+        pane = soup.find(id=target_tab_id)
+        if not pane:
+            raise RuntimeError(f"Tab pane id '{target_tab_id}' not found in HTML.")
+        return pane
+
+    def _discover_links(self, soup: BeautifulSoup, year: int, month: int) -> List[Dict[str, str]]:
+        """Discovers all scheme portfolio links for target period under Monthly Portfolio."""
+        month_name = self.MONTH_NAMES[month].lower()
+        month_abbr = self.MONTH_ABBR[month].lower()
+        year_str = str(year)
+        fy_start, fy_end, fy_end_short = self._get_financial_year(year, month)
+        
+        pane = self._locate_monthly_portfolio_pane(soup)
+        grey_heads = pane.find_all("div", class_="grey-head")
+        
+        target_fy_head = None
+        for gh in grey_heads:
+            gh_txt = gh.get_text(strip=True)
+            if any(ex in gh_txt.lower() for ex in ["portfolio overlap", "monthly portfolio"]):
+                continue
+            clean_gh = re.sub(r"\s+", "", gh_txt)
+            if fy_start in clean_gh and (fy_end in clean_gh or fy_end_short in clean_gh):
+                target_fy_head = gh
+                logger.info(f"Old Bridge: Found Financial Year section: '{gh_txt}'")
+                break
+                
+        if not target_fy_head:
+            logger.warning(f"Old Bridge: FY {fy_start}-{fy_end_short} not found under Monthly Portfolio.")
+            return []
+
+        matching_elements = []
+        curr = target_fy_head.find_next_sibling()
+        while curr:
+            if curr.name == "div" and "grey-head" in curr.get("class", []):
+                break
+            matching_elements.append(curr)
+            curr = curr.find_next_sibling()
+
+        discovered = []
+        seen_urls = set()
+
+        for el in matching_elements:
+            for a_tag in el.find_all("a", href=True):
+                href = a_tag["href"].strip()
+                if not href:
+                    continue
+                
+                h2 = a_tag.find_previous("h2")
+                title = h2.get_text(strip=True) if h2 else a_tag.get_text(strip=True)
+                abs_url = urllib.parse.urljoin(BASE_DOMAIN, href)
+                
+                combined_meta = f"{title} {href}".lower()
+                # Strict exclusion of Portfolio Overlap
+                if "overlap" in combined_meta:
+                    continue
+                
+                norm_combined = re.sub(r"[-_]+", " ", combined_meta)
+                month_match = (month_name in norm_combined or month_abbr in norm_combined)
+                year_match = year_str in norm_combined or f"_{year_str[-2:]}" in href
+                
+                if month_match and year_match:
+                    if abs_url in seen_urls:
+                        continue
+                    seen_urls.add(abs_url)
+                    
+                    scheme_name = title
+                    if " - " in title:
+                        scheme_name = title.split(" - ")[0].strip()
+                    elif "-" in title:
+                        scheme_name = title.split("-")[0].strip()
+                    
+                    discovered.append({
+                        "scheme": scheme_name,
+                        "title": title,
+                        "href": href,
+                        "url": abs_url
+                    })
+
+        return discovered
+
+    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_abbr: str, download_folder: Path) -> int:
+        soup = self._fetch_page_soup()
+        links = self._discover_links(soup, target_year, target_month)
+        
+        if not links:
+            logger.warning(f"Old Bridge: No portfolio links found for {month_name} {target_year}")
+            return 0
+            
+        logger.info(f"Old Bridge: Found {len(links)} portfolio link(s) for {month_name} {target_year}.")
+        success_count = 0
+        
+        for idx, item in enumerate(links, 1):
+            url = item["url"]
+            title = item["title"]
+            
+            parsed = urllib.parse.urlparse(url)
+            raw_filename = os.path.basename(parsed.path)
+            if not raw_filename or not (raw_filename.endswith(".xlsx") or raw_filename.endswith(".xls")):
+                clean_title = re.sub(r"[^\w\-_.]", "_", title)
+                raw_filename = f"{clean_title}.xlsx"
+                
+            target_path = download_folder / raw_filename
+            temp_path = target_path.with_name(target_path.stem + ".tmp.xlsx")
+            
+            logger.info(f"  [{idx}/{len(links)}] Downloading: {title}...")
+            try:
+                resp = self.session.get(url, stream=True, timeout=60)
+                if resp.status_code != 200:
+                    logger.error(f"    [FAIL] HTTP {resp.status_code} for {title}")
+                    continue
+                
+                with open(temp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=16384):
+                        if chunk:
+                            f.write(chunk)
+                
+                if self._validate_excel_file(temp_path):
+                    if target_path.exists():
+                        target_path.unlink()
+                    temp_path.rename(target_path)
+                    logger.info(f"    [OK] Saved: {target_path.name} ({target_path.stat().st_size:,} bytes)")
+                    success_count += 1
+                else:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    logger.error(f"    [FAIL] Validation failed for {title}")
+            except Exception as e:
+                if temp_path.exists():
+                    temp_path.unlink()
+                logger.error(f"    [FAIL] Error downloading {title}: {e}")
+                
+        return success_count
+
+    def download(self, year: int, month: int) -> Dict[str, Any]:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
         month_abbr = self.MONTH_ABBR[month]
@@ -93,16 +305,13 @@ class OldBridgeDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Old Bridge: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -126,13 +335,14 @@ class OldBridgeDownloader(BaseDownloader):
                 if files_downloaded == 0:
                     logger.warning(f"{self.AMC_NAME}: No portfolios found for {month_name} {year}")
                     self.notifier.notify_not_published("Old Bridge", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
                 self._create_success_marker(target_dir, year, month, files_downloaded)
                 
-                # Consolidate downloads
+                # Consolidate downloads into merged excels
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
@@ -143,127 +353,14 @@ class OldBridgeDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("Old Bridge", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
-
-    def _run_download_flow(self, target_year: int, target_month: int, month_name: str, month_abbr: str, download_folder: Path) -> int:
-        url = "https://www.oldbridgemf.com/statutory-disclosures.html#"
-
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                accept_downloads=True
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to Old Bridge Statutory Disclosures page...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(3)
-
-            is_multi_file = False
-            if target_year > 2025:
-                is_multi_file = True
-            elif target_year == 2025 and target_month >= 11:
-                is_multi_file = True
-
-            # Handle Declaration
-            declaration_btn = page.get_by_role("button", name=re.compile("I AM NOT A US PERSON", re.I))
-            if declaration_btn.count() > 0:
-                logger.info("Bypassing US person declaration...")
-                declaration_btn.first.click()
-                time.sleep(1)
-
-            # Select 'Monthly Portfolio' tab
-            tab = page.get_by_role("tab", name=re.compile("Monthly Portfolio", re.I))
-            if tab.count() > 0:
-                logger.info("Selecting 'Monthly Portfolio' tab...")
-                tab.first.click()
-                time.sleep(2)
-            else:
-                logger.error("'Monthly Portfolio' tab not found.")
-                return 0
-
-            # Find matching headings
-            success_count = 0
-            search_regex = re.compile(rf"\b{month_name}\b.*\b{target_year}\b", re.I)
-            panel = page.locator("#v-pills-tabContent2")
-            if panel.count() == 0: panel = page
-            
-            # headings are h6 usually
-            headings = panel.locator("h6").all()
-            logger.info(f"Found {len(headings)} total headings in portfolio section. Filtering for {month_name} {target_year}...")
-
-            processed_hrefs = set()
-
-            for h in headings:
-                try:
-                    if not h.is_visible(): continue
-                    h_text = h.inner_text().strip().replace('\n', ' ')
-                    
-                    if not search_regex.search(h_text):
-                        continue
-                        
-                    logger.info(f"  Matched: '{h_text}'")
-                    row = h.locator("xpath=./ancestor::div[contains(@class, 'about-text')][1]")
-                    if row.count() == 0: row = h.locator("xpath=..")
-                    
-                    lnk = row.locator("a.download-dotted-button")
-                    if lnk.count() > 0:
-                        target_lnk = lnk.first
-                        href = target_lnk.get_attribute("href")
-                        if href in processed_hrefs: continue
-
-                        # Extract scheme name for file renaming
-                        # h_text: 'Old Bridge Arbitrage Fund - December 2025'
-                        scheme_name = "Old_Bridge_Scheme"
-                        if "-" in h_text:
-                            parts = h_text.split("-")
-                            # First part is usually the fund name
-                            raw_scheme = parts[0].strip().replace("Old Bridge ", "")
-                            scheme_name = raw_scheme.replace(" ", "_").replace("/", "_")
-                        elif is_multi_file:
-                            # Fallback if no delimiter
-                            scheme_name = h_text.replace(" ", "_").replace("/", "_")
-                        else:
-                            scheme_name = "CONSOLIDATED"
-
-                        try:
-                            # Scroll and download
-                            target_lnk.scroll_into_view_if_needed(timeout=5000)
-                            with page.expect_download(timeout=60000) as dinfo:
-                                target_lnk.click(force=True)
-                            
-                            dl = dinfo.value
-                            fname = dl.suggested_filename
-                                
-                            dl.save_as(download_folder / fname)
-                            logger.info(f"    [OK] Saved: {fname}")
-                            success_count += 1
-                            processed_hrefs.add(href)
-                            time.sleep(1)
-                        except Exception as e:
-                            logger.error(f"    [FAIL] Download failed: {str(e)[:100]}")
-                except:
-                    continue
-
-            return success_count
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
 
 
 if __name__ == "__main__":

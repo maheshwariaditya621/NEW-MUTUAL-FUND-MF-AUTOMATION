@@ -99,6 +99,8 @@ htmlcov/
 *.sql
 *.dump
 mf_backup*
+!database/**/*.sql
+!database/*.sql
 
 # ============================================================
 # ANTIGRAVITY / SYSTEM SCRATCH

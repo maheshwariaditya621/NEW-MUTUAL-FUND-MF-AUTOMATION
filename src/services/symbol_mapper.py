@@ -45,7 +45,6 @@ class SymbolMapper:
             for isin, symbol in rows:
                 db_map[isin] = symbol
             cur.close()
-            conn.close()
         except Exception as e:
             logger.error(f"Error fetching DB ISIN mappings: {e}")
             

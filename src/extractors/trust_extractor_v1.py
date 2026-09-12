@@ -39,41 +39,69 @@ class TrustExtractorV1(BaseExtractor):
 
     def extract_scheme_info(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Extracts scheme name from Row 3.
+        Extracts scheme name robustly, handling both old and new Trust formats:
+
+        OLD FORMAT (Jan 2026 and earlier):
+          Row 0: 'MONTHLY PORTFOLIO STATEMENT AS ON ...'
+          Row 1: SEBI regulation text
+          Row 3: Scheme name ('TRUSTMF Banking & PSU Fund...')
+          Row 4: Header row
+
+        NEW FORMAT (Apr 2026 onwards):
+          Row 0: Sheet code ('TMFLIQ')
+          Row 1: Scheme name ('TRUSTMF Liquid Fund')  ← moved here
+          Row 4: 'Monthly Portfolio Statement as on...'
+          Row 5: Header row
+
+        Strategy: scan rows 0 → (header_idx - 1) for any cell containing
+        'TRUST' (case-insensitive) that is not a boilerplate line.
         """
-        try:
-            # Based on inspection, Row 3 (index 3) contains the scheme name
-            row_3_values = [str(val).strip() for val in df.iloc[3].values if not pd.isna(val)]
-            row_text = " ".join(row_3_values)
-            if row_text:
-                # TrustMF names often contain description after \n
-                main_name = row_text.split('\n')[0].strip()
-                return self.parse_verbose_scheme_name(main_name)
-        except Exception as e:
-            logger.warning(f"Error extracting scheme info from Row 3: {e}")
-            
+        # First find the header so we know how far to scan
+        header_idx = self.find_header_row(df, self.header_keywords)
+        scan_limit = header_idx if header_idx != -1 else min(10, len(df))
+
+        # Boilerplate phrases to skip
+        boilerplate_markers = [
+            "MONTHLY PORTFOLIO", "PURSUANT TO", "SEBI", "REGULATION",
+            "SECURITIES AND EXCHANGE", "PORTFOLIO STATEMENT",
+        ]
+
+        for i in range(scan_limit):
+            row_vals = [
+                str(v).strip()
+                for v in df.iloc[i].values
+                if pd.notna(v) and str(v).strip() and str(v).strip() != "nan"
+            ]
+            for val in row_vals:
+                # Must reference TRUST and not be a boilerplate header
+                if "TRUST" in val.upper() and len(val) > 5:
+                    val_upper = val.upper()
+                    if not any(bp in val_upper for bp in boilerplate_markers):
+                        # Strip embedded newlines (cell may have name + description)
+                        clean = val.split("\n")[0].strip()
+                        return self.parse_verbose_scheme_name(clean)
+
         return self.parse_verbose_scheme_name("Unknown Trust Scheme")
+
 
     def _extract_total_aum(self, df: pd.DataFrame, unit: str = "LAKHS") -> float:
         """Find Grand Total row and extract value from the Market Value column."""
-        # Scan from bottom up
-        for i in range(len(df)-1, -1, -1):
+        for i in range(len(df)):
             row = df.iloc[i]
-            row_text = ' '.join([str(v).upper() for v in row if pd.notna(v)])
-            
-            if "GRAND TOTAL" in row_text:
-                # Based on observation, column 4 usually contains the Market Value (In Rs. lakh)
-                # But it might be shifted. Let's find the numeric value.
-                candidates = []
-                for idx, val in enumerate(row):
-                    f_val = self.safe_float(val)
-                    # Filter out percentages (like 1.0 or 100.0)
-                    if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1:
-                        candidates.append(f_val)
-                
-                if candidates:
-                    # Usually the largest value in the row is the AUM (if multiple numbers exist)
-                    return self.normalize_currency(max(candidates), unit)
+            for c in range(min(5, len(row))):
+                val_str = str(row.iloc[c]).strip().upper().replace('_', ' ')
+                if len(val_str) > 35:
+                    continue
+                if any(bad in val_str for bad in ["EXPOSURE", "PERCENTAGE", "HEDGED", "FUTURES", "OPTIONS", "PER UNIT", "AGGREGATE"]):
+                    continue
+                if "GRAND TOTAL" in val_str or val_str in ["NET ASSETS", "TOTAL NET ASSETS"]:
+                    candidates = []
+                    for val in row:
+                        f_val = self.safe_float(val)
+                        if f_val is not None and f_val > 0 and abs(f_val - 1.0) > 0.001 and abs(f_val - 100.0) > 0.1 and f_val < 20000000:
+                            candidates.append(f_val)
+                    if candidates:
+                        return self.normalize_currency(candidates[0], unit)
         return 0.0
 
     def extract(self, file_path: str) -> List[Dict[str, Any]]:
@@ -84,7 +112,7 @@ class TrustExtractorV1(BaseExtractor):
                 if "XDO MET" in sheet_name:
                     continue
                     
-                logger.info(f"Processing sheet: {sheet_name}")
+                logger.info(f"Processing Trust sheet: {sheet_name}")
                 df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
                 
                 if df_raw.empty:
@@ -97,13 +125,13 @@ class TrustExtractorV1(BaseExtractor):
                     logger.warning(f"Header not found in sheet: {sheet_name}")
                     continue
 
-                # Fetch Total AUM from the FULL dataframe (scanning bottom-up)
+                # Fetch Total AUM from the FULL dataframe
                 normalized_net_assets = self._extract_total_aum(df_raw)
                 if normalized_net_assets == 0:
                     normalized_net_assets = None
 
-                # Prepare headers and data
-                headers = [str(h).strip() for h in df_raw.iloc[header_idx]]
+                # Prepare headers and data (normalize all newlines and whitespace)
+                headers = [re.sub(r'[\s\n\r]+', ' ', str(h)).strip().upper() for h in df_raw.iloc[header_idx]]
                 df = df_raw.iloc[header_idx + 1:].copy()
                 
                 # Handle potential column count mismatch
@@ -116,11 +144,15 @@ class TrustExtractorV1(BaseExtractor):
 
                 # Map columns
                 col_map = {
+                    "NAME OF THE INSTRUMENT": "company_name",
                     "NAME OF INSTRUMENT": "company_name",
                     "ISIN": "isin",
                     "QUANTITY": "quantity",
+                    "MARKET/FAIR VALUE": "market_value_inr",
                     "MARKET VALUE": "market_value_inr",
-                    "% TO NET ASSETS": "percent_of_nav"
+                    "FAIR VALUE": "market_value_inr",
+                    "% TO NET ASSETS": "percent_of_nav",
+                    "% TO NAV": "percent_of_nav"
                 }
 
                 final_map = {}
