@@ -163,8 +163,30 @@ const Header = () => {
           <div className="header-left">
             <Link to={isAnnouncementOnly ? "/announcements" : "/"} className="logo">
               <div className="logo-container">
-                <span className="logo-mf">AV</span>
-                <span className="logo-analytics">Fincorp</span>
+                <div className="logo-brand-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="url(#av-grad-1)"/>
+                    <path d="M2 17L12 22L22 17" stroke="url(#av-grad-2)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M2 12L12 17L22 12" stroke="url(#av-grad-2)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <defs>
+                      <linearGradient id="av-grad-1" x1="2" y1="2" x2="22" y2="12" gradientUnits="userSpaceOnUse">
+                        <stop stopColor="#3b82f6"/>
+                        <stop offset="1" stopColor="#6366f1"/>
+                      </linearGradient>
+                      <linearGradient id="av-grad-2" x1="2" y1="12" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                        <stop stopColor="#60a5fa"/>
+                        <stop offset="1" stopColor="#818cf8"/>
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </div>
+                <div className="logo-text-group">
+                  <div className="logo-text-main">
+                    <span className="logo-part-av">AV</span>
+                    <span className="logo-part-fincorp">FINCORP</span>
+                  </div>
+                  <span className="logo-text-sub">INSTITUTIONAL</span>
+                </div>
               </div>
             </Link>
 

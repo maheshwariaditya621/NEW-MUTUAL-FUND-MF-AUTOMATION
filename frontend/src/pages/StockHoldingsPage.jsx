@@ -60,6 +60,74 @@ function ChangeCell({ change, pct }) {
     );
 }
 
+// ── AMC Branding & Logo Monograms ─────────────────────────────────────────────
+const AMC_BRANDS = {
+    'HDFC': { bg: '#dc2626', color: '#ffffff', initial: 'HDFC' },
+    'NIPPON': { bg: '#d90429', color: '#ffffff', initial: 'NIPPON' },
+    'ICICI': { bg: '#b91c1c', color: '#ffffff', initial: 'ICICI' },
+    'SBI': { bg: '#0284c7', color: '#ffffff', initial: 'SBI' },
+    'KOTAK': { bg: '#e11d48', color: '#ffffff', initial: 'KOTAK' },
+    'AXIS': { bg: '#9d174d', color: '#ffffff', initial: 'AXIS' },
+    'TATA': { bg: '#2563eb', color: '#ffffff', initial: 'TATA' },
+    'UTI': { bg: '#d97706', color: '#ffffff', initial: 'UTI' },
+    'JM FINANCIAL': { bg: '#b45309', color: '#ffffff', initial: 'JM' },
+    'MOTILAL': { bg: '#f59e0b', color: '#0f172a', initial: 'MO' },
+    'FRANKLIN': { bg: '#0f766e', color: '#ffffff', initial: 'FT' },
+    'BANDHAN': { bg: '#ea580c', color: '#ffffff', initial: 'BANDHAN' },
+    'MIRAE': { bg: '#0369a1', color: '#ffffff', initial: 'MIRAE' },
+    'DSP': { bg: '#4f46e5', color: '#ffffff', initial: 'DSP' },
+    'QUANT': { bg: '#7c3aed', color: '#ffffff', initial: 'QUANT' },
+    'PPFAS': { bg: '#15803d', color: '#ffffff', initial: 'PPFAS' },
+    'PARAG PARIKH': { bg: '#15803d', color: '#ffffff', initial: 'PPFAS' },
+    'BAJAJ': { bg: '#0891b2', color: '#ffffff', initial: 'BAJAJ' },
+    'CANARA': { bg: '#1d4ed8', color: '#ffffff', initial: 'CANARA' },
+    'EDELWEISS': { bg: '#0284c7', color: '#ffffff', initial: 'EDEL' },
+    'SUNDARAM': { bg: '#059669', color: '#ffffff', initial: 'SUNDARAM' },
+    'HSBC': { bg: '#db2777', color: '#ffffff', initial: 'HSBC' },
+    'BARODA': { bg: '#c2410c', color: '#ffffff', initial: 'BOB' },
+    'UNION': { bg: '#1e40af', color: '#ffffff', initial: 'UNION' },
+};
+
+function getAmcBrand(name) {
+    if (!name) return { bg: '#475569', color: '#ffffff', label: 'MF' };
+    const upper = name.toUpperCase();
+    for (const [key, val] of Object.entries(AMC_BRANDS)) {
+        if (upper.includes(key)) {
+            return { bg: val.bg, color: val.color, label: val.initial };
+        }
+    }
+    const parts = name.trim().split(/\s+/);
+    const initials = (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+    return { bg: '#334155', color: '#ffffff', label: initials };
+}
+
+// ── Lightweight In-Row Vector Sparkline ───────────────────────────────────────
+function MiniSparkline({ history }) {
+    if (!history || history.length < 2) return null;
+    const vals = history.map(h => h.num_shares).filter(v => v !== null && v !== undefined);
+    if (vals.length < 2) return null;
+    const rev = [...vals].reverse();
+    const min = Math.min(...rev);
+    const max = Math.max(...rev);
+    const range = max - min || 1;
+    const w = 44;
+    const h = 16;
+    const points = rev.map((val, idx) => {
+        const x = (idx / (rev.length - 1)) * (w - 4) + 2;
+        const y = h - 2 - ((val - min) / range) * (h - 4);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    const isGrowing = rev[rev.length - 1] >= rev[0];
+    const stroke = isGrowing ? '#10b981' : '#f87171';
+
+    return (
+        <svg className="shp-sparkline" width={w} height={h} viewBox={`0 0 ${w} ${h}`} title="Holding trend trajectory">
+            <polyline fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" points={points} />
+        </svg>
+    );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -239,6 +307,25 @@ export default function StockHoldingsPage() {
             };
         });
     }, [summary, schemeTypeFilter, filteredHoldings, displayMonths]);
+
+    // Overall Institutional Conviction Ratio (Pure Active vs Arbitrage)
+    const convictionRatio = useMemo(() => {
+        if (!summary?.holdings) return { equityPct: 100, arbPct: 0, equityShares: 0, arbShares: 0 };
+        let equityShares = 0;
+        let arbShares = 0;
+        summary.holdings.forEach(s => {
+            const latest = s.history?.[0]?.num_shares || 0;
+            if (isArbitrageScheme(s)) {
+                arbShares += latest;
+            } else {
+                equityShares += latest;
+            }
+        });
+        const total = equityShares + arbShares;
+        const equityPct = total > 0 ? Math.round((equityShares / total) * 100) : 100;
+        const arbPct = 100 - equityPct;
+        return { equityPct, arbPct, equityShares, arbShares };
+    }, [summary]);
 
     const amcAggregated = useMemo(() => {
         if (!summary?.holdings) return [];
@@ -453,87 +540,198 @@ export default function StockHoldingsPage() {
 
                 {summary && !loading && !error && (
                     <>
-                        <div className="shp-identity-bar">
-                            <div className="shp-identity-row">
-                                <div className="shp-identity-left">
-                                    <div className="shp-id-top" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                        <span className="shp-company-name">{summary.company_name}</span>
-                                        <WatchButton
-                                            assetType="stock"
-                                            isin={summary.isin}
-                                            name={summary.company_name}
-                                            size="sm"
-                                        />
-                                        <div className="rv-live-price-wrapper" style={{ display: 'flex', alignItems: 'center', minWidth: '120px' }}>
-                                            {livePrice ? (
-                                                <div className="rv-live-price-chip">
-                                                    <span>LTP</span>
-                                                    ₹ {formatNumber(livePrice)}
-                                                    <div
-                                                        className="shp-mcap-info"
-                                                        style={{ display: 'inline-flex', alignItems: 'center', position: 'relative' }}
-                                                    >
-                                                        <span className="shp-mcap-info-icon">i</span>
-                                                        <span className="shp-mcap-tooltip" style={{ minWidth: '180px', left: '50%', transform: 'translateX(-50%)' }}>
-                                                            Live prices refresh every 30 seconds.
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.6 }}>
-                                                    <div className="shp-spinner-tiny"></div>
-                                                    Fetching LTP...
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="shp-id-bottom" style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                                        <span className="shp-isin-chip">{summary.isin}</span>
-                                        {summary.sector && <span className="shp-sector-chip">{summary.sector}</span>}
-                                        {summary.market_cap && (
-                                            <span className="shp-mcap-chip">
-                                                ₹ {fmtCr(summary.market_cap) || <MissingData inline />} Cr
-                                                {summary.mcap_type && (
-                                                    <span className={`shp-mcap-badge ${summary.mcap_type.toLowerCase().replace(' ', '-')}`}>
-                                                        {summary.mcap_type}
-                                                    </span>
-                                                )}
-                                                <span className="shp-mcap-info">
-                                                    <span className="shp-mcap-info-icon">i</span>
-                                                    <span className="shp-mcap-tooltip">
-                                                        Market cap as on {summary.mcap_updated_at ? new Date(summary.mcap_updated_at).toLocaleDateString('en-IN') : 'N/A'}
-                                                    </span>
-                                                </span>
-                                            </span>
-                                        )}
-                                        {summary.shares_outstanding && (
-                                            <span className="shp-mcap-chip">
-                                                Shares: {fmt(summary.shares_outstanding)}
-                                                <span className="shp-mcap-info">
-                                                    <span className="shp-mcap-info-icon">i</span>
-                                                    <span className="shp-mcap-tooltip">
-                                                        As on {summary.shares_last_updated_at ? new Date(summary.shares_last_updated_at).toLocaleDateString('en-IN') : 'N/A'}
-                                                    </span>
-                                                </span>
-                                            </span>
+                        {/* ── Institutional Bento Grid Overview ── */}
+                        <div className="shp-bento-grid">
+                            {/* Card 1: Stock Identity & Snapshot */}
+                            <div className="shp-bento-card shp-stock-hero-card">
+                                <div className="shp-card-header">
+                                    <span className="shp-card-eyebrow">EQUITY ASSET</span>
+                                    <div className="rv-live-price-wrapper">
+                                        {livePrice ? (
+                                            <div className="rv-live-price-chip">
+                                                <span className="shp-live-pulse-dot"></span>
+                                                <span className="shp-live-label">LTP</span>
+                                                <span className="shp-live-price">₹{formatNumber(livePrice)}</span>
+                                            </div>
+                                        ) : (
+                                            <div className="shp-fetching-ltp">
+                                                <div className="shp-spinner-tiny"></div>
+                                                <span>Fetching LTP...</span>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
-                                <div className="shp-stat-chips">
-                                    <div className="shp-stat-chip">
-                                        <span className="shp-stat-label">Ownership %</span>
-                                        <span className="shp-stat-value shp-accent" style={{ color: '#10b981' }}>
+
+                                <div className="shp-stock-title-row">
+                                    <h1 className="shp-company-name">{summary.company_name}</h1>
+                                    <WatchButton
+                                        assetType="stock"
+                                        isin={summary.isin}
+                                        name={summary.company_name}
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <div className="shp-meta-pills">
+                                    <span className="shp-meta-pill shp-isin-pill">{summary.isin}</span>
+                                    {summary.sector && <span className="shp-meta-pill shp-sector-pill">{summary.sector}</span>}
+                                    {summary.market_cap && (
+                                        <span className="shp-meta-pill shp-mcap-pill">
+                                            ₹{fmtCr(summary.market_cap) || <MissingData inline />} Cr
+                                            {summary.mcap_type && (
+                                                <span className={`shp-mcap-type-badge ${summary.mcap_type.toLowerCase().replace(' ', '-')}`}>
+                                                    {summary.mcap_type}
+                                                </span>
+                                            )}
+                                        </span>
+                                    )}
+                                    {summary.shares_outstanding && (
+                                        <span className="shp-meta-pill shp-shares-pill">
+                                            O/S: {fmt(summary.shares_outstanding)}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="shp-hero-metrics-row">
+                                    <div className="shp-metric-block">
+                                        <span className="shp-metric-label">MF Ownership</span>
+                                        <span className="shp-metric-val shp-emerald-glow">
                                             {summary.ownership_percent !== null ? `${summary.ownership_percent.toFixed(2)}%` : <MissingData inline />}
                                         </span>
                                     </div>
-                                    <div className="shp-stat-chip">
-                                        <span className="shp-stat-label">Funds</span>
-                                        <span className="shp-stat-value">{summary.total_funds}</span>
+                                    <div className="shp-metric-block">
+                                        <span className="shp-metric-label">Total MF Shares</span>
+                                        <span className="shp-metric-val tabular-nums">{fmt(summary.total_shares)}</span>
                                     </div>
-                                    <div className="shp-stat-chip">
-                                        <span className="shp-stat-label">Total MF Shares</span>
-                                        <span className="shp-stat-value shp-accent">{fmt(summary.total_shares)}</span>
+                                    <div className="shp-metric-block">
+                                        <span className="shp-metric-label">Active Funds</span>
+                                        <span className="shp-metric-val tabular-nums">{summary.total_funds}</span>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* Card 2: 3-Month Flow Momentum */}
+                            <div className="shp-bento-card shp-flow-momentum-card">
+                                <div className="shp-card-header">
+                                    <div>
+                                        <span className="shp-card-eyebrow">INSTITUTIONAL NET FLOW MOMENTUM</span>
+                                        <div className="shp-card-sublabel">MoM Holdings & Accumulation Trajectory</div>
+                                    </div>
+                                    <span className="shp-flow-trend-badge">
+                                        {displayMonths.length} Months Trend
+                                    </span>
+                                </div>
+
+                                <div className="shp-flow-months-grid">
+                                    {displayMonths.map((m, i) => {
+                                        const trendData = displayTrend.find(t => t.month === m);
+                                        const isPartialMonth = summary.data_warning && m === summary.data_warning.latest_label;
+                                        const isPos = trendData && trendData.month_change > 0;
+                                        const isNeg = trendData && trendData.month_change < 0;
+
+                                        return (
+                                            <div key={m} className={`shp-flow-month-item ${i === 0 ? 'is-latest' : ''}`}>
+                                                <div className="shp-flow-month-head">
+                                                    <span className="shp-flow-month-label">{m}</span>
+                                                    {isPartialMonth && (
+                                                        <span className="shp-partial-badge" title="Partial data — not all AMCs have uploaded yet">⚠️ Partial</span>
+                                                    )}
+                                                </div>
+                                                {trendData ? (
+                                                    <div className="shp-flow-month-body">
+                                                        <div className="shp-flow-shares-val tabular-nums">
+                                                            {fmt(trendData.total_shares)}
+                                                        </div>
+                                                        <div className="shp-flow-delta-row">
+                                                            {trendData.month_change !== 0 ? (
+                                                                <span className={`shp-flow-delta-pill ${isPos ? 'pos' : 'neg'}`}>
+                                                                    {isPos ? '▲ +' : '▼ '}{fmt(trendData.month_change)}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="shp-flow-delta-pill neutral">— 0</span>
+                                                            )}
+                                                        </div>
+                                                        {trendData.ownership_percent !== null && (
+                                                            <div className="shp-flow-stake">
+                                                                <span>Stake:</span> <strong>{trendData.ownership_percent.toFixed(2)}%</strong>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="shp-flow-empty"><MissingData /></div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Card 3: Active Conviction vs Arbitrage Meter */}
+                            <div className="shp-bento-card shp-conviction-meter-card">
+                                <div className="shp-card-header">
+                                    <div>
+                                        <span className="shp-card-eyebrow">PORTFOLIO DYNAMICS</span>
+                                        <div className="shp-card-sublabel">Fundamental Conviction vs Hedged Arbitrage</div>
+                                    </div>
+                                    <span className={`shp-conviction-pill ${convictionRatio.equityPct >= 75 ? 'high-conviction' : 'spread-play'}`}>
+                                        {convictionRatio.equityPct >= 75 ? 'HIGH ACTIVE CONVICTION' : convictionRatio.arbPct >= 40 ? 'SIGNIFICANT ARBITRAGE' : 'BALANCED SPREAD'}
+                                    </span>
+                                </div>
+
+                                <div className="shp-meter-wrap">
+                                    <div className="shp-meter-stats-row">
+                                        <div className="shp-meter-stat">
+                                            <span className="shp-meter-dot equity-dot"></span>
+                                            <span className="shp-meter-name">Pure Equity</span>
+                                            <strong className="shp-meter-pct">{convictionRatio.equityPct}%</strong>
+                                        </div>
+                                        <div className="shp-meter-stat">
+                                            <span className="shp-meter-dot arb-dot"></span>
+                                            <span className="shp-meter-name">Arbitrage</span>
+                                            <strong className="shp-meter-pct">{convictionRatio.arbPct}%</strong>
+                                        </div>
+                                    </div>
+
+                                    <div className="shp-meter-bar-track">
+                                        <div
+                                            className="shp-meter-bar-fill equity-fill"
+                                            style={{ width: `${convictionRatio.equityPct}%` }}
+                                            title={`Pure Equity: ${convictionRatio.equityPct}% (${fmt(convictionRatio.equityShares)} shares)`}
+                                        />
+                                        <div
+                                            className="shp-meter-bar-fill arb-fill"
+                                            style={{ width: `${convictionRatio.arbPct}%` }}
+                                            title={`Arbitrage: ${convictionRatio.arbPct}% (${fmt(convictionRatio.arbShares)} shares)`}
+                                        />
+                                    </div>
+
+                                    <div className="shp-conviction-subtext">
+                                        <strong>{fmt(convictionRatio.equityShares)}</strong> fundamental shares vs <strong>{fmt(convictionRatio.arbShares)}</strong> hedged arbitrage desk shares.
+                                    </div>
+                                </div>
+
+                                <div className="shp-meter-quick-toggles">
+                                    <button
+                                        type="button"
+                                        className={`shp-meter-btn ${schemeTypeFilter === 'all' ? 'active' : ''}`}
+                                        onClick={() => setSchemeTypeFilter('all')}
+                                    >
+                                        All Funds
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`shp-meter-btn equity-btn ${schemeTypeFilter === 'pure_equity' ? 'active' : ''}`}
+                                        onClick={() => setSchemeTypeFilter('pure_equity')}
+                                    >
+                                        Pure Equity Only
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`shp-meter-btn arb-btn ${schemeTypeFilter === 'arbitrage' ? 'active' : ''}`}
+                                        onClick={() => setSchemeTypeFilter('arbitrage')}
+                                    >
+                                        Arbitrage Only
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -558,7 +756,7 @@ export default function StockHoldingsPage() {
                                             {summary.data_warning.amcs_pending > 0 && (
                                                 <span style={{ color: '#f87171' }}> ({summary.data_warning.amcs_pending} still pending)</span>
                                             )}.
-                                            {' '}Summary figures (Ownership%, Funds, Total Shares) reflect
+                                            {' '}Summary figures reflect
                                             {' '}<strong>{summary.data_warning.complete_label}</strong> — the last complete month.
                                             Banner disappears automatically once all AMCs upload.
                                         </span>
@@ -625,60 +823,6 @@ export default function StockHoldingsPage() {
                                 )}
                             </div>
                         )}
-
-                        <div className="shp-summary-table-wrap" style={{ marginBottom: '24px' }}>
-                            <table className="shp-table shp-summary-table">
-                                <thead>
-                                    <tr>
-                                        <th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>
-                                            Industry Holding
-                                            {schemeTypeFilter === 'pure_equity' && (
-                                                <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: '500', color: '#34d399', background: 'rgba(16,185,129,0.15)', padding: '2px 8px', borderRadius: '4px' }}>
-                                                    Pure Equity (Excl. Arbitrage)
-                                                </span>
-                                            )}
-                                            {schemeTypeFilter === 'arbitrage' && (
-                                                <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: '500', color: '#fbbf24', background: 'rgba(245,158,11,0.15)', padding: '2px 8px', borderRadius: '4px' }}>
-                                                    Arbitrage Only
-                                                </span>
-                                            )}
-                                        </th>
-                                    </tr>
-                                    <tr>{displayMonths.map((m, i) => {
-                                        const isPartialMonth = summary.data_warning && m === summary.data_warning.latest_label;
-                                        return (
-                                            <th key={m} className={`shp-th shp-th-sub shp-month-${i}`} style={{ textAlign: 'center' }}>
-                                                {m}{isPartialMonth && <span title="Partial data — not all AMCs have uploaded yet" style={{ marginLeft: '4px', color: '#eab308', fontSize: '10px' }}>⚠️ Partial</span>}
-                                            </th>
-                                        );
-                                    })}</tr>
-                                </thead>
-                                <tbody>
-                                    <tr className="shp-row">
-                                        {displayMonths.map((m, i) => {
-                                            const trendData = displayTrend.find(t => t.month === m);
-                                            if (!trendData) return <td key={m} className={`shp-td shp-num shp-month-${i}`}><MissingData /></td>;
-                                            const isPos = trendData.month_change > 0;
-                                            return (
-                                                <td key={m} className={`shp-td shp-num shp-month-${i}`} style={{ textAlign: 'center' }}>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                                                        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                            {fmt(trendData.total_shares)}
-                                                            {trendData.month_change !== 0 && <span className={isPos ? 'shp-pos' : 'shp-neg'} style={{ fontSize: '10px' }}>{isPos ? '▲' : '▼'}</span>}
-                                                        </div>
-                                                        {trendData.ownership_percent !== null && (
-                                                            <div className="shp-stake-badge" style={{ fontSize: '10px', color: '#10b981' }}>
-                                                                {trendData.ownership_percent.toFixed(2)}%
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            );
-                                        })}
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
 
                         <div className="shp-table-wrap">
                             <div className="shp-controls-row shp-controls-header">
@@ -1004,7 +1148,12 @@ export default function StockHoldingsPage() {
                                                                         return (
                                                                             <React.Fragment key={m}>
                                                                                 {i === 0 && <td className={`shp-td shp-num shp-month-${i}`}>{fmtPct(h?.percent_to_aum) || <MissingData />}</td>}
-                                                                                <td className={`shp-td shp-num shp-month-${i}`}>{fmt(h?.num_shares) || <MissingData />}</td>
+                                                                                <td className={`shp-td shp-num shp-month-${i}`}>
+                                                                                    <div className="shp-qty-cell-content">
+                                                                                        <span>{fmt(h?.num_shares) || <MissingData />}</span>
+                                                                                        {i === 0 && <MiniSparkline history={scheme.history} />}
+                                                                                    </div>
+                                                                                </td>
                                                                                 <td className={`shp-td shp-num shp-month-${i}`}><ChangeCell change={h?.month_change} pct={h?.percent_change} /></td>
                                                                             </React.Fragment>
                                                                         );
@@ -1053,53 +1202,73 @@ export default function StockHoldingsPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {(viewMode === 'scheme' ? schemesToRender : amcToRender).map((item, idx) => (
-                                            <tr key={idx} className="shp-row">
-                                                <td className="shp-td shp-td-name">
-                                                    <div className="shp-fund-name">
-                                                        {viewMode === 'scheme' ? item.scheme_name : item.amc_name}
-                                                        {viewMode === 'amc' && schemeTypeFilter === 'all' && item.has_arbitrage && (
-                                                            <span className="shp-arb-tag" title="This AMC holds this stock across both Active Equity and Arbitrage schemes">
-                                                                ⚡ Arb Incl.
-                                                            </span>
-                                                        )}
-                                                        {viewMode === 'amc' && schemeTypeFilter === 'arbitrage' && (
-                                                            <span className="shp-arb-tag" title="Showing Arbitrage scheme holdings only">
-                                                                Arbitrage
-                                                            </span>
-                                                        )}
-                                                        {viewMode === 'amc' && schemeTypeFilter === 'pure_equity' && (
-                                                            <span className="shp-equity-tag" title="Arbitrage excluded — pure fundamental equity conviction">
-                                                                Pure Eq
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="shp-fund-sub">
-                                                        {viewMode === 'scheme'
-                                                            ? item.amc_name
-                                                            : (
-                                                                schemeTypeFilter === 'all' && item.has_arbitrage
-                                                                    ? `${item.scheme_count} schemes (${item.equity_schemes_all} Equity, ${item.arb_schemes_all} Arb) | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
-                                                                    : `${item.scheme_count} scheme${item.scheme_count !== 1 ? 's' : ''} | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
-                                                            )
-                                                        }
-                                                    </div>
-                                                </td>
-                                                {displayMonths.map((m, i) => {
-                                                    const history = (item.history || []).find(h => h.month === m);
-                                                    return (
-                                                        <React.Fragment key={m}>
-                                                            {i === 0 && <td className="shp-td shp-num shp-month-0">{fmtPct(history?.percent_to_aum) || <MissingData />}</td>}
-                                                            <td className={`shp-td shp-num shp-month-${i}`} style={{ color: '#10b981', fontWeight: '600' }}>
-                                                                {fmtPct(history?.ownership_percent) || <MissingData />}
-                                                            </td>
-                                                            <td className={`shp-td shp-num shp-month-${i}`}>{fmt(history?.num_shares) || <MissingData />}</td>
-                                                            <td className={`shp-td shp-num shp-month-${i}`}><ChangeCell change={history?.month_change} pct={history?.percent_change} /></td>
-                                                        </React.Fragment>
-                                                    );
-                                                })}
-                                            </tr>
-                                        ))}
+                                        {(viewMode === 'scheme' ? schemesToRender : amcToRender).map((item, idx) => {
+                                            const brand = viewMode === 'amc' ? getAmcBrand(item.amc_name) : null;
+                                            return (
+                                                <tr key={idx} className="shp-row">
+                                                    <td className="shp-td shp-td-name">
+                                                        <div className="shp-fund-name">
+                                                            {viewMode === 'amc' && brand && (
+                                                                <span
+                                                                    className="shp-amc-brand-badge"
+                                                                    style={{
+                                                                        backgroundColor: brand.bg,
+                                                                        color: brand.color
+                                                                    }}
+                                                                    title={item.amc_name}
+                                                                >
+                                                                    {brand.label}
+                                                                </span>
+                                                            )}
+                                                            <span>{viewMode === 'scheme' ? item.scheme_name : item.amc_name}</span>
+                                                            {viewMode === 'amc' && schemeTypeFilter === 'all' && item.has_arbitrage && (
+                                                                <span className="shp-arb-tag" title="This AMC holds this stock across both Active Equity and Arbitrage schemes">
+                                                                    ⚡ Arb Incl.
+                                                                </span>
+                                                            )}
+                                                            {viewMode === 'amc' && schemeTypeFilter === 'arbitrage' && (
+                                                                <span className="shp-arb-tag" title="Showing Arbitrage scheme holdings only">
+                                                                    Arbitrage
+                                                                </span>
+                                                            )}
+                                                            {viewMode === 'amc' && schemeTypeFilter === 'pure_equity' && (
+                                                                <span className="shp-equity-tag" title="Arbitrage excluded — pure fundamental equity conviction">
+                                                                    Pure Eq
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="shp-fund-sub">
+                                                            {viewMode === 'scheme'
+                                                                ? item.amc_name
+                                                                : (
+                                                                    schemeTypeFilter === 'all' && item.has_arbitrage
+                                                                        ? `${item.scheme_count} schemes (${item.equity_schemes_all} Equity, ${item.arb_schemes_all} Arb) | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
+                                                                        : `${item.scheme_count} scheme${item.scheme_count !== 1 ? 's' : ''} | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
+                                                                )
+                                                            }
+                                                        </div>
+                                                    </td>
+                                                    {displayMonths.map((m, i) => {
+                                                        const history = (item.history || []).find(h => h.month === m);
+                                                        return (
+                                                            <React.Fragment key={m}>
+                                                                {i === 0 && <td className="shp-td shp-num shp-month-0">{fmtPct(history?.percent_to_aum) || <MissingData />}</td>}
+                                                                <td className={`shp-td shp-num shp-month-${i}`} style={{ color: '#10b981', fontWeight: '600' }}>
+                                                                    {fmtPct(history?.ownership_percent) || <MissingData />}
+                                                                </td>
+                                                                <td className={`shp-td shp-num shp-month-${i}`}>
+                                                                    <div className="shp-qty-cell-content">
+                                                                        <span>{fmt(history?.num_shares) || <MissingData />}</span>
+                                                                        {i === 0 && <MiniSparkline history={item.history} />}
+                                                                    </div>
+                                                                </td>
+                                                                <td className={`shp-td shp-num shp-month-${i}`}><ChangeCell change={history?.month_change} pct={history?.percent_change} /></td>
+                                                            </React.Fragment>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                                 )}

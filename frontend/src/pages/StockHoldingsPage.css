@@ -1211,4 +1211,531 @@
 
 [data-theme="dark"] .shp-cat-summary-card.theme-other    { background: linear-gradient(135deg, rgba(148,163,184,0.15), rgba(148,163,184,0.05)); }
 [data-theme="dark"] .shp-cat-summary-card.theme-other .shp-cat-card-label { color: #94a3b8; }
-[data-theme="dark"] .shp-cat-summary-card.theme-other .shp-cat-card-value { color: #e2e8f0; }
+[data-theme="dark"] .shp-cat-summary-card.theme-other .shp-cat-card-value { color: #e2e8f0; }
+
+/* ==========================================================================
+   INSTITUTIONAL TERMINAL REDESIGN: BENTO GRID & DYNAMICS
+   ========================================================================== */
+
+/* ── Bento Grid Layout ── */
+.shp-bento-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 1.1fr 1.05fr;
+    gap: 16px;
+    margin-bottom: 20px;
+    align-items: stretch;
+}
+
+@media (max-width: 1200px) {
+    .shp-bento-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.shp-bento-card {
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 12px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.04);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+[data-theme="dark"] .shp-bento-card {
+    background: #0f1629;
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+}
+
+.shp-bento-card:hover {
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow: 0 8px 24px -2px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .shp-bento-card:hover {
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 10px 30px -4px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Card Headers ── */
+.shp-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.shp-card-eyebrow {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary, #94a3b8);
+}
+
+.shp-card-sublabel {
+    font-size: 11px;
+    color: var(--text-secondary, #64748b);
+    margin-top: 2px;
+}
+
+/* ── Card 1: Stock Hero ── */
+.shp-stock-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.shp-stock-hero-card .shp-company-name {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-primary, #0f172a);
+    margin: 0;
+    line-height: 1.2;
+}
+
+[data-theme="dark"] .shp-stock-hero-card .shp-company-name {
+    color: #f8fafc;
+}
+
+.rv-live-price-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #10b981;
+}
+
+.shp-live-pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 8px #10b981;
+    animation: livePulse 1.8s infinite;
+}
+
+@keyframes livePulse {
+    0% { transform: scale(0.9); opacity: 0.7; }
+    50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 12px #10b981; }
+    100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.shp-fetching-ltp {
+    font-size: 11px;
+    color: var(--text-tertiary, #94a3b8);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.shp-meta-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.shp-meta-pill {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--bg-tertiary, #f1f5f9);
+    border: 1px solid var(--border-color, #e2e8f0);
+    color: var(--text-secondary, #475569);
+}
+
+[data-theme="dark"] .shp-meta-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+}
+
+.shp-isin-pill {
+    font-family: var(--font-mono, monospace);
+    font-size: 10.5px;
+}
+
+.shp-mcap-type-badge {
+    margin-left: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.shp-hero-metrics-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+[data-theme="dark"] .shp-hero-metrics-row {
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.shp-metric-block {
+    display: flex;
+    flex-direction: column;
+}
+
+.shp-metric-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-tertiary, #94a3b8);
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.shp-metric-val {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary, #0f172a);
+}
+
+[data-theme="dark"] .shp-metric-val {
+    color: #f1f5f9;
+}
+
+.shp-emerald-glow {
+    color: #10b981 !important;
+}
+
+/* ── Card 2: 3-Month Flow Momentum ── */
+.shp-flow-trend-badge {
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(99, 102, 241, 0.1);
+    color: #6366f1;
+}
+
+.shp-flow-months-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.shp-flow-month-item {
+    background: var(--bg-tertiary, #f8fafc);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 8px;
+    padding: 10px 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .shp-flow-month-item {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.shp-flow-month-item.is-latest {
+    border-color: rgba(99, 102, 241, 0.4);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.06) 0%, rgba(99, 102, 241, 0.01) 100%);
+}
+
+.shp-flow-month-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.shp-flow-month-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary, #0f172a);
+}
+
+[data-theme="dark"] .shp-flow-month-label {
+    color: #f8fafc;
+}
+
+.shp-partial-badge {
+    font-size: 9px;
+    font-weight: 600;
+    color: #eab308;
+    background: rgba(234, 179, 8, 0.12);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.shp-flow-shares-val {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-primary, #0f172a);
+    margin-bottom: 4px;
+}
+
+[data-theme="dark"] .shp-flow-shares-val {
+    color: #f1f5f9;
+}
+
+.shp-flow-delta-pill {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+}
+
+.shp-flow-delta-pill.pos {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+}
+
+.shp-flow-delta-pill.neg {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.shp-flow-delta-pill.neutral {
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+}
+
+.shp-flow-stake {
+    font-size: 10.5px;
+    color: var(--text-secondary, #64748b);
+    border-top: 1px dashed var(--border-color, #e2e8f0);
+    padding-top: 4px;
+}
+
+[data-theme="dark"] .shp-flow-stake {
+    border-top-color: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+}
+
+.shp-flow-stake strong {
+    color: #10b981;
+}
+
+/* ── Card 3: Portfolio Dynamics Meter ── */
+.shp-conviction-pill {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.shp-conviction-pill.high-conviction {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.shp-conviction-pill.spread-play {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.shp-meter-wrap {
+    margin: 8px 0 12px 0;
+}
+
+.shp-meter-stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 11.5px;
+}
+
+.shp-meter-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.shp-meter-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.shp-meter-dot.equity-dot {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.shp-meter-dot.arb-dot {
+    background: #f59e0b;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
+.shp-meter-name {
+    color: var(--text-secondary, #64748b);
+    font-weight: 500;
+}
+
+[data-theme="dark"] .shp-meter-name {
+    color: #94a3b8;
+}
+
+.shp-meter-pct {
+    color: var(--text-primary, #0f172a);
+    font-weight: 800;
+}
+
+[data-theme="dark"] .shp-meter-pct {
+    color: #f8fafc;
+}
+
+.shp-meter-bar-track {
+    height: 9px;
+    border-radius: 6px;
+    background: rgba(148, 163, 184, 0.2);
+    display: flex;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.shp-meter-bar-fill {
+    height: 100%;
+    transition: width 0.4s ease;
+}
+
+.shp-meter-bar-fill.equity-fill {
+    background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+}
+
+.shp-meter-bar-fill.arb-fill {
+    background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+}
+
+.shp-conviction-subtext {
+    font-size: 11px;
+    color: var(--text-secondary, #64748b);
+    line-height: 1.4;
+}
+
+[data-theme="dark"] .shp-conviction-subtext {
+    color: #94a3b8;
+}
+
+.shp-conviction-subtext strong {
+    color: var(--text-primary, #0f172a);
+}
+
+[data-theme="dark"] .shp-conviction-subtext strong {
+    color: #f1f5f9;
+}
+
+.shp-meter-quick-toggles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+[data-theme="dark"] .shp-meter-quick-toggles {
+    border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.shp-meter-btn {
+    padding: 5px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    background: var(--bg-tertiary, #f8fafc);
+    color: var(--text-secondary, #64748b);
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .shp-meter-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+}
+
+.shp-meter-btn:hover {
+    color: var(--text-primary, #0f172a);
+    border-color: var(--accent-primary, #3b82f6);
+}
+
+[data-theme="dark"] .shp-meter-btn:hover {
+    color: #ffffff;
+    border-color: rgba(99, 102, 241, 0.5);
+}
+
+.shp-meter-btn.active {
+    background: var(--accent-primary, #3b82f6);
+    color: #ffffff;
+    border-color: var(--accent-primary, #3b82f6);
+}
+
+.shp-meter-btn.equity-btn.active {
+    background: #059669;
+    border-color: #059669;
+    color: #ffffff;
+}
+
+.shp-meter-btn.arb-btn.active {
+    background: #d97706;
+    border-color: #d97706;
+    color: #ffffff;
+}
+
+/* ── AMC Brand Badges ── */
+.shp-amc-brand-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 8px;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+/* ── In-Row Sparkline & Qty Layout ── */
+.shp-qty-cell-content {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.shp-sparkline {
+    flex-shrink: 0;
+    vertical-align: middle;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+}

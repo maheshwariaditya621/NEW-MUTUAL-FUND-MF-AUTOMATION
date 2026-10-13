@@ -43,6 +43,18 @@ export default function SearchBox({
         }
     }, [query, minChars, debouncedSearch]);
 
+    // Global shortcut Ctrl+K / Cmd+K to focus search
+    useEffect(() => {
+        const handleGlobalKeyDown = (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                inputRef.current?.focus();
+            }
+        };
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, []);
+
     // Close dropdown when clicking outside
     useEffect(() => {
         function handleClickOutside(event) {
@@ -142,6 +154,10 @@ export default function SearchBox({
 
                 {loading && (
                     <Loader2 className="search-loading" size={20} />
+                )}
+
+                {!query && !loading && (
+                    <kbd className="search-shortcut" title="Press Ctrl+K or ⌘K to search">⌘K</kbd>
                 )}
 
                 {query && !loading && (

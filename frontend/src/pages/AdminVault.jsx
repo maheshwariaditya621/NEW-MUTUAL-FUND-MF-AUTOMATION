@@ -254,12 +254,80 @@ const AdminVault = () => {
         } catch (err) { alert("Failed to update user"); }
     };
 
+    const fetchJobs = async () => {
+        try {
+            const resp = await fetch(`${API_BASE}/extraction-jobs`, {
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.length > 0) {
+                    const latest = data[0];
+                    // Fetch details for the first/latest job to populate its results immediately
+                    try {
+                        const detailResp = await fetch(`${API_BASE}/extraction-jobs/${latest.run_id}`, {
+                            headers: { 'X-Admin-Secret': password }
+                        });
+                        if (detailResp.ok) {
+                            const detailData = await detailResp.json();
+                            setExtJobs([detailData, ...data.slice(1).map(r => ({
+                                job_id: r.run_id,
+                                status: (r.status || 'unknown').toLowerCase(),
+                                year: r.year,
+                                month: r.month,
+                                dry_run: r.dry_run,
+                                redo: r.redo,
+                                total: r.total,
+                                done: r.done,
+                                results: {}
+                            }))]);
+                            if (detailData.status === 'running') {
+                                setActiveJobId(detailData.job_id);
+                            }
+                            return;
+                        }
+                    } catch { }
+
+                    setExtJobs(data.map(r => ({
+                        job_id: r.run_id,
+                        status: (r.status || 'unknown').toLowerCase(),
+                        year: r.year,
+                        month: r.month,
+                        dry_run: r.dry_run,
+                        redo: r.redo,
+                        total: r.total,
+                        done: r.done,
+                        results: {}
+                    })));
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch jobs", err);
+        }
+    };
+
+    const loadJobDetails = async (jobId) => {
+        try {
+            const resp = await fetch(`${API_BASE}/extraction-jobs/${jobId}`, {
+                headers: { 'X-Admin-Secret': password }
+            });
+            if (resp.ok) {
+                const detailData = await resp.json();
+                setExtJobs(prev => prev.map(j => j.job_id === jobId ? detailData : j));
+            }
+        } catch (err) {
+            console.error("Failed to load job details", err);
+        }
+    };
+
     useEffect(() => {
         if (isAuthenticated) {
             fetchData();
             if (activeTab === 'users') {
                 fetchUsers();
                 fetchInvites();
+            } else if (activeTab === 'extraction') {
+                fetchJobs();
             }
         }
     }, [isAuthenticated, activeTab]);
@@ -274,7 +342,8 @@ const AdminVault = () => {
                 });
                 const data = await resp.json();
                 setExtJobs(prev => prev.map(j => j.job_id === activeJobId ? data : j));
-                if (data.status === 'completed') {
+                const terminal = ['completed', 'completed_with_errors', 'failed', 'cancelled'];
+                if (terminal.includes(data.status?.toLowerCase())) {
                     setActiveJobId(null);
                     clearInterval(interval);
                 }
@@ -950,7 +1019,7 @@ const AdminVault = () => {
                                         </div>
 
                                         {/* Results table */}
-                                        {Object.keys(job.results).length > 0 && (
+                                        {job.results && Object.keys(job.results).length > 0 ? (
                                             <div style={{ marginTop: '10px', overflowX: 'auto' }}>
                                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                                                     <thead>
@@ -966,7 +1035,7 @@ const AdminVault = () => {
                                                         {Object.entries(job.results).map(([slug, res]) => {
                                                             const steps = res.steps || {};
                                                             const extractRes = steps.extract || {};
-                                                            const isErr = res.status === 'error' || extractRes.status === 'error';
+                                                            const isErr = res.status === 'error' || res.status === 'failed' || extractRes.status === 'error' || extractRes.status === 'failed';
 
                                                             const getStepColor = (stepKey) => {
                                                                 const s = steps[stepKey];
@@ -986,14 +1055,14 @@ const AdminVault = () => {
                                                                             <span title="Extract" style={{ width: '8px', height: '8px', borderRadius: '50%', background: getStepColor('extract') }} />
                                                                         </div>
                                                                     </td>
-                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: extractRes.rows_read > 0 ? '#4ade80' : '#555' }}>
-                                                                        {extractRes.rows_read ?? '—'}
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: (res.rows_extracted || extractRes.rows_read) > 0 ? '#4ade80' : '#555' }}>
+                                                                        {res.rows_extracted ?? extractRes.rows_read ?? '—'}
                                                                     </td>
-                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: extractRes.rows_inserted > 0 ? '#4ade80' : '#555' }}>
-                                                                        {extractRes.rows_inserted ?? '—'}
+                                                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: (res.rows_inserted || extractRes.rows_inserted) > 0 ? '#4ade80' : '#555' }}>
+                                                                        {res.rows_inserted ?? extractRes.rows_inserted ?? '—'}
                                                                     </td>
-                                                                    <td style={{ padding: '5px 8px', color: isErr ? '#f87171' : '#666', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                                        {isErr ? (res.error || extractRes.error || 'Err') : (steps.download?.reason || steps.merge?.error || extractRes.message || '')}
+                                                                    <td style={{ padding: '5px 8px', color: isErr ? '#f87171' : '#666', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                        {isErr ? (res.error || extractRes.error || 'Err') : (steps.download?.reason || steps.merge?.error || extractRes.message || (res.status === 'success' ? 'Loaded to DB' : ''))}
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -1001,6 +1070,14 @@ const AdminVault = () => {
                                                     </tbody>
                                                 </table>
                                             </div>
+                                        ) : (
+                                            <button 
+                                                className="btn-secondary" 
+                                                style={{ marginTop: '6px', padding: '5px 12px', fontSize: '0.8rem', borderRadius: '4px' }}
+                                                onClick={() => loadJobDetails(job.job_id)}
+                                            >
+                                                📊 Load Detailed AMC Breakdown ({job.done}/{job.total} processed)
+                                            </button>
                                         )}
                                     </div>
                                 ))}

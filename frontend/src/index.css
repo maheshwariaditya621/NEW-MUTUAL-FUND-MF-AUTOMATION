@@ -7,88 +7,119 @@
   padding: 0;
 }
 
-/* ===== CSS VARIABLES (THEME) ===== */
+/* ===== CSS VARIABLES (INSTITUTIONAL FINTECH THEME) ===== */
 :root {
-  /* Light Mode Colors */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --bg-tertiary: #e9ecef;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+  /* Executive Pearl / Light Mode Colors */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
   --bg-card: #ffffff;
   --card-bg: #ffffff;
-  --bg-hover: #f1f5f9;
+  --bg-hover: #f8fafc;
 
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
   --text-tertiary: #94a3b8;
   --text-muted: #94a3b8;
 
-  --border-color: #dee2e6;
+  --border-color: #e2e8f0;
+  --border-subtle: #f1f5f9;
   --border-hover: #cbd5e1;
 
-  --accent-primary: #0066cc;
-  --accent-hover: #0052a3;
-  --accent-light: #e6f2ff;
+  --accent-primary: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #eff6ff;
+  --accent-glow: rgba(37, 99, 235, 0.12);
 
-  --success: #28a745;
-  --warning: #ffc107;
-  --danger: #dc3545;
-  --info: #17a2b8;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #06b6d4;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.03);
+  --shadow-glow: 0 0 25px rgba(37, 99, 235, 0.15);
 
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
 
-  --transition-fast: 150ms ease;
-  --transition-normal: 250ms ease;
-  --transition-slow: 350ms ease;
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Dark Mode Colors */
+/* Deep Obsidian Dark Mode Colors */
 [data-theme="dark"] {
-  --bg-primary: #121824;
-  --bg-secondary: #1e2638;
-  --bg-tertiary: #2a354b;
-  --bg-card: #1e2638;
-  --card-bg: #1e2638;
-  --bg-hover: #263147;
+  --bg-primary: #0a0f1d;
+  --bg-secondary: #111827;
+  --bg-tertiary: #161f33;
+  --bg-card: #111827;
+  --card-bg: #111827;
+  --bg-hover: #1a253c;
 
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --text-tertiary: #64748b;
   --text-muted: #64748b;
 
-  --border-color: #2e3b52;
-  --border-hover: #3d4d6b;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-hover: rgba(255, 255, 255, 0.16);
 
-  --accent-primary: #4d9fff;
-  --accent-hover: #6bb0ff;
-  --accent-light: #1a3a5c;
+  --accent-primary: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-light: rgba(59, 130, 246, 0.15);
+  --accent-glow: rgba(59, 130, 246, 0.25);
 
-  --success: #48c774;
-  --warning: #ffd43b;
-  --danger: #ff6b6b;
-  --info: #3bc9db;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #38bdf8;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 30px rgba(59, 130, 246, 0.2);
 }
 
 /* ===== TYPOGRAPHY ===== */
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  font-size: 16px;
-  line-height: 1.6;
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.55;
   color: var(--text-primary);
   background-color: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color var(--transition-normal), color var(--transition-normal);
+}
+
+/* Numeric alignment for financial tables */
+.tabular-nums, table td, table th, [class*="-num"], [class*="-qty"], [class*="-shares"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
 }
 
 h1,
