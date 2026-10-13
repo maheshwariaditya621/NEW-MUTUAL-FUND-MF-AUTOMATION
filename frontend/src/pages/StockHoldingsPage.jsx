@@ -78,6 +78,7 @@ export default function StockHoldingsPage() {
     const [allAvailableMonths, setAllAvailableMonths] = useState([]);
     const [showAmcStatus, setShowAmcStatus] = useState(false);
     const [expandedCats, setExpandedCats] = useState({}); // sub_category -> bool
+    const [schemeTypeFilter, setSchemeTypeFilter] = useState('all'); // 'all' | 'pure_equity' | 'arbitrage'
 
     useEffect(() => {
         if (!summary?.holdings?.[0]?.history) return;
@@ -174,15 +175,101 @@ export default function StockHoldingsPage() {
         return 'other';
     };
 
+    // Helper: Identify Arbitrage schemes
+    const isArbitrageScheme = (s) => {
+        if (!s) return false;
+        const cat = (s.website_category || '').toLowerCase();
+        const sub = (s.website_sub_category || '').toLowerCase();
+        const name = (s.scheme_name || '').toUpperCase();
+        return cat.includes('arbitrage') || sub.includes('arbitrage') || name.includes('ARBITRAGE');
+    };
+
+    // Scheme counts by type
+    const schemeTypeCounts = useMemo(() => {
+        if (!summary?.holdings) return { all: 0, pureEquity: 0, arbitrage: 0 };
+        let pureEquity = 0;
+        let arbitrage = 0;
+        summary.holdings.forEach(s => {
+            if (isArbitrageScheme(s)) {
+                arbitrage++;
+            } else {
+                pureEquity++;
+            }
+        });
+        return { all: summary.holdings.length, pureEquity, arbitrage };
+    }, [summary]);
+
+    // Schemes filtered by schemeTypeFilter
+    const filteredHoldings = useMemo(() => {
+        if (!summary?.holdings) return [];
+        if (schemeTypeFilter === 'pure_equity') {
+            return summary.holdings.filter(s => !isArbitrageScheme(s));
+        }
+        if (schemeTypeFilter === 'arbitrage') {
+            return summary.holdings.filter(s => isArbitrageScheme(s));
+        }
+        return summary.holdings;
+    }, [summary, schemeTypeFilter]);
+
+    // Dynamic Monthly Trend for Top Cards (reflects active filter)
+    const displayTrend = useMemo(() => {
+        if (!summary?.monthly_trend) return [];
+        if (schemeTypeFilter === 'all') return summary.monthly_trend;
+        return displayMonths.map((m) => {
+            let total_shares = 0;
+            let month_change = 0;
+            let activeFunds = 0;
+            filteredHoldings.forEach(scheme => {
+                const h = scheme.history?.find(x => x.month === m);
+                if (h && h.num_shares !== null && h.num_shares > 0) {
+                    total_shares += h.num_shares;
+                    month_change += (h.month_change || 0);
+                    activeFunds += 1;
+                }
+            });
+            const ownership_percent = summary.shares_outstanding && total_shares > 0
+                ? (total_shares / summary.shares_outstanding) * 100
+                : null;
+            return {
+                month: m,
+                total_shares,
+                num_funds: activeFunds,
+                month_change,
+                ownership_percent,
+            };
+        });
+    }, [summary, schemeTypeFilter, filteredHoldings, displayMonths]);
+
     const amcAggregated = useMemo(() => {
         if (!summary?.holdings) return [];
-        const map = {};
+
+        // Track total composition per AMC across all schemes
+        const amcComposition = {};
         for (const scheme of summary.holdings) {
             const amc = scheme.amc_name;
+            if (!amcComposition[amc]) {
+                amcComposition[amc] = { total: 0, pureEquity: 0, arbitrage: 0 };
+            }
+            amcComposition[amc].total += 1;
+            if (isArbitrageScheme(scheme)) {
+                amcComposition[amc].arbitrage += 1;
+            } else {
+                amcComposition[amc].pureEquity += 1;
+            }
+        }
+
+        const map = {};
+        for (const scheme of filteredHoldings) {
+            const amc = scheme.amc_name;
             if (!map[amc]) {
+                const comp = amcComposition[amc] || { total: 0, pureEquity: 0, arbitrage: 0 };
                 map[amc] = {
                     amc_name: amc,
                     scheme_count: 0,
+                    total_schemes_all: comp.total,
+                    equity_schemes_all: comp.pureEquity,
+                    arb_schemes_all: comp.arbitrage,
+                    has_arbitrage: comp.arbitrage > 0,
                     equity_aum_cr: 0,
                     total_aum_cr: 0,
                     history: scheme.history.map(h => ({ ...h, num_shares: null, month_change: 0 })),
@@ -206,16 +293,16 @@ export default function StockHoldingsPage() {
             });
         }
         return Object.values(map);
-    }, [summary]);
+    }, [summary, filteredHoldings]);
 
     // ── Category grouped data (for Category-wise view) ──
     const { broadGroups, subGroups } = useMemo(() => {
-        if (!summary?.holdings) return { broadGroups: [], subGroups: [] };
+        if (!filteredHoldings) return { broadGroups: [], subGroups: [] };
         
         const broadMap = {};
         const subMap = {};
         
-        for (const scheme of summary.holdings) {
+        for (const scheme of filteredHoldings) {
             const cat  = scheme.website_category     || 'Other';
             const sub  = scheme.website_sub_category || 'Uncategorized';
             const subKey  = `${cat}||${sub}`;
@@ -248,7 +335,7 @@ export default function StockHoldingsPage() {
         });
         
         return { broadGroups: broadGroupsArr, subGroups: subGroupsArr };
-    }, [summary]);
+    }, [filteredHoldings]);
 
     // toggle expand/collapse of one category
     const toggleCat = (key) => setExpandedCats(prev => ({ ...prev, [key]: !prev[key] }));
@@ -260,8 +347,8 @@ export default function StockHoldingsPage() {
     const collapseAll = () => setExpandedCats({});
 
     const schemesToRender = useMemo(() => {
-        if (!summary?.holdings) return [];
-        let items = [...summary.holdings];
+        if (!filteredHoldings) return [];
+        let items = [...filteredHoldings];
 
         if (filterParam === 'entrants') {
             items = items.filter(h => (h.history[0]?.num_shares > 0 && h.history[1]?.num_shares === 0));
@@ -542,7 +629,21 @@ export default function StockHoldingsPage() {
                         <div className="shp-summary-table-wrap" style={{ marginBottom: '24px' }}>
                             <table className="shp-table shp-summary-table">
                                 <thead>
-                                    <tr><th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>Industry Holding</th></tr>
+                                    <tr>
+                                        <th className="shp-th shp-th-month-group" colSpan={displayMonths.length} style={{ textAlign: 'center' }}>
+                                            Industry Holding
+                                            {schemeTypeFilter === 'pure_equity' && (
+                                                <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: '500', color: '#34d399', background: 'rgba(16,185,129,0.15)', padding: '2px 8px', borderRadius: '4px' }}>
+                                                    Pure Equity (Excl. Arbitrage)
+                                                </span>
+                                            )}
+                                            {schemeTypeFilter === 'arbitrage' && (
+                                                <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: '500', color: '#fbbf24', background: 'rgba(245,158,11,0.15)', padding: '2px 8px', borderRadius: '4px' }}>
+                                                    Arbitrage Only
+                                                </span>
+                                            )}
+                                        </th>
+                                    </tr>
                                     <tr>{displayMonths.map((m, i) => {
                                         const isPartialMonth = summary.data_warning && m === summary.data_warning.latest_label;
                                         return (
@@ -555,7 +656,7 @@ export default function StockHoldingsPage() {
                                 <tbody>
                                     <tr className="shp-row">
                                         {displayMonths.map((m, i) => {
-                                            const trendData = summary.monthly_trend.find(t => t.month === m);
+                                            const trendData = displayTrend.find(t => t.month === m);
                                             if (!trendData) return <td key={m} className={`shp-td shp-num shp-month-${i}`}><MissingData /></td>;
                                             const isPos = trendData.month_change > 0;
                                             return (
@@ -590,6 +691,35 @@ export default function StockHoldingsPage() {
                                     <button className={`shp-toggle-btn ${!filterParam ? 'active' : ''}`} onClick={() => { searchParams.delete('filter'); setSearchParams(searchParams); }}>All</button>
                                     <button className={`shp-toggle-btn ${filterParam === 'entrants' ? 'active' : ''}`} onClick={() => { searchParams.set('filter', 'entrants'); setSearchParams(searchParams); }}>Entrants</button>
                                     <button className={`shp-toggle-btn ${filterParam === 'exits' ? 'active' : ''}`} onClick={() => { searchParams.set('filter', 'exits'); setSearchParams(searchParams); }}>Exits</button>
+                                </div>
+                                <div className="shp-scheme-type-toggle">
+                                    <button
+                                        type="button"
+                                        className={`shp-scheme-type-btn ${schemeTypeFilter === 'all' ? 'active' : ''}`}
+                                        onClick={() => setSchemeTypeFilter('all')}
+                                        title="Show all funds (Pure Equity + Arbitrage combined)"
+                                    >
+                                        All Funds
+                                        <span className="shp-scheme-type-badge">{schemeTypeCounts.all}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`shp-scheme-type-btn pure-equity ${schemeTypeFilter === 'pure_equity' ? 'active' : ''}`}
+                                        onClick={() => setSchemeTypeFilter('pure_equity')}
+                                        title="Exclude Arbitrage schemes — shows pure fundamental equity conviction"
+                                    >
+                                        Pure Equity
+                                        <span className="shp-scheme-type-badge">{schemeTypeCounts.pureEquity}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`shp-scheme-type-btn arbitrage ${schemeTypeFilter === 'arbitrage' ? 'active' : ''}`}
+                                        onClick={() => setSchemeTypeFilter('arbitrage')}
+                                        title="Arbitrage schemes only — hedged cash-futures trading flow"
+                                    >
+                                        Arbitrage Only
+                                        <span className="shp-scheme-type-badge">{schemeTypeCounts.arbitrage}</span>
+                                    </button>
                                 </div>
                                 <div className="shp-aum-toggle" style={{ display: 'flex', background: 'var(--bg-tertiary)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '500', marginLeft: 'auto' }}>
                                     <button
@@ -742,6 +872,7 @@ export default function StockHoldingsPage() {
                                                 'Total MF Shares': summary?.total_shares ? Number(summary.total_shares).toLocaleString('en-IN') : undefined,
                                                 'Displayed Periods': displayMonths.join(', '),
                                                 'View': viewMode === 'scheme' ? 'Scheme-wise' : 'AMC-wise',
+                                                'Scheme Type': schemeTypeFilter === 'pure_equity' ? 'Pure Equity (Excl. Arbitrage)' : schemeTypeFilter === 'arbitrage' ? 'Arbitrage Only' : 'All Funds',
                                                 'AUM Mode': aumViewMode === 'total' ? 'Total AUM' : 'Equity AUM',
                                                 'Fund Filter': filterParam === 'entrants' ? 'New Entrants Only' : filterParam === 'exits' ? 'Exits Only' : undefined,
                                                 'Search': filterText || undefined,
@@ -750,6 +881,26 @@ export default function StockHoldingsPage() {
                                     />
                                 </div>
                             </div>
+
+                            {/* ── Active Filter Notification Banner ── */}
+                            {schemeTypeFilter !== 'all' && (
+                                <div className="shp-filter-active-banner">
+                                    <span>
+                                        {schemeTypeFilter === 'pure_equity' ? (
+                                            <>
+                                                <strong style={{ color: '#10b981' }}>Pure Equity View:</strong> Arbitrage funds are excluded to show genuine institutional fundamental conviction.
+                                            </>
+                                        ) : (
+                                            <>
+                                                <strong style={{ color: '#f59e0b' }}>Arbitrage Only View:</strong> Showing hedged cash-futures arbitrage desk positions and spread rollovers only.
+                                            </>
+                                        )}
+                                    </span>
+                                    <button type="button" onClick={() => setSchemeTypeFilter('all')} className="shp-filter-clear-btn">
+                                        Reset to All Funds
+                                    </button>
+                                </div>
+                            )}
 
                             <div className="shp-table-inner">
                                 {viewMode === 'category' ? (
@@ -895,7 +1046,7 @@ export default function StockHoldingsPage() {
                                                         Qty {sortArrow(`shares_${i}`)}
                                                     </th>
                                                     <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
-                                                        Change {sortArrow(`change_${i}`)}
+                                                        Change{schemeTypeFilter === 'pure_equity' ? ' (Eq)' : schemeTypeFilter === 'arbitrage' ? ' (Arb)' : ''} {sortArrow(`change_${i}`)}
                                                     </th>
                                                 </React.Fragment>
                                             ))}
@@ -905,11 +1056,33 @@ export default function StockHoldingsPage() {
                                         {(viewMode === 'scheme' ? schemesToRender : amcToRender).map((item, idx) => (
                                             <tr key={idx} className="shp-row">
                                                 <td className="shp-td shp-td-name">
-                                                    <div className="shp-fund-name">{viewMode === 'scheme' ? item.scheme_name : item.amc_name}</div>
+                                                    <div className="shp-fund-name">
+                                                        {viewMode === 'scheme' ? item.scheme_name : item.amc_name}
+                                                        {viewMode === 'amc' && schemeTypeFilter === 'all' && item.has_arbitrage && (
+                                                            <span className="shp-arb-tag" title="This AMC holds this stock across both Active Equity and Arbitrage schemes">
+                                                                ⚡ Arb Incl.
+                                                            </span>
+                                                        )}
+                                                        {viewMode === 'amc' && schemeTypeFilter === 'arbitrage' && (
+                                                            <span className="shp-arb-tag" title="Showing Arbitrage scheme holdings only">
+                                                                Arbitrage
+                                                            </span>
+                                                        )}
+                                                        {viewMode === 'amc' && schemeTypeFilter === 'pure_equity' && (
+                                                            <span className="shp-equity-tag" title="Arbitrage excluded — pure fundamental equity conviction">
+                                                                Pure Eq
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     <div className="shp-fund-sub">
                                                         {viewMode === 'scheme'
                                                             ? item.amc_name
-                                                            : `${item.scheme_count} schemes | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`}
+                                                            : (
+                                                                schemeTypeFilter === 'all' && item.has_arbitrage
+                                                                    ? `${item.scheme_count} schemes (${item.equity_schemes_all} Equity, ${item.arb_schemes_all} Arb) | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
+                                                                    : `${item.scheme_count} scheme${item.scheme_count !== 1 ? 's' : ''} | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
+                                                            )
+                                                        }
                                                     </div>
                                                 </td>
                                                 {displayMonths.map((m, i) => {
