@@ -1163,19 +1163,30 @@ export default function StockHoldingsPage() {
 
                                         <table className="shp-table">
                                             <thead>
-                                                <tr>
+                                                <tr className="shp-thead-row">
                                                     <th className="shp-th" style={{ textAlign:'left', minWidth:260 }}>Category / Scheme</th>
                                                     {displayMonths.map((m, i) => (
-                                                        <th key={m} className={`shp-th shp-month-${i}`} colSpan={i === 0 ? 3 : 2}>{m}</th>
-                                                    ))}
-                                                </tr>
-                                                <tr>
-                                                    <th className="shp-th shp-th-sub" style={{ textAlign:'left' }}>Name</th>
-                                                    {displayMonths.map((m, i) => (
                                                         <React.Fragment key={m}>
-                                                            {i === 0 && <th className={`shp-th shp-th-sub shp-month-${i}`}>% AUM</th>}
-                                                            <th className={`shp-th shp-th-sub shp-month-${i}`}>Qty</th>
-                                                            <th className={`shp-th shp-th-sub shp-month-${i}`}>Change</th>
+                                                            {i === 0 && (
+                                                                <th className={`shp-th shp-th-col shp-month-${i}`}>
+                                                                    <div className="shp-th-cell-content">
+                                                                        <span className="shp-th-period-badge latest">{m} · LATEST</span>
+                                                                        <span>% AUM</span>
+                                                                    </div>
+                                                                </th>
+                                                            )}
+                                                            <th className={`shp-th shp-th-col shp-month-${i}`}>
+                                                                <div className="shp-th-cell-content">
+                                                                    <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
+                                                                    <span>QTY</span>
+                                                                </div>
+                                                            </th>
+                                                            <th className={`shp-th shp-th-col shp-th-change-hdr shp-month-${i}`}>
+                                                                <div className="shp-th-cell-content">
+                                                                    <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
+                                                                    <span>CHANGE</span>
+                                                                </div>
+                                                            </th>
                                                         </React.Fragment>
                                                     ))}
                                                 </tr>
@@ -1241,49 +1252,51 @@ export default function StockHoldingsPage() {
                                 /* ── SCHEME / AMC TABLE ── */
                                 <table className="shp-table">
                                     <thead>
-                                        <tr className="shp-thead-row-months">
-                                            <th className="shp-th shp-th-asset" rowSpan={2} onClick={() => handleSort(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}>
+                                        <tr className="shp-thead-row">
+                                            <th className="shp-th shp-th-asset sortable" onClick={() => handleSort(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}>
                                                 <div className="shp-th-sort-wrap">
                                                     <span>{viewMode === 'scheme' ? 'Mutual Fund Scheme' : 'Asset Management Company (AMC)'}</span>
                                                     {sortArrow(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}
                                                 </div>
                                             </th>
                                             {displayMonths.map((m, i) => (
-                                                <th key={m} className={`shp-th shp-month-group shp-month-${i}`} colSpan={i === 0 ? 4 : 3}>
-                                                    <div className="shp-month-th-content">
-                                                        <span className="shp-month-title">{m}</span>
-                                                        {i === 0 && <span className="shp-month-latest-tag">LATEST</span>}
-                                                    </div>
-                                                </th>
-                                            ))}
-                                        </tr>
-                                        <tr className="shp-thead-row-subs">
-                                            {displayMonths.map((m, i) => (
                                                 <React.Fragment key={m}>
                                                     {i === 0 && (
-                                                        <th className="shp-th shp-th-sub shp-month-0 sortable" onClick={() => handleSort('pnav')}>
-                                                            <div className="shp-th-sub-wrap">
-                                                                <span>% AUM</span>
-                                                                {sortArrow('pnav')}
+                                                        <th className="shp-th shp-th-col shp-month-0 sortable" onClick={() => handleSort('pnav')}>
+                                                            <div className="shp-th-cell-content">
+                                                                <span className="shp-th-period-badge latest">{m} · LATEST</span>
+                                                                <div className="shp-th-sub-wrap">
+                                                                    <span>% AUM</span>
+                                                                    {sortArrow('pnav')}
+                                                                </div>
                                                             </div>
                                                         </th>
                                                     )}
-                                                    <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`own_${i}`)}>
-                                                        <div className="shp-th-sub-wrap">
-                                                            <span>OWN %</span>
-                                                            {sortArrow(`own_${i}`)}
+                                                    <th className={`shp-th shp-th-col shp-month-${i} sortable`} onClick={() => handleSort(`own_${i}`)}>
+                                                        <div className="shp-th-cell-content">
+                                                            <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
+                                                            <div className="shp-th-sub-wrap">
+                                                                <span>OWN %</span>
+                                                                {sortArrow(`own_${i}`)}
+                                                            </div>
                                                         </div>
                                                     </th>
-                                                    <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`shares_${i}`)}>
-                                                        <div className="shp-th-sub-wrap">
-                                                            <span>QTY</span>
-                                                            {sortArrow(`shares_${i}`)}
+                                                    <th className={`shp-th shp-th-col shp-month-${i} sortable`} onClick={() => handleSort(`shares_${i}`)}>
+                                                        <div className="shp-th-cell-content">
+                                                            <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
+                                                            <div className="shp-th-sub-wrap">
+                                                                <span>QTY</span>
+                                                                {sortArrow(`shares_${i}`)}
+                                                            </div>
                                                         </div>
                                                     </th>
-                                                    <th className={`shp-th shp-th-sub shp-th-change-hdr shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
-                                                        <div className="shp-th-sub-wrap">
-                                                            <span>CHANGE{schemeTypeFilter === 'pure_equity' ? ' (EQ)' : schemeTypeFilter === 'arbitrage' ? ' (ARB)' : ''}</span>
-                                                            {sortArrow(`change_${i}`)}
+                                                    <th className={`shp-th shp-th-col shp-th-change-hdr shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
+                                                        <div className="shp-th-cell-content">
+                                                            <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
+                                                            <div className="shp-th-sub-wrap">
+                                                                <span>CHANGE{schemeTypeFilter === 'pure_equity' ? ' (EQ)' : schemeTypeFilter === 'arbitrage' ? ' (ARB)' : ''}</span>
+                                                                {sortArrow(`change_${i}`)}
+                                                            </div>
                                                         </div>
                                                     </th>
                                                 </React.Fragment>

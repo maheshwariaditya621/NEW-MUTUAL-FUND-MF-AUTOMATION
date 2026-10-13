@@ -936,56 +936,47 @@
     table-layout: auto;
 }
 
-/* ── Sticky Table Header ────────────────────────────────────── */
+/* ── Robust Single-Row Sticky Table Header ────────────────────────── */
 .shp-table thead {
     position: static;
 }
 
-/* Row 1 sticky header cells */
-.shp-thead-row-months th,
-.shp-table thead tr:first-child th {
+.shp-thead-row th {
     position: sticky;
     top: 0;
     z-index: 30;
     background: #0a1122 !important;
-    border-bottom: 1.5px solid rgba(255, 255, 255, 0.14);
-    height: 38px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.14);
+    padding: 10px 12px;
     box-sizing: border-box;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    vertical-align: middle;
 }
 
-[data-theme="light"] .shp-thead-row-months th,
-[data-theme="light"] .shp-table thead tr:first-child th {
+[data-theme="light"] .shp-thead-row th {
     background: #f8fafc !important;
-    border-bottom: 1.5px solid #cbd5e1;
-}
-
-/* Row 2 sticky sub-headers */
-.shp-thead-row-subs th,
-.shp-table thead tr:nth-child(2) th {
-    position: sticky;
-    top: 38px;
-    z-index: 29;
-    background: #0d162a !important;
-    border-bottom: 1.5px solid rgba(255, 255, 255, 0.1);
-    height: 32px;
-    box-sizing: border-box;
-}
-
-[data-theme="light"] .shp-thead-row-subs th,
-[data-theme="light"] .shp-table thead tr:nth-child(2) th {
-    background: #f1f5f9 !important;
-    border-bottom: 1.5px solid #e2e8f0;
+    border-bottom: 2px solid #cbd5e1;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .shp-th {
-    padding: 8px 12px;
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.5px;
     white-space: nowrap;
     text-align: center;
     color: var(--text-secondary, #94a3b8);
+}
+
+.shp-th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease;
+}
+
+.shp-th.sortable:hover {
+    color: #ffffff;
 }
 
 /* Asset column */
@@ -998,14 +989,13 @@
     min-width: 250px;
     max-width: 340px;
     padding-left: 18px;
-    border-right: 2px solid rgba(255, 255, 255, 0.12);
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
     vertical-align: middle;
-    cursor: pointer;
 }
 
 [data-theme="light"] .shp-th.shp-th-asset {
     background: #f8fafc !important;
-    border-right: 2px solid #e2e8f0;
+    border-right: 2px solid #e2e8f0 !important;
 }
 
 .shp-th-sort-wrap {
@@ -1014,45 +1004,61 @@
     gap: 6px;
     color: var(--text-primary, #f8fafc);
     font-size: 12px;
+    font-weight: 700;
 }
 
-/* Month headers */
-.shp-month-th-content {
+/* Stacked cell content inside single-row header */
+.shp-th-cell-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.shp-th-period-badge {
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    text-transform: uppercase;
+    line-height: 1.2;
+}
+
+.shp-th-period-badge.latest {
+    background: rgba(37, 99, 235, 0.25);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.shp-th-sub-wrap {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #f1f5f9;
 }
 
-.shp-month-title {
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.8px;
-    color: var(--text-primary, #f8fafc);
+[data-theme="light"] .shp-th-sub-wrap {
+    color: #0f172a;
 }
 
-.shp-month-latest-tag {
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.6px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: #2563eb;
-    color: #ffffff;
-    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.4);
+/* Month column vertical dividers on header */
+.shp-th.shp-th-change-hdr.shp-month-0 {
+    border-right: 2px solid rgba(56, 189, 248, 0.35) !important;
 }
 
-/* Month column dividers on header */
-.shp-th.shp-month-0 {
-    border-right: 2px solid rgba(56, 189, 248, 0.3) !important;
+.shp-th.shp-th-change-hdr.shp-month-1 {
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
 }
 
-.shp-th.shp-month-1 {
-    border-right: 2px solid rgba(255, 255, 255, 0.12) !important;
-}
-
-.shp-th.shp-month-2 {
-    border-right: 2px solid rgba(255, 255, 255, 0.12) !important;
+.shp-th.shp-th-change-hdr.shp-month-2 {
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
 }
 
 [data-theme="light"] .shp-th.shp-month-0 {
