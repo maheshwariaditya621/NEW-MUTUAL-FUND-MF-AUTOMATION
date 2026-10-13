@@ -1116,77 +1116,72 @@ export default function StockHoldingsPage() {
                             </div>
                         )}
 
-                        <div className="shp-table-wrap">
-                            <div className="shp-table-inner">
-                                {viewMode === 'category' ? (
-                                    /* ── CATEGORY-WISE VIEW ── */
-                                    <>
-                                        {/* Partial Data Warning for Category View */}
-                                        {summary.data_warning && (
-                                            <div style={{ 
-                                                marginBottom: '12px', padding: '10px 14px', 
-                                                backgroundColor: 'rgba(234, 179, 8, 0.1)', 
-                                                border: '1px solid rgba(234, 179, 8, 0.3)', 
-                                                borderRadius: '8px', color: '#d97706', 
-                                                fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' 
-                                            }}>
-                                                <span style={{ fontSize: '16px' }}>⚠️</span>
-                                                <span>
-                                                    <strong>Incomplete Data for {summary.data_warning.latest_label}:</strong> The totals below only include data from {summary.data_warning.amcs_uploaded} out of {summary.data_warning.amcs_expected} AMCs.
-                                                </span>
+                        {viewMode === 'category' && (
+                            <>
+                                {/* Partial Data Warning for Category View */}
+                                {summary.data_warning && (
+                                    <div style={{ 
+                                        marginBottom: '12px', padding: '10px 14px', 
+                                        backgroundColor: 'rgba(234, 179, 8, 0.1)', 
+                                        border: '1px solid rgba(234, 179, 8, 0.3)', 
+                                        borderRadius: '8px', color: '#d97706', 
+                                        fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' 
+                                    }}>
+                                        <span style={{ fontSize: '16px' }}>⚠️</span>
+                                        <span>
+                                            <strong>Incomplete Data for {summary.data_warning.latest_label}:</strong> The totals below only include data from {summary.data_warning.amcs_uploaded} out of {summary.data_warning.amcs_expected} AMCs.
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Summary cards strip (Broad Categories) */}
+                                <div className="shp-cat-summary-strip">
+                                    {broadGroups.map(g => {
+                                        const cls = catClass(g.category);
+                                        return (
+                                            <div key={g.category} className={`shp-cat-summary-card theme-${cls}`}>
+                                                <div className="shp-cat-card-label">{g.category}</div>
+                                                <div className="shp-cat-card-value">
+                                                    {fmt(g.totalShares)}
+                                                    {summary.data_warning && <span style={{ color: '#eab308', marginLeft: '3px' }} title="Partial Data">*</span>}
+                                                </div>
+                                                <div className="shp-cat-card-sub">{g.schemeCount} scheme{g.schemeCount !== 1 ? 's' : ''}</div>
                                             </div>
-                                        )}
+                                        );
+                                    })}
+                                </div>
 
-                                        {/* Summary cards strip (Broad Categories) */}
-                                        <div className="shp-cat-summary-strip">
-                                            {broadGroups.map(g => {
-                                                const cls = catClass(g.category);
-                                                return (
-                                                    <div key={g.category} className={`shp-cat-summary-card theme-${cls}`}>
-                                                        <div className="shp-cat-card-label">{g.category}</div>
-                                                        <div className="shp-cat-card-value">
-                                                            {fmt(g.totalShares)}
-                                                            {summary.data_warning && <span style={{ color: '#eab308', marginLeft: '3px' }} title="Partial Data">*</span>}
-                                                        </div>
-                                                        <div className="shp-cat-card-sub">{g.schemeCount} scheme{g.schemeCount !== 1 ? 's' : ''}</div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
+                                {/* Expand / Collapse all controls */}
+                                <div style={{ display:'flex', gap:'8px', marginBottom:'10px', alignItems:'center' }}>
+                                    <span style={{ fontSize:'11px', color:'var(--text-secondary)', fontWeight:600 }}>Groups:</span>
+                                    <button onClick={expandAll}  style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'5px', border:'1px solid var(--border-color)', background:'var(--bg-tertiary)', color:'var(--text-secondary)', cursor:'pointer' }}>Expand All</button>
+                                    <button onClick={collapseAll} style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'5px', border:'1px solid var(--border-color)', background:'var(--bg-tertiary)', color:'var(--text-secondary)', cursor:'pointer' }}>Collapse All</button>
+                                </div>
+                            </>
+                        )}
 
-                                        {/* Expand / Collapse all controls */}
-                                        <div style={{ display:'flex', gap:'8px', marginBottom:'10px', alignItems:'center' }}>
-                                            <span style={{ fontSize:'11px', color:'var(--text-secondary)', fontWeight:600 }}>Groups:</span>
-                                            <button onClick={expandAll}  style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'5px', border:'1px solid var(--border-color)', background:'var(--bg-tertiary)', color:'var(--text-secondary)', cursor:'pointer' }}>Expand All</button>
-                                            <button onClick={collapseAll} style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'5px', border:'1px solid var(--border-color)', background:'var(--bg-tertiary)', color:'var(--text-secondary)', cursor:'pointer' }}>Collapse All</button>
-                                        </div>
-
-                                        <table className="shp-table">
+                        <div className="shp-table-wrap">
+                            {viewMode === 'category' ? (
+                                /* ── CATEGORY-WISE VIEW ── */
+                                <table className="shp-table">
                                             <thead>
-                                                <tr className="shp-thead-row">
-                                                    <th className="shp-th" style={{ textAlign:'left', minWidth:260 }}>Category / Scheme</th>
+                                                <tr className="shp-thead-row-months">
+                                                    <th className="shp-th shp-th-asset-hdr" style={{ textAlign:'left', minWidth:260 }}>Category / Scheme</th>
+                                                    {displayMonths.map((m, i) => (
+                                                        <th key={m} className={`shp-th shp-month-group shp-month-${i}`} colSpan={i === 0 ? 3 : 2}>
+                                                            <span className="shp-month-title">{m}{i === 0 ? ' (LATEST)' : ''}</span>
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                                <tr className="shp-thead-row-subs">
+                                                    <th className="shp-th shp-th-sub shp-th-asset-sub" style={{ textAlign:'left' }}>
+                                                        <span>Classification</span>
+                                                    </th>
                                                     {displayMonths.map((m, i) => (
                                                         <React.Fragment key={m}>
-                                                            {i === 0 && (
-                                                                <th className={`shp-th shp-th-col shp-month-${i}`}>
-                                                                    <div className="shp-th-cell-content">
-                                                                        <span className="shp-th-period-badge latest">{m} · LATEST</span>
-                                                                        <span>% AUM</span>
-                                                                    </div>
-                                                                </th>
-                                                            )}
-                                                            <th className={`shp-th shp-th-col shp-month-${i}`}>
-                                                                <div className="shp-th-cell-content">
-                                                                    <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
-                                                                    <span>QTY</span>
-                                                                </div>
-                                                            </th>
-                                                            <th className={`shp-th shp-th-col shp-th-change-hdr shp-month-${i}`}>
-                                                                <div className="shp-th-cell-content">
-                                                                    <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
-                                                                    <span>CHANGE</span>
-                                                                </div>
-                                                            </th>
+                                                            {i === 0 && <th className={`shp-th shp-th-sub shp-month-${i}`}>% AUM</th>}
+                                                            <th className={`shp-th shp-th-sub shp-month-${i}`}>QTY</th>
+                                                            <th className={`shp-th shp-th-sub shp-th-change-hdr shp-month-${i}`}>CHANGE</th>
                                                         </React.Fragment>
                                                     ))}
                                                 </tr>
@@ -1247,57 +1242,46 @@ export default function StockHoldingsPage() {
                                                 })}
                                             </tbody>
                                         </table>
-                                    </>
                                 ) : (
                                 /* ── SCHEME / AMC TABLE ── */
                                 <table className="shp-table">
                                     <thead>
-                                        <tr className="shp-thead-row">
-                                            <th className="shp-th shp-th-asset sortable" onClick={() => handleSort(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}>
+                                        <tr className="shp-thead-row-months">
+                                            <th className="shp-th shp-th-asset-hdr sortable" onClick={() => handleSort(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}>
                                                 <div className="shp-th-sort-wrap">
                                                     <span>{viewMode === 'scheme' ? 'Mutual Fund Scheme' : 'Asset Management Company (AMC)'}</span>
                                                     {sortArrow(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}
                                                 </div>
                                             </th>
                                             {displayMonths.map((m, i) => (
+                                                <th key={m} className={`shp-th shp-month-group shp-month-${i}`} colSpan={i === 0 ? 4 : 3}>
+                                                    <span className="shp-month-title">{m}{i === 0 ? ' (LATEST)' : ''}</span>
+                                                </th>
+                                            ))}
+                                        </tr>
+                                        <tr className="shp-thead-row-subs">
+                                            <th className="shp-th shp-th-sub shp-th-asset-sub">
+                                                <span>Portfolio Allocation</span>
+                                            </th>
+                                            {displayMonths.map((m, i) => (
                                                 <React.Fragment key={m}>
                                                     {i === 0 && (
-                                                        <th className="shp-th shp-th-col shp-month-0 sortable" onClick={() => handleSort('pnav')}>
-                                                            <div className="shp-th-cell-content">
-                                                                <span className="shp-th-period-badge latest">{m} · LATEST</span>
-                                                                <div className="shp-th-sub-wrap">
-                                                                    <span>% AUM</span>
-                                                                    {sortArrow('pnav')}
-                                                                </div>
-                                                            </div>
+                                                        <th className="shp-th shp-th-sub shp-month-0 sortable" onClick={() => handleSort('pnav')}>
+                                                            <span>% AUM</span>
+                                                            {sortArrow('pnav')}
                                                         </th>
                                                     )}
-                                                    <th className={`shp-th shp-th-col shp-month-${i} sortable`} onClick={() => handleSort(`own_${i}`)}>
-                                                        <div className="shp-th-cell-content">
-                                                            <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
-                                                            <div className="shp-th-sub-wrap">
-                                                                <span>OWN %</span>
-                                                                {sortArrow(`own_${i}`)}
-                                                            </div>
-                                                        </div>
+                                                    <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`own_${i}`)}>
+                                                        <span>OWN %</span>
+                                                        {sortArrow(`own_${i}`)}
                                                     </th>
-                                                    <th className={`shp-th shp-th-col shp-month-${i} sortable`} onClick={() => handleSort(`shares_${i}`)}>
-                                                        <div className="shp-th-cell-content">
-                                                            <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
-                                                            <div className="shp-th-sub-wrap">
-                                                                <span>QTY</span>
-                                                                {sortArrow(`shares_${i}`)}
-                                                            </div>
-                                                        </div>
+                                                    <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`shares_${i}`)}>
+                                                        <span>QTY</span>
+                                                        {sortArrow(`shares_${i}`)}
                                                     </th>
-                                                    <th className={`shp-th shp-th-col shp-th-change-hdr shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
-                                                        <div className="shp-th-cell-content">
-                                                            <span className={`shp-th-period-badge ${i === 0 ? 'latest' : ''}`}>{m}</span>
-                                                            <div className="shp-th-sub-wrap">
-                                                                <span>CHANGE{schemeTypeFilter === 'pure_equity' ? ' (EQ)' : schemeTypeFilter === 'arbitrage' ? ' (ARB)' : ''}</span>
-                                                                {sortArrow(`change_${i}`)}
-                                                            </div>
-                                                        </div>
+                                                    <th className={`shp-th shp-th-sub shp-th-change-hdr shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
+                                                        <span>CHANGE{schemeTypeFilter === 'pure_equity' ? ' (EQ)' : schemeTypeFilter === 'arbitrage' ? ' (ARB)' : ''}</span>
+                                                        {sortArrow(`change_${i}`)}
                                                     </th>
                                                 </React.Fragment>
                                             ))}
@@ -1375,7 +1359,6 @@ export default function StockHoldingsPage() {
                                 </table>
                                 )}
                             </div>
-                        </div>
                     </>
                 )}
             </div>
