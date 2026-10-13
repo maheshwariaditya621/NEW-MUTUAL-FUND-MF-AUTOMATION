@@ -42,17 +42,17 @@ function computeDisplayMonths(endLabel, n = 3) {
 
 function ChangeCell({ change, pct }) {
     if (change == null) return <MissingData inline />;
-    if (change === 0) return <span className="shp-neutral">-</span>;
+    if (change === 0) return <span className="shp-change-neutral">—</span>;
     const isPos = change > 0;
     const isNeg = change < 0;
-    const cls = isPos ? 'shp-pos' : isNeg ? 'shp-neg' : 'shp-neutral';
+    const cls = isPos ? 'pos' : isNeg ? 'neg' : 'neutral';
     const sign = isPos ? '+' : '';
 
     return (
-        <div className="shp-change-cell">
-            <span className={cls}>{sign}{fmt(change)}</span>
+        <div className={`shp-change-cell ${cls}`}>
+            <span className="shp-change-val">{sign}{fmt(change)}</span>
             {pct != null && (
-                <span className={`shp-change-pct ${cls}`}>
+                <span className="shp-change-pct">
                     ({sign}{pct.toFixed(2)}%)
                 </span>
             )}
@@ -110,20 +110,24 @@ function MiniSparkline({ history }) {
     const min = Math.min(...rev);
     const max = Math.max(...rev);
     const range = max - min || 1;
-    const w = 44;
+    const w = 38;
     const h = 16;
-    const points = rev.map((val, idx) => {
-        const x = (idx / (rev.length - 1)) * (w - 4) + 2;
-        const y = h - 2 - ((val - min) / range) * (h - 4);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
+    const pointsArr = rev.map((val, idx) => {
+        const x = (idx / (rev.length - 1)) * (w - 8) + 4;
+        const y = h - 3 - ((val - min) / range) * (h - 6);
+        return [x, y];
+    });
+    const pointsStr = pointsArr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const lastPoint = pointsArr[pointsArr.length - 1];
 
-    const isGrowing = rev[rev.length - 1] >= rev[0];
-    const stroke = isGrowing ? '#10b981' : '#f87171';
+    const isGrowing = rev[rev.length - 1] > rev[0];
+    const isFlat = rev[rev.length - 1] === rev[0];
+    const stroke = isGrowing ? '#10b981' : isFlat ? '#94a3b8' : '#f43f5e';
 
     return (
         <svg className="shp-sparkline" width={w} height={h} viewBox={`0 0 ${w} ${h}`} title="Holding trend trajectory">
-            <polyline fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" points={points} />
+            <polyline fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" points={pointsStr} />
+            <circle cx={lastPoint[0].toFixed(1)} cy={lastPoint[1].toFixed(1)} r="2" fill={stroke} />
         </svg>
     );
 }
@@ -824,67 +828,132 @@ export default function StockHoldingsPage() {
                             </div>
                         )}
 
-                        <div className="shp-table-wrap">
-                            <div className="shp-controls-row shp-controls-header">
-                                <div className="shp-view-toggle">
-                                    <button className={`shp-toggle-btn ${viewMode === 'scheme' ? 'active' : ''}`} onClick={() => setViewMode('scheme')}>Scheme-wise</button>
-                                    <button className={`shp-toggle-btn ${viewMode === 'amc' ? 'active' : ''}`} onClick={() => setViewMode('amc')}>AMC-wise</button>
-                                    <button className={`shp-toggle-btn ${viewMode === 'category' ? 'active' : ''}`} onClick={() => setViewMode('category')}>Category-wise</button>
+                        {/* ── Terminal Controls Panel (Deck 1 & Deck 2) ── */}
+                        <div className="shp-terminal-toolbar-card">
+                            <div className="shp-toolbar-deck-1">
+                                <div className="shp-toolbar-left-group">
+                                    <div className="shp-segmented-control">
+                                        <button
+                                            type="button"
+                                            className={`shp-segment-btn ${viewMode === 'scheme' ? 'active' : ''}`}
+                                            onClick={() => setViewMode('scheme')}
+                                        >
+                                            <span>Scheme-wise</span>
+                                            <span className="shp-segment-badge">{schemesToRender.length}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-segment-btn ${viewMode === 'amc' ? 'active' : ''}`}
+                                            onClick={() => setViewMode('amc')}
+                                        >
+                                            <span>AMC-wise</span>
+                                            <span className="shp-segment-badge">{amcToRender.length}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-segment-btn ${viewMode === 'category' ? 'active' : ''}`}
+                                            onClick={() => setViewMode('category')}
+                                        >
+                                            <span>Category-wise</span>
+                                        </button>
+                                    </div>
+                                    <div className="shp-flow-filter-group">
+                                        <button
+                                            type="button"
+                                            className={`shp-flow-btn ${!filterParam ? 'active' : ''}`}
+                                            onClick={() => { searchParams.delete('filter'); setSearchParams(searchParams); }}
+                                        >
+                                            All
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-flow-btn entrants ${filterParam === 'entrants' ? 'active' : ''}`}
+                                            onClick={() => { searchParams.set('filter', 'entrants'); setSearchParams(searchParams); }}
+                                            title="New entrants that added this stock"
+                                        >
+                                            ✦ Entrants
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-flow-btn exits ${filterParam === 'exits' ? 'active' : ''}`}
+                                            onClick={() => { searchParams.set('filter', 'exits'); setSearchParams(searchParams); }}
+                                            title="Exited funds that sold out"
+                                        >
+                                            ✕ Exits
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="shp-filter-toggle" style={{ display: 'flex', gap: '4px' }}>
-                                    <button className={`shp-toggle-btn ${!filterParam ? 'active' : ''}`} onClick={() => { searchParams.delete('filter'); setSearchParams(searchParams); }}>All</button>
-                                    <button className={`shp-toggle-btn ${filterParam === 'entrants' ? 'active' : ''}`} onClick={() => { searchParams.set('filter', 'entrants'); setSearchParams(searchParams); }}>Entrants</button>
-                                    <button className={`shp-toggle-btn ${filterParam === 'exits' ? 'active' : ''}`} onClick={() => { searchParams.set('filter', 'exits'); setSearchParams(searchParams); }}>Exits</button>
+                                <div className="shp-toolbar-right-group">
+                                    <div className="shp-fund-type-pills">
+                                        <button
+                                            type="button"
+                                            className={`shp-type-pill ${schemeTypeFilter === 'all' ? 'active' : ''}`}
+                                            onClick={() => setSchemeTypeFilter('all')}
+                                            title="Show all funds (Pure Equity + Arbitrage combined)"
+                                        >
+                                            All Funds <span className="shp-pill-count">{schemeTypeCounts.all}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-type-pill pure-eq ${schemeTypeFilter === 'pure_equity' ? 'active' : ''}`}
+                                            onClick={() => setSchemeTypeFilter('pure_equity')}
+                                            title="Exclude Arbitrage schemes — shows pure fundamental equity conviction"
+                                        >
+                                            Pure Equity <span className="shp-pill-count">{schemeTypeCounts.pureEquity}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-type-pill arb ${schemeTypeFilter === 'arbitrage' ? 'active' : ''}`}
+                                            onClick={() => setSchemeTypeFilter('arbitrage')}
+                                            title="Arbitrage schemes only — hedged cash-futures trading flow"
+                                        >
+                                            Arbitrage <span className="shp-pill-count">{schemeTypeCounts.arbitrage}</span>
+                                        </button>
+                                    </div>
+                                    <div className="shp-aum-pill-toggle">
+                                        <button
+                                            type="button"
+                                            className={`shp-aum-btn ${aumViewMode === 'total' ? 'active' : ''}`}
+                                            onClick={() => setAumViewMode('total')}
+                                        >
+                                            Total AUM
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`shp-aum-btn ${aumViewMode === 'equity' ? 'active' : ''}`}
+                                            onClick={() => setAumViewMode('equity')}
+                                        >
+                                            EQ AUM
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="shp-scheme-type-toggle">
-                                    <button
-                                        type="button"
-                                        className={`shp-scheme-type-btn ${schemeTypeFilter === 'all' ? 'active' : ''}`}
-                                        onClick={() => setSchemeTypeFilter('all')}
-                                        title="Show all funds (Pure Equity + Arbitrage combined)"
-                                    >
-                                        All Funds
-                                        <span className="shp-scheme-type-badge">{schemeTypeCounts.all}</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className={`shp-scheme-type-btn pure-equity ${schemeTypeFilter === 'pure_equity' ? 'active' : ''}`}
-                                        onClick={() => setSchemeTypeFilter('pure_equity')}
-                                        title="Exclude Arbitrage schemes — shows pure fundamental equity conviction"
-                                    >
-                                        Pure Equity
-                                        <span className="shp-scheme-type-badge">{schemeTypeCounts.pureEquity}</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className={`shp-scheme-type-btn arbitrage ${schemeTypeFilter === 'arbitrage' ? 'active' : ''}`}
-                                        onClick={() => setSchemeTypeFilter('arbitrage')}
-                                        title="Arbitrage schemes only — hedged cash-futures trading flow"
-                                    >
-                                        Arbitrage Only
-                                        <span className="shp-scheme-type-badge">{schemeTypeCounts.arbitrage}</span>
-                                    </button>
+                            </div>
+                            <div className="shp-toolbar-deck-2">
+                                <div className="shp-search-container">
+                                    <span className="shp-search-icon">🔍</span>
+                                    <input
+                                        type="text"
+                                        className="shp-terminal-search"
+                                        placeholder={`Filter ${viewMode === 'scheme' ? schemesToRender.length : amcToRender.length} ${viewMode === 'scheme' ? 'schemes' : 'AMCs'} by name...`}
+                                        value={filterText}
+                                        onChange={(e) => setFilterText(e.target.value)}
+                                    />
+                                    {filterText && (
+                                        <button type="button" className="shp-clear-btn" onClick={() => setFilterText('')}>✕</button>
+                                    )}
                                 </div>
-                                <div className="shp-aum-toggle" style={{ display: 'flex', background: 'var(--bg-tertiary)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '500', marginLeft: 'auto' }}>
-                                    <button
-                                        onClick={() => setAumViewMode('total')}
-                                        style={{ padding: '4px 8px', borderRadius: '4px', border: 'none', background: aumViewMode === 'total' ? 'var(--accent-primary)' : 'transparent', color: aumViewMode === 'total' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s' }}
-                                    >
-                                        Total AUM
-                                    </button>
-                                    <button
-                                        onClick={() => setAumViewMode('equity')}
-                                        style={{ padding: '4px 8px', borderRadius: '4px', border: 'none', background: aumViewMode === 'equity' ? 'var(--accent-primary)' : 'transparent', color: aumViewMode === 'equity' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s' }}
-                                    >
-                                        Equity AUM
-                                    </button>
-                                </div>
-                                <div className="shp-controls-right" style={{ marginLeft: '12px' }}>
-                                    <select className="shp-picker-select" value={selectedMonth || ''} onChange={(e) => handleMonthChange(e.target.value)}>
-                                        <option value="">Latest</option>
-                                        {allAvailableMonths.map(m => <option key={m} value={m}>{m}</option>)}
-                                    </select>
-                                    <input type="text" className="shp-search-input" placeholder="Filter..." value={filterText} onChange={(e) => setFilterText(e.target.value)} />
+                                <div className="shp-toolbar-actions-group">
+                                    <div className="shp-picker-wrapper">
+                                        <span className="shp-picker-icon">📅</span>
+                                        <select
+                                            className="shp-terminal-select"
+                                            value={selectedMonth || ''}
+                                            onChange={(e) => handleMonthChange(e.target.value)}
+                                        >
+                                            <option value="">Latest Period</option>
+                                            {allAvailableMonths.map(m => <option key={m} value={m}>{m}</option>)}
+                                        </select>
+                                    </div>
                                     <ExportButton
                                         getData={() => {
                                             if (viewMode === 'scheme') {
@@ -1025,27 +1094,29 @@ export default function StockHoldingsPage() {
                                     />
                                 </div>
                             </div>
+                        </div>
 
-                            {/* ── Active Filter Notification Banner ── */}
-                            {schemeTypeFilter !== 'all' && (
-                                <div className="shp-filter-active-banner">
-                                    <span>
-                                        {schemeTypeFilter === 'pure_equity' ? (
-                                            <>
-                                                <strong style={{ color: '#10b981' }}>Pure Equity View:</strong> Arbitrage funds are excluded to show genuine institutional fundamental conviction.
-                                            </>
-                                        ) : (
-                                            <>
-                                                <strong style={{ color: '#f59e0b' }}>Arbitrage Only View:</strong> Showing hedged cash-futures arbitrage desk positions and spread rollovers only.
-                                            </>
-                                        )}
-                                    </span>
-                                    <button type="button" onClick={() => setSchemeTypeFilter('all')} className="shp-filter-clear-btn">
-                                        Reset to All Funds
-                                    </button>
-                                </div>
-                            )}
+                        {/* ── Active Filter Notification Banner ── */}
+                        {schemeTypeFilter !== 'all' && (
+                            <div className="shp-filter-active-banner">
+                                <span>
+                                    {schemeTypeFilter === 'pure_equity' ? (
+                                        <>
+                                            <strong style={{ color: '#10b981' }}>Pure Equity View:</strong> Arbitrage funds are excluded to show genuine institutional fundamental conviction.
+                                        </>
+                                    ) : (
+                                        <>
+                                            <strong style={{ color: '#f59e0b' }}>Arbitrage Only View:</strong> Showing hedged cash-futures arbitrage desk positions and spread rollovers only.
+                                        </>
+                                    )}
+                                </span>
+                                <button type="button" onClick={() => setSchemeTypeFilter('all')} className="shp-filter-clear-btn">
+                                    Reset to All Funds
+                                </button>
+                            </div>
+                        )}
 
+                        <div className="shp-table-wrap">
                             <div className="shp-table-inner">
                                 {viewMode === 'category' ? (
                                     /* ── CATEGORY-WISE VIEW ── */
@@ -1170,32 +1241,50 @@ export default function StockHoldingsPage() {
                                 /* ── SCHEME / AMC TABLE ── */
                                 <table className="shp-table">
                                     <thead>
-                                        <tr>
-                                            <th className="shp-th" rowSpan={2} onClick={() => handleSort(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}>Name{sortArrow(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}</th>
-                                            {displayMonths.map((m, i) => <th key={m} className={`shp-th shp-month-${i}`} colSpan={i === 0 ? 4 : 3}>{m}</th>)}
+                                        <tr className="shp-thead-row-months">
+                                            <th className="shp-th shp-th-asset" rowSpan={2} onClick={() => handleSort(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}>
+                                                <div className="shp-th-sort-wrap">
+                                                    <span>{viewMode === 'scheme' ? 'Mutual Fund Scheme' : 'Asset Management Company (AMC)'}</span>
+                                                    {sortArrow(viewMode === 'scheme' ? 'scheme_name' : 'amc_name')}
+                                                </div>
+                                            </th>
+                                            {displayMonths.map((m, i) => (
+                                                <th key={m} className={`shp-th shp-month-group shp-month-${i}`} colSpan={i === 0 ? 4 : 3}>
+                                                    <div className="shp-month-th-content">
+                                                        <span className="shp-month-title">{m}</span>
+                                                        {i === 0 && <span className="shp-month-latest-tag">LATEST</span>}
+                                                    </div>
+                                                </th>
+                                            ))}
                                         </tr>
-                                        <tr>
+                                        <tr className="shp-thead-row-subs">
                                             {displayMonths.map((m, i) => (
                                                 <React.Fragment key={m}>
                                                     {i === 0 && (
                                                         <th className="shp-th shp-th-sub shp-month-0 sortable" onClick={() => handleSort('pnav')}>
-                                                            % AUM {sortArrow('pnav')}
+                                                            <div className="shp-th-sub-wrap">
+                                                                <span>% AUM</span>
+                                                                {sortArrow('pnav')}
+                                                            </div>
                                                         </th>
                                                     )}
                                                     <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`own_${i}`)}>
-                                                        Own % {sortArrow(`own_${i}`)}
-                                                        <div className="shp-mcap-info" style={{ display: 'inline-flex', marginLeft: '4px' }}>
-                                                            <span className="shp-mcap-info-icon" style={{ width: '12px', height: '12px', fontSize: '9px' }}>i</span>
-                                                            <span className="shp-mcap-tooltip" style={{ textTransform: 'none', fontWeight: '400' }}>
-                                                                (Shares Held / Total Outstanding Shares) * 100
-                                                            </span>
+                                                        <div className="shp-th-sub-wrap">
+                                                            <span>OWN %</span>
+                                                            {sortArrow(`own_${i}`)}
                                                         </div>
                                                     </th>
                                                     <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`shares_${i}`)}>
-                                                        Qty {sortArrow(`shares_${i}`)}
+                                                        <div className="shp-th-sub-wrap">
+                                                            <span>QTY</span>
+                                                            {sortArrow(`shares_${i}`)}
+                                                        </div>
                                                     </th>
-                                                    <th className={`shp-th shp-th-sub shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
-                                                        Change{schemeTypeFilter === 'pure_equity' ? ' (Eq)' : schemeTypeFilter === 'arbitrage' ? ' (Arb)' : ''} {sortArrow(`change_${i}`)}
+                                                    <th className={`shp-th shp-th-sub shp-th-change-hdr shp-month-${i} sortable`} onClick={() => handleSort(`change_${i}`)}>
+                                                        <div className="shp-th-sub-wrap">
+                                                            <span>CHANGE{schemeTypeFilter === 'pure_equity' ? ' (EQ)' : schemeTypeFilter === 'arbitrage' ? ' (ARB)' : ''}</span>
+                                                            {sortArrow(`change_${i}`)}
+                                                        </div>
                                                     </th>
                                                 </React.Fragment>
                                             ))}
@@ -1253,7 +1342,7 @@ export default function StockHoldingsPage() {
                                                         return (
                                                             <React.Fragment key={m}>
                                                                 {i === 0 && <td className="shp-td shp-num shp-month-0">{fmtPct(history?.percent_to_aum) || <MissingData />}</td>}
-                                                                <td className={`shp-td shp-num shp-month-${i}`} style={{ color: '#10b981', fontWeight: '600' }}>
+                                                                <td className={`shp-td shp-num shp-month-${i} shp-own-cell`}>
                                                                     {fmtPct(history?.ownership_percent) || <MissingData />}
                                                                 </td>
                                                                 <td className={`shp-td shp-num shp-month-${i}`}>

@@ -1,6 +1,6 @@
-import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { LogOut, User, X, ChevronDown, Lock } from 'lucide-react';
+import { LogOut, User, X, ChevronDown, Lock, TrendingUp, PieChart, BarChart3, Bookmark, Bell, Layers } from 'lucide-react';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { WatchlistProvider } from './contexts/WatchlistContext';
@@ -192,15 +192,44 @@ const Header = () => {
 
             {isAuthenticated && (
               <nav className="nav">
-                {hasPermission('view_stocks') && <Link to="/stocks" className="nav-link">Stock Holdings</Link>}
-                {hasPermission('view_portfolio') && <Link to="/schemes" className="nav-link">Scheme Portfolio</Link>}
-                {hasPermission('view_insights') && <Link to="/insights" className="nav-link">Insights</Link>}
-                {hasPermission('view_watchlist') && <Link to="/watchlist" className="nav-link"><span className="wl-icon">🔖</span> Watchlist</Link>}
-                {hasPermission('view_announcements') && <Link to="/announcements" className="nav-link"><span className="wl-icon">📢</span> Announcements</Link>}
+                {hasPermission('view_stocks') && (
+                  <NavLink to="/stocks" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                    <TrendingUp size={14} className="nav-icon" />
+                    <span>Stock Holdings</span>
+                  </NavLink>
+                )}
+                {hasPermission('view_portfolio') && (
+                  <NavLink to="/schemes" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                    <PieChart size={14} className="nav-icon" />
+                    <span>Scheme Portfolio</span>
+                  </NavLink>
+                )}
+                {hasPermission('view_insights') && (
+                  <NavLink to="/insights" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                    <BarChart3 size={14} className="nav-icon" />
+                    <span>Insights</span>
+                  </NavLink>
+                )}
+                {hasPermission('view_watchlist') && (
+                  <NavLink to="/watchlist" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                    <Bookmark size={14} className="nav-icon" />
+                    <span>Watchlist</span>
+                  </NavLink>
+                )}
+                {hasPermission('view_announcements') && (
+                  <NavLink to="/announcements" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                    <Bell size={14} className="nav-icon" />
+                    <span>Announcements</span>
+                  </NavLink>
+                )}
                 
                 {hasPermission('view_tools') && (
                   <div className="nav-dropdown">
-                    <span className="nav-link dropdown-toggle">Tools ▾</span>
+                    <span className="nav-link dropdown-toggle">
+                      <Layers size={14} className="nav-icon" />
+                      <span>Tools</span>
+                      <ChevronDown size={12} className="dropdown-chevron" />
+                    </span>
                     <div className="dropdown-menu">
                       <Link to="/funds-explorer" className="dropdown-item">Funds Explorer</Link>
                       <Link to="/sector-exposure" className="dropdown-item">Fund Sector Exposure</Link>

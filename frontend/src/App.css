@@ -118,57 +118,93 @@
 .nav {
   display: flex;
   align-items: center;
-  gap: 4px;
-  background: rgba(148, 163, 184, 0.08);
-  padding: 3px;
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
+  gap: 3px;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 3px 4px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
 }
 
-[data-theme="dark"] .nav {
-  background: rgba(15, 23, 42, 0.5);
-  border-color: rgba(255, 255, 255, 0.06);
+[data-theme="light"] .nav {
+  background: rgba(241, 245, 249, 0.85);
+  border-color: rgba(203, 213, 225, 0.7);
 }
 
 .nav-link {
-  color: var(--text-secondary);
+  color: #94a3b8;
   font-weight: 600;
-  font-size: 0.85rem;
-  padding: 6px 13px;
-  border-radius: 7px;
-  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 0.84rem;
+  letter-spacing: -0.01em;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 6px;
   text-decoration: none;
+  border: 1px solid transparent;
+  outline: none;
+  user-select: none;
+}
+
+[data-theme="light"] .nav-link {
+  color: #64748b;
+}
+
+.nav-link:focus,
+.nav-link:focus-visible {
+  outline: none;
+}
+
+.nav-icon {
+  opacity: 0.75;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  flex-shrink: 0;
 }
 
 .nav-link:hover {
-  color: var(--text-primary);
-  background-color: var(--bg-card);
+  color: #f1f5f9;
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
+[data-theme="light"] .nav-link:hover {
+  color: #0f172a;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.nav-link:hover .nav-icon {
+  opacity: 1;
+}
+
+/* Active Nav State - High Precision Institutional Pill */
 .nav-link.active {
-  color: #ffffff;
-  background-color: var(--accent-primary);
-  box-shadow: 0 1px 5px rgba(37, 99, 235, 0.35);
+  color: #ffffff !important;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.25) 0%, rgba(59, 130, 246, 0.18) 100%) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  box-shadow: 0 1px 8px rgba(37, 99, 235, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
 }
 
-[data-theme="dark"] .nav-link.active {
-  color: #ffffff;
-  background-color: #2563eb;
-  box-shadow: 0 1px 8px rgba(37, 99, 235, 0.45);
+[data-theme="light"] .nav-link.active {
+  color: #1d4ed8 !important;
+  background: #ffffff !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(37, 99, 235, 0.08) !important;
 }
 
-/* Remove the underline effect for a cleaner look */
-.nav-link::after {
-  display: none;
+.nav-link.active .nav-icon {
+  color: #60a5fa;
+  opacity: 1;
 }
 
-/* Watchlist Special Styling */
-.nav-link .wl-icon {
-  font-size: 0.95rem;
+[data-theme="light"] .nav-link.active .nav-icon {
+  color: #2563eb;
+}
+
+.dropdown-chevron {
+  opacity: 0.6;
+  margin-left: 2px;
 }
 
 /* Dropdown Tool Customization */
