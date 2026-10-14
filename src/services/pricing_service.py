@@ -24,6 +24,7 @@ class PricingService:
         self.CACHE_TTL_SECONDS = 30  
         self.LOG_THROTTLE_SECONDS = 60 # Throttle repetitive error logs
         self._last_error_time = 0
+        self._login_retry_after = 0
         
     def _is_configured(self) -> bool:
         return all([self.api_key, self.client_code, self.password, self.totp_secret])
@@ -35,11 +36,17 @@ class PricingService:
         if not self._is_configured():
             logger.warning("Angel One credentials incomplete. Pricing service disabled.")
             return False
+
+        if time.time() < self._login_retry_after:
+            return False
             
         with self._login_lock:
             # Double-check if another thread already logged in while we were waiting for the lock
             if self.smartApi and self.feed_token:
                 return True
+
+            if time.time() < self._login_retry_after:
+                return False
 
             try:
                 logger.info("Initiating Angel One login...")
@@ -58,9 +65,11 @@ class PricingService:
                 else:
                     msg = data.get('message') if data else "No response data"
                     logger.error(f"Angel One login failed: {msg}")
+                    self._login_retry_after = time.time() + 60
                     return False
                     
             except Exception as e:
+                self._login_retry_after = time.time() + 60
                 if time.time() - self._last_error_time > self.LOG_THROTTLE_SECONDS:
                     logger.error(f"Error connecting to Angel One: {e}")
                     self._last_error_time = time.time()

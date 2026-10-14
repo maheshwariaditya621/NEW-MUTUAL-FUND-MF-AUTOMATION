@@ -20,18 +20,45 @@ export default function InsightsPage() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [progress, setProgress] = useState(0);
+    const [progressStage, setProgressStage] = useState('Initializing market radar...');
 
     const fetchActivity = async () => {
         setLoading(true);
         setError(null);
+        setProgress(15);
+        setProgressStage('Scanning mutual fund portfolio snapshots...');
+
+        const t1 = setTimeout(() => {
+            setProgress(42);
+            setProgressStage('Analyzing month-over-month volume shifts...');
+        }, 150);
+
+        const t2 = setTimeout(() => {
+            setProgress(75);
+            setProgressStage('Aggregating institutional conviction & net flows...');
+        }, 450);
+
+        const t3 = setTimeout(() => {
+            setProgress(92);
+            setProgressStage('Ranking top institutional movers...');
+        }, 850);
+
         try {
             const result = await getStockActivity(activityType, mcapCategory);
+            setProgress(100);
+            setProgressStage('Institutional analytics ready');
             setData(result);
         } catch (err) {
             setError("Failed to fetch analytical insights. Please try again later.");
             console.error(err);
         } finally {
-            setLoading(false);
+            clearTimeout(t1);
+            clearTimeout(t2);
+            clearTimeout(t3);
+            setTimeout(() => {
+                setLoading(false);
+            }, 180);
         }
     };
 
@@ -257,8 +284,8 @@ export default function InsightsPage() {
                                     company_name: item.company_name,
                                     isin: item.isin,
                                     sector: item.sector,
-                                    // market_cap is already in Crores from the API (Pydantic field: "Market Cap in INR Crores")
-                                    market_cap_cr: item.market_cap != null ? Number(item.market_cap) : null,
+                                    // market_cap is stored in INR base units, convert to Crores for export
+                                    market_cap_cr: item.market_cap != null ? Number(item.market_cap) / 10000000 : null,
                                     classification: item.classification,
                                     period: data.month,
                                     prev_period: data.prev_month,
@@ -317,7 +344,28 @@ export default function InsightsPage() {
             </div>
 
             {/* ── Data Views ── */}
-            {loading && <Loading message="Calculating market movements..." />}
+            {loading && (
+                <div className="ins-loading-container">
+                    <div className="ins-progress-card">
+                        <div className="ins-progress-header">
+                            <div className="ins-progress-title-row">
+                                <span className="ins-radar-pulse"></span>
+                                <span className="ins-progress-stage">{progressStage}</span>
+                            </div>
+                            <span className="ins-progress-pct">{Math.round(progress)}%</span>
+                        </div>
+                        <div className="ins-progress-track">
+                            <div 
+                                className="ins-progress-fill" 
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                        <div className="ins-progress-sub">
+                            Scanning portfolio positions across 40+ AMCs & thousands of mutual fund schemes...
+                        </div>
+                    </div>
+                </div>
+            )}
             {error && <ErrorMessage message={error} onRetry={fetchActivity} />}
 
             {data && !loading && !error && (

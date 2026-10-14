@@ -2,11 +2,12 @@
 Analytical insights for mutual fund portfolio data.
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
+from typing import List, Optional, Dict, Tuple
+from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from psycopg2.extensions import cursor
 from decimal import Decimal
 from datetime import date
+import time
 
 from src.api.models.insights import StockActivityResponse, StockActivityItem
 from src.api.dependencies import get_db_cursor, get_current_user
@@ -14,12 +15,17 @@ from src.config import logger
 
 router = APIRouter()
 
+# In-memory cache for fast tab-switching (TTL: 5 minutes)
+_insights_cache: Dict[Tuple, Tuple[float, StockActivityResponse]] = {}
+INSIGHTS_CACHE_TTL = 300
+
 
 @router.get("/stock-activity", response_model=StockActivityResponse)
 async def get_stock_activity(
     activity_type: str = Query("buying", pattern="^(buying|selling|entrants|exits)$", description="Type of activity to fetch"),
     mcap_category: Optional[str] = Query(None, description="Filter by market cap (Large Cap, Mid Cap, Small Cap)"),
     limit: int = Query(250, ge=1, le=1000, description="Number of top stocks to return"),
+    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor),
     current_user: dict = Depends(get_current_user)
 ):
@@ -29,6 +35,13 @@ async def get_stock_activity(
     Compares the latest available period with the previous month's data.
     """
     try:
+        cache_key = (activity_type, mcap_category, limit)
+        now = time.time()
+        if cache_key in _insights_cache:
+            cached_time, cached_res = _insights_cache[cache_key]
+            if now - cached_time < INSIGHTS_CACHE_TTL:
+                return cached_res
+
         # 1. Get the latest periods and check coverage
         from src.api.utils.data_coverage import get_period_coverage, get_data_warning
         coverage = get_period_coverage(cur)
@@ -181,12 +194,11 @@ async def get_stock_activity(
         
         rows = cur.fetchall()
         
-        # PREFETCH LIVE PRICES CONCURRENTLY to avoid 30sec+ loads
+        # PREFETCH LIVE PRICES in background to avoid blocking response
         unique_isins = list(set([row[0] for row in rows if row[0]]))
-        if unique_isins:
+        if unique_isins and background_tasks:
             from src.services.pricing_service import pricing_service
-            # This fetches all required LTPs in parallel (max 6 workers) and seeds the cache
-            pricing_service.prefetch_ltps(unique_isins)
+            background_tasks.add_task(pricing_service.prefetch_ltps, unique_isins)
         
         results = []
         for row in rows:
@@ -195,7 +207,7 @@ async def get_stock_activity(
             shares_out = row[12]
             
             from src.services.pricing_service import pricing_service
-            live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out)
+            live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out, sync=False)
             
             
             net_qty = int(row[8])
@@ -231,7 +243,7 @@ async def get_stock_activity(
                 holding_change_percent=holding_change
             ))
             
-        return StockActivityResponse(
+        response = StockActivityResponse(
             month=month_label,
             prev_month=prev_month_label,
             results=results,
@@ -239,6 +251,8 @@ async def get_stock_activity(
             activity_type=activity_type,
             data_warning=data_warning
         )
+        _insights_cache[cache_key] = (time.time(), response)
+        return response
 
     except Exception as e:
         logger.error(f"Failed to fetch stock activity: {e}")
