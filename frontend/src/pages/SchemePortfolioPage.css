@@ -309,70 +309,7 @@
     text-align: center;
 }
 
-/* ── Month group tints — header cells ────────────────────────── */
-.shp-th.shp-month-0 {
-    background: var(--shp-m0-bg) !important;
-}
 
-.shp-th.shp-month-1 {
-    background: var(--shp-m1-bg) !important;
-}
-
-.shp-th.shp-month-2 {
-    background: var(--shp-m2-bg) !important;
-}
-
-.shp-th.shp-th-sub.shp-month-0 {
-    background: var(--shp-m0-sub-bg) !important;
-}
-
-.shp-th.shp-th-sub.shp-month-1 {
-    background: var(--shp-m1-sub-bg) !important;
-}
-
-.shp-th.shp-th-sub.shp-month-2 {
-    background: var(--shp-m2-sub-bg) !important;
-}
-
-/* ── Month group borders — bold at group start, faint inside ─── */
-
-/* Group row-1 header spans — always the bold left border */
-.shp-th.shp-th-month-group.shp-month-0 {
-    border-left: 3.5px solid var(--shp-m0-border) !important;
-}
-
-.shp-th.shp-th-month-group.shp-month-1 {
-    border-left: 3.5px solid var(--shp-m1-border) !important;
-}
-
-.shp-th.shp-th-month-group.shp-month-2 {
-    border-left: 3.5px solid var(--shp-m2-border) !important;
-}
-
-/* Sub-header — faint inside, bold only at group start */
-.shp-th.shp-th-sub.shp-month-0 {
-    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-}
-
-.shp-th.shp-th-sub.shp-month-1 {
-    border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-}
-
-.shp-th.shp-th-sub.shp-month-2 {
-    border-left: 1px solid rgba(255, 255, 255, 0.06) !important;
-}
-
-.shp-th.shp-th-sub.shp-group-start.shp-month-0 {
-    border-left: 3.5px solid var(--shp-m0-border) !important;
-}
-
-.shp-th.shp-th-sub.shp-group-start.shp-month-1 {
-    border-left: 3.5px solid var(--shp-m1-border) !important;
-}
-
-.shp-th.shp-th-sub.shp-group-start.shp-month-2 {
-    border-left: 3.5px solid var(--shp-m2-border) !important;
-}
 
 /* ── Body Rows ────────────────────────────────────────────────── */
 .shp-td {
@@ -709,10 +646,10 @@
 .shp-thead-row-months th {
     position: sticky;
     top: 0;
-    height: 48px;
-    min-height: 48px;
+    height: 46px;
+    min-height: 46px;
     box-sizing: border-box;
-    padding: 6px 12px;
+    padding: 4px 12px;
     vertical-align: middle;
     z-index: 50;
     background: #090e1c !important;
@@ -734,7 +671,7 @@
 
 .shp-thead-row-subs th {
     position: sticky;
-    top: 48px;
+    top: 46px;
     height: 34px;
     min-height: 34px;
     box-sizing: border-box;
@@ -765,8 +702,8 @@
     position: sticky;
     left: 0;
     top: 0;
-    height: 48px;
-    min-height: 48px;
+    height: 46px;
+    min-height: 46px;
     box-sizing: border-box;
     z-index: 60;
     background: #090e1c !important;
@@ -785,7 +722,7 @@
 .shp-th.shp-th-asset-sub {
     position: sticky;
     left: 0;
-    top: 48px;
+    top: 46px;
     height: 34px;
     min-height: 34px;
     box-sizing: border-box;
