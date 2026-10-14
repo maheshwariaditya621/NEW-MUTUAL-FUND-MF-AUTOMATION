@@ -112,25 +112,21 @@ export default function SchemePortfolioPage() {
         if (schemeIdParam) handleSelectSchemeById(schemeIdParam, val);
     };
 
-    // Bulk polling for live prices of visible holdings
+    // One-time bulk fetch for any holding missing EOD price
     useEffect(() => {
         if (!portfolio?.holdings?.length) return;
 
-        const pollPrices = async () => {
-            const isins = portfolio.holdings.map(h => h.isin).filter(Boolean);
-            if (isins.length === 0) return;
+        const missingIsins = portfolio.holdings
+            .filter(h => !h.live_price && !h.close_price && h.isin)
+            .map(h => h.isin);
 
-            try {
-                const priceMap = await getBulkPrices(isins);
+        if (missingIsins.length === 0) return;
+
+        getBulkPrices(missingIsins)
+            .then(priceMap => {
                 setLivePrices(prev => ({ ...prev, ...priceMap }));
-            } catch (err) {
-                console.error("Failed to fetch bulk prices:", err);
-            }
-        };
-
-        pollPrices(); // Initial fetch
-        const interval = setInterval(pollPrices, 30000); // Poll every 30s
-        return () => clearInterval(interval);
+            })
+            .catch(err => console.error("Failed to fetch bulk prices:", err));
     }, [portfolio?.holdings]);
 
     const handleSort = (key) => {
@@ -424,13 +420,13 @@ export default function SchemePortfolioPage() {
                                                     <td className="shp-td shp-td-name">
                                                         <div className="shp-fund-name" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                             {holding.company_name}
-                                                            {(holding.live_price || livePrices[holding.isin]) && (
-                                                                <span className="rv-live-label">
-                                                                    ₹ {formatNumber(holding.live_price || livePrices[holding.isin])}
+                                                            {(holding.close_price || holding.live_price || livePrices[holding.isin]) && (
+                                                                <span className="rv-live-label" title={holding.price_date ? `NSE Bhavcopy EOD Close as of ${holding.price_date}` : 'NSE Bhavcopy EOD Close'}>
+                                                                    ₹ {formatNumber(holding.close_price || holding.live_price || livePrices[holding.isin])}
                                                                     <span className="shp-mcap-info">
-                                                                        <span className="rv-info-icon-small">i</span>
+                                                                        <span className="rv-info-icon-small" style={{ fontSize: '9px', fontWeight: '800' }}>EOD</span>
                                                                         <span className="shp-mcap-tooltip" style={{ fontSize: '10px' }}>
-                                                                            Live market price (LTP). Updates every 30s.
+                                                                            End of Day (EOD) Closing Price{holding.price_date ? ` (${holding.price_date})` : ''} via NSE Bhavcopy
                                                                         </span>
                                                                     </span>
                                                                 </span>

@@ -132,6 +132,23 @@ function MiniSparkline({ history }) {
     );
 }
 
+function formatEodDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+        const parts = String(dateStr).split('-');
+        if (parts.length === 3) {
+            const [y, m, d] = parts;
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const mi = parseInt(m, 10) - 1;
+            return `${parseInt(d, 10)} ${months[mi] || m} ${y}`;
+        }
+        const dt = new Date(dateStr);
+        return isNaN(dt.getTime()) ? dateStr : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+        return dateStr;
+    }
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -160,9 +177,6 @@ export default function StockHoldingsPage() {
         return [];
     }, [selectedMonth, summary]);
 
-    // Note: sticky header top offsets are hardcoded in CSS (row1=38px, row2=top:38px).
-    // No JS measurement needed.
-
     useEffect(() => {
         if (!summary?.holdings?.[0]?.history) return;
         const seen = new Set(summary.holdings[0].history.map(h => h.month));
@@ -179,24 +193,6 @@ export default function StockHoldingsPage() {
         }
     }, [identifierParam]);
 
-    // Fast polling for live price
-    useEffect(() => {
-        if (!summary?.isin) return;
-
-        const interval = setInterval(async () => {
-            try {
-                const data = await getStockPrice(summary.isin);
-                if (data.price !== undefined && data.price !== null) {
-                    setLivePrice(data.price);
-                }
-            } catch (err) {
-                console.error("Failed to poll live price:", err);
-            }
-        }, 30000); // 30 seconds
-
-        return () => clearInterval(interval);
-    }, [summary?.isin]);
-
     const handleFetchHoldings = async (identifier, months, endMonth) => {
         setLoading(true);
         setError(null);
@@ -205,13 +201,13 @@ export default function StockHoldingsPage() {
             const data = await getStockHoldings(identifier, months, endMonth);
             setSummary(data);
 
-            // If live_price is missing from aggregated response, fetch it immediately
-            if (data.live_price) {
-                setLivePrice(data.live_price);
-            } else {
+            const p = data.close_price || data.live_price;
+            if (p) {
+                setLivePrice(p);
+            } else if (data.isin) {
                 getStockPrice(data.isin).then(res => {
-                    if (res.price) setLivePrice(res.price);
-                }).catch(e => console.error("Price fetch error:", e));
+                    if (res?.price) setLivePrice(res.price);
+                }).catch(e => console.error("Price fetch fallback error:", e));
             }
         } catch (err) {
             setError(handleApiError(err));
@@ -555,16 +551,27 @@ export default function StockHoldingsPage() {
                                 <div className="shp-card-header">
                                     <span className="shp-card-eyebrow">EQUITY ASSET</span>
                                     <div className="rv-live-price-wrapper">
-                                        {livePrice ? (
-                                            <div className="rv-live-price-chip">
-                                                <span className="shp-live-pulse-dot"></span>
-                                                <span className="shp-live-label">LTP</span>
-                                                <span className="shp-live-price">₹{formatNumber(livePrice)}</span>
+                                        {(summary.close_price || livePrice) ? (
+                                            <div 
+                                                className="rv-eod-price-chip" 
+                                                title={summary.price_date ? `NSE Bhavcopy EOD Close as of ${formatEodDate(summary.price_date)}` : 'NSE Bhavcopy EOD Close'}
+                                            >
+                                                <span className="shp-eod-badge">EOD</span>
+                                                <span className="shp-eod-price">₹{formatNumber(summary.close_price || livePrice)}</span>
+                                                {summary.price_change_pct !== null && summary.price_change_pct !== undefined && (
+                                                    <span className={`shp-eod-change ${Number(summary.price_change_pct) >= 0 ? 'pos' : 'neg'}`}>
+                                                        {Number(summary.price_change_pct) >= 0 ? '+' : ''}{Number(summary.price_change_pct).toFixed(2)}%
+                                                    </span>
+                                                )}
+                                                {summary.price_date && (
+                                                    <span className="shp-eod-date">
+                                                        • {formatEodDate(summary.price_date)}
+                                                    </span>
+                                                )}
                                             </div>
                                         ) : (
-                                            <div className="shp-fetching-ltp">
-                                                <div className="shp-spinner-tiny"></div>
-                                                <span>Fetching LTP...</span>
+                                            <div className="shp-eod-unavailable">
+                                                <span>Price: N/A</span>
                                             </div>
                                         )}
                                     </div>

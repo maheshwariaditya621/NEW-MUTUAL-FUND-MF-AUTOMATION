@@ -37,7 +37,9 @@ class PortfolioHolding(BaseModel):
     sector: Optional[str] = Field(None, description="Sector classification")
     market_cap: Optional[Decimal] = Field(None, description="Market cap in crores")
     mcap_type: Optional[str] = Field(None, description="Market cap type (Large Cap, etc.)")
-    live_price: Optional[float] = Field(None, description="Current market price (LTP)")
+    live_price: Optional[float] = Field(None, description="End of day market price (close_price)")
+    close_price: Optional[float] = Field(None, description="Bhavcopy End of Day Closing Price")
+    price_date: Optional[str] = Field(None, description="Bhavcopy trade date (YYYY-MM-DD)")
     monthly_data: List[MonthlyHoldingSnapshot] = Field(..., description="Monthly snapshots (last N months)")
 
 

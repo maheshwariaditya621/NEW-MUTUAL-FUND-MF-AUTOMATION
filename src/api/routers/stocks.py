@@ -138,14 +138,14 @@ async def search_stocks(
 
 
 
-def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optional[str], Optional[Decimal], Optional[str], Optional[str], Optional[int], Optional[int], Optional[datetime]]:
+def _resolve_company_isin(identifier: str, cur: cursor) -> tuple:
     """
     Resolve a company identifier (ISIN, name, or symbol) to ISIN and metadata.
     
     Returns:
-        Tuple of (isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at, entity_id)
+        Tuple of (isin, company_name, sector, market_cap, mcap_type, mcap_updated_at, shares_outstanding, shares_last_updated_at, entity_id, close_price, prev_close, price_date, price_change_pct)
     """
-    # Use a common query structure to fetch metadata and entity_id
+    # Use a common query structure to fetch metadata, entity_id, and EOD prices
     query_base = """
         SELECT 
             c.isin, 
@@ -156,7 +156,11 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
             c.mcap_updated_at, 
             c.shares_outstanding, 
             c.shares_last_updated_at,
-            c.entity_id
+            c.entity_id,
+            c.close_price,
+            c.prev_close,
+            c.price_date,
+            c.price_change_pct
         FROM companies c
         LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
     """
@@ -196,6 +200,10 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
             c.shares_outstanding, 
             c.shares_last_updated_at,
             c.entity_id,
+            c.close_price,
+            c.prev_close,
+            c.price_date,
+            c.price_change_pct,
             CASE 
                 WHEN UPPER(COALESCE(ce.canonical_name, c.company_name)) = UPPER(%s) THEN 1
                 WHEN COALESCE(ce.canonical_name, c.company_name) ILIKE %s THEN 2
@@ -228,8 +236,8 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
             detail=f"Multiple companies match '{identifier}': {', '.join(matches)}. Please use exact ISIN or NSE symbol."
         )
     
-    # Return exactly the 9 company metadata columns (exclude relevance_score at index 9)
-    return results[0][:9]
+    # Return exactly the 13 company metadata & EOD price columns (exclude relevance_score at index 13)
+    return results[0][:13]
 
 
 @router.get("/{isin}/price")
@@ -239,27 +247,33 @@ async def get_stock_price(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get the latest live price (LTP) for a specific stock by ISIN.
-    Designed for fast polling in the UI.
+    Get the official Bhavcopy EOD closing price and date for a specific stock by ISIN.
     """
-    from src.services.symbol_mapper import symbol_mapper
-    from src.services.pricing_service import pricing_service
-    
-    info = symbol_mapper.get_symbol_info(isin)
-    if not info:
-        # Fallback to DB if symbol mapper doesn't have it (likely not an equity or missing mapping)
-        cur.execute("SELECT nse_symbol, bse_code FROM companies WHERE isin = %s", (isin,))
-        row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Stock not found")
-        return {"isin": isin, "price": None, "timestamp": datetime.now()}
+    cur.execute(
+        """
+        SELECT close_price, prev_close, price_date, price_change_pct
+        FROM companies
+        WHERE isin = %s
+        """,
+        (isin,)
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Stock not found")
 
-    symbol, token, exchange = info
-    ltp = pricing_service.get_ltp(exchange, symbol, token)
-    
+    close_p = float(row[0]) if row[0] is not None else None
+    prev_p = float(row[1]) if row[1] is not None else None
+    dt_str = str(row[2]) if row[2] is not None else None
+    chg_pct = float(row[3]) if row[3] is not None else None
+
     return {
         "isin": isin,
-        "price": ltp,
+        "price": close_p,
+        "close_price": close_p,
+        "prev_close": prev_p,
+        "price_date": dt_str,
+        "price_change_pct": chg_pct,
+        "price_type": "EOD",
         "timestamp": datetime.now()
     }
 
@@ -267,37 +281,41 @@ async def get_stock_price(
 @router.post("/prices")
 async def get_bulk_prices(
     request: BulkPriceRequest,
-    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Fetch live prices for a list of ISINs in bulk.
-    Returns prices from cache immediately and triggers background fetch for missing ones.
+    Fetch official EOD prices for a list of ISINs in bulk from database.
     """
-    from src.services.symbol_mapper import symbol_mapper
-    from src.services.pricing_service import pricing_service
-    
-    results = {}
-    missing_isins = []
-    
-    for isin in request.isins:
-        info = symbol_mapper.get_symbol_info(isin)
-        if info:
-            symbol, token, exchange = info
-            # Check cache directly to avoid blocking if not found
-            cached = pricing_service._ltp_cache.get(symbol)
-            if cached and (datetime.now().timestamp() - cached['timestamp'] < pricing_service.CACHE_TTL_SECONDS):
-                results[isin] = cached['ltp']
-            else:
-                results[isin] = None
-                missing_isins.append(isin)
-        else:
-            results[isin] = None
+    if not request.isins:
+        return {}
 
-    if missing_isins and background_tasks:
-        background_tasks.add_task(pricing_service.prefetch_ltps, missing_isins)
-        
+    cur.execute(
+        """
+        SELECT isin, close_price, prev_close, price_date, price_change_pct
+        FROM companies
+        WHERE isin = ANY(%s)
+        """,
+        (request.isins,)
+    )
+
+    results = {}
+    for row in cur.fetchall():
+        isin = row[0]
+        close_p = float(row[1]) if row[1] is not None else None
+        prev_p = float(row[2]) if row[2] is not None else None
+        dt_str = str(row[3]) if row[3] is not None else None
+        chg_pct = float(row[4]) if row[4] is not None else None
+
+        results[isin] = {
+            "price": close_p,
+            "close_price": close_p,
+            "prev_close": prev_p,
+            "price_date": dt_str,
+            "price_change_pct": chg_pct,
+            "price_type": "EOD"
+        }
+
     return results
 
 
@@ -330,13 +348,14 @@ async def get_holdings_by_identifier(
         - /api/v1/stocks/holdings?q=reliance industries
     """
     try:
-        # 1. Resolve identifier to ISIN and metadata (already includes entity_id)
-        isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated, entity_id = _resolve_company_isin(q, cur)
+        # 1. Resolve identifier to ISIN, metadata, and EOD prices
+        isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated, entity_id, close_p, prev_close, price_date, price_chg = _resolve_company_isin(q, cur)
         
         # 3. Get holdings (aggregated by entity if available)
         return await _get_stock_holdings_aggregated(
             isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated, 
-            shares, shares_updated, months, end_month, background_tasks, cur
+            shares, shares_updated, close_p, prev_close, price_date, price_chg,
+            months, end_month, cur
         )
         
     except HTTPException:
@@ -351,7 +370,6 @@ async def get_stock_holdings(
     isin: str = Path(..., description="12-character ISIN code"),
     months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
-    background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor),
     current_user: dict = Depends(get_current_user)
 ):
@@ -368,12 +386,13 @@ async def get_stock_holdings(
         Detailed holdings summary with scheme-wise breakdown
     """
     try:
-        # Resolve company metadata using the helper function (already includes entity_id)
-        res_isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated, entity_id = _resolve_company_isin(isin, cur)
+        # Resolve company metadata and EOD prices
+        res_isin, company_name, sector, mcap, mcap_type, mcap_updated, shares, shares_updated, entity_id, close_p, prev_close, price_date, price_chg = _resolve_company_isin(isin, cur)
         
         return await _get_stock_holdings_aggregated(
             res_isin, entity_id, company_name, sector, mcap, mcap_type, mcap_updated,
-            shares, shares_updated, months, end_month, background_tasks, cur
+            shares, shares_updated, close_p, prev_close, price_date, price_chg,
+            months, end_month, cur
         )
         
     except HTTPException:
@@ -436,10 +455,13 @@ async def _get_stock_holdings_aggregated(
     mcap_updated_at: Optional[datetime],
     shares_outstanding: Optional[int],
     shares_last_updated_at: Optional[datetime],
-    months: int,
-    end_month: Optional[str],
-    background_tasks: Optional[BackgroundTasks],
-    cur: cursor
+    close_price_db: Optional[Decimal] = None,
+    prev_close_db: Optional[Decimal] = None,
+    price_date_db: Optional[date] = None,
+    price_change_pct_db: Optional[Decimal] = None,
+    months: int = 4,
+    end_month: Optional[str] = None,
+    cur: cursor = None
 ) -> StockHoldingsSummary:
     """
     Get holdings data aggregated by Corporate Entity (if available) or by single ISIN.
@@ -799,39 +821,25 @@ async def _get_stock_holdings_aggregated(
             percent_to_nav=round(agg["pnav_sum"], 4) if agg["pnav_sum"] else None
         ))
 
-    # Dynamic Market Cap Calculation
-    live_mcap = None
-    if shares_outstanding:
-        # Trigger prefetch for this ISIN in background
-        if background_tasks:
-            background_tasks.add_task(pricing_service.prefetch_ltps, [isin])
-            
-        live_mcap = pricing_service.get_live_market_cap(
-            isin=isin, 
-            db_mcap=float(market_cap) if market_cap else None, 
-            shares_outstanding=shares_outstanding,
-            sync=False
-        )
-    else:
-        live_mcap = float(market_cap) if market_cap else None
-    
-    # If we got a live price, market_updated_at is now, else the db value
-    if live_mcap and market_cap and float(live_mcap) != float(market_cap):
-        mcap_updated_at = datetime.now()
-        
-    # Calculate live price data
-    info = symbol_mapper.get_symbol_info(isin)
-    live_price = None
-    if info:
-        symbol, token, exchange = info
-        live_price = pricing_service.get_ltp(exchange, symbol, token, sync=False)
+    # EOD Closing Price & Market Cap from Bhavcopy
+    eod_price = float(close_price_db) if close_price_db is not None else None
+    prev_price = float(prev_close_db) if prev_close_db is not None else None
+    price_dt = str(price_date_db) if price_date_db is not None else None
+    chg_pct = float(price_change_pct_db) if price_change_pct_db is not None else None
+
+    # Market Cap in Crores
+    mcap_cr = Decimal(str(market_cap / 10000000)).quantize(Decimal('0.01')) if market_cap else None
 
     return StockHoldingsSummary(
         isin=isin,
         company_name=company_name.upper(),
         sector=sector,
-        market_cap=Decimal(str(live_mcap / 10000000)).quantize(Decimal('0.01')) if live_mcap else None,
-        live_price=live_price,
+        market_cap=mcap_cr,
+        live_price=eod_price,
+        close_price=eod_price,
+        prev_close=prev_price,
+        price_date=price_dt,
+        price_change_pct=chg_pct,
         mcap_type=mcap_type,
         mcap_updated_at=mcap_updated_at,
         as_of_date=current_month_label,

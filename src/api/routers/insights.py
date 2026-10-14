@@ -194,20 +194,12 @@ async def get_stock_activity(
         
         rows = cur.fetchall()
         
-        # PREFETCH LIVE PRICES in background to avoid blocking response
-        unique_isins = list(set([row[0] for row in rows if row[0]]))
-        if unique_isins and background_tasks:
-            from src.services.pricing_service import pricing_service
-            background_tasks.add_task(pricing_service.prefetch_ltps, unique_isins)
-        
         results = []
         for row in rows:
             isin = row[0]
             m_cap = row[4]
             shares_out = row[12]
-            
-            from src.services.pricing_service import pricing_service
-            live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out, sync=False)
+            live_mcap = float(m_cap) if m_cap else None
             
             
             net_qty = int(row[8])

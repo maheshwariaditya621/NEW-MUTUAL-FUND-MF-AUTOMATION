@@ -208,8 +208,7 @@ def _get_company_info(company_name: str, cur: cursor) -> dict:
             return {"found": False, "message": f"No company found matching '{company_name}'."}
         name, isin, sector, nse, bse, mcap, mcap_type, mcap_updated_at, shares, shares_updated_at = row
         
-        from src.services.pricing_service import pricing_service
-        live_mcap = pricing_service.get_live_market_cap(isin, float(mcap) if mcap else None, shares)
+        live_mcap = float(mcap) if mcap else None
         
         return {
             "found": True,

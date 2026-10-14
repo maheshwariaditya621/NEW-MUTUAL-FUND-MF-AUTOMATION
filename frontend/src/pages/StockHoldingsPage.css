@@ -1677,17 +1677,82 @@
     color: #f8fafc;
 }
 
-.rv-live-price-chip {
+.rv-live-price-chip,
+.rv-eod-price-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.25);
     padding: 3px 8px;
     border-radius: 6px;
-    font-size: 11.5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary, #0f172a);
+    transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .rv-eod-price-chip {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #f8fafc;
+}
+
+.shp-eod-badge {
+    background: #2563eb;
+    color: #ffffff;
+    font-size: 9px;
+    font-weight: 800;
+    padding: 1.5px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.shp-eod-price {
     font-weight: 700;
+    font-size: 12.5px;
+    letter-spacing: -0.01em;
+}
+
+.shp-eod-change {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.shp-eod-change.pos {
+    color: #059669;
+    background: rgba(16, 185, 129, 0.12);
+}
+
+[data-theme="dark"] .shp-eod-change.pos {
     color: #10b981;
+}
+
+.shp-eod-change.neg {
+    color: #dc2626;
+    background: rgba(239, 68, 68, 0.12);
+}
+
+[data-theme="dark"] .shp-eod-change.neg {
+    color: #f87171;
+}
+
+.shp-eod-date {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary, #64748b);
+}
+
+[data-theme="dark"] .shp-eod-date {
+    color: #94a3b8;
+}
+
+.shp-eod-unavailable {
+    font-size: 11px;
+    color: var(--text-tertiary, #94a3b8);
 }
 
 .shp-live-pulse-dot {

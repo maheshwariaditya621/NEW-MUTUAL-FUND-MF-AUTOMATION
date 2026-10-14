@@ -560,7 +560,9 @@ async def _get_scheme_portfolio_by_id(
             COALESCE(eh.adj_quantity, eh.quantity) as quantity,
             c.market_cap,
             c.mcap_type,
-            c.shares_outstanding
+            c.shares_outstanding,
+            c.close_price,
+            c.price_date
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
         JOIN companies c ON eh.company_id = c.company_id
@@ -573,13 +575,6 @@ async def _get_scheme_portfolio_by_id(
         (scheme_id, period_ids_list)
     )
     rows = cur.fetchall()
-    
-    # PREFETCH LIVE PRICES IN BACKGROUND to avoid 30sec+ loads
-    # row[4] is the isin
-    unique_isins = list(set([row[4] for row in rows if row[4]]))
-    if unique_isins and background_tasks:
-        from src.services.pricing_service import pricing_service
-        background_tasks.add_task(pricing_service.prefetch_ltps, unique_isins)
         
     # Group holdings by entity and month
     # Structure: logical_id -> { metadata, monthly_data: { month_str -> { aggregated_metrics } } }
@@ -591,13 +586,13 @@ async def _get_scheme_portfolio_by_id(
         "market_cap": None,
         "mcap_type": None,
         "live_price": None,
+        "close_price": None,
+        "price_date": None,
         "monthly_data": defaultdict(lambda: {"percent": 0.0, "quantity": 0, "equity_aum_cr": 0.0, "total_aum_cr": 0.0})
     })
-    
-    from src.services.pricing_service import pricing_service
 
     for row in rows:
-        logical_id, resolved_name, raw_name, sector, isin, year, month, eq_aum_cr, tot_aum_cr, percent_nav, quantity, m_cap, m_type, shares_out = row
+        logical_id, resolved_name, raw_name, sector, isin, year, month, eq_aum_cr, tot_aum_cr, percent_nav, quantity, m_cap, m_type, shares_out, close_p, price_dt = row
         month_str = date(year, month, 1).strftime("%b-%y").upper()
         
         entry = holdings_by_entity[logical_id]
@@ -607,16 +602,13 @@ async def _get_scheme_portfolio_by_id(
              entry["isin"] = isin
              entry["sector"] = sector
              
-             live_mcap = pricing_service.get_live_market_cap(isin, float(m_cap) if m_cap else None, shares_out, sync=False)
-             entry["market_cap"] = Decimal(str(live_mcap / 10000000)).quantize(Decimal('0.01')) if live_mcap else None
+             entry["market_cap"] = Decimal(str(m_cap / 10000000)).quantize(Decimal('0.01')) if m_cap else None
              entry["mcap_type"] = m_type
              
-             # Fetch live price
-             from src.services.symbol_mapper import symbol_mapper
-             info = symbol_mapper.get_symbol_info(isin) if isin else None
-             if info:
-                 symbol, token, exchange = info
-                 entry["live_price"] = pricing_service.get_ltp(exchange, symbol, token, sync=False)
+             # EOD Closing price from Bhavcopy
+             entry["live_price"] = float(close_p) if close_p else None
+             entry["close_price"] = float(close_p) if close_p else None
+             entry["price_date"] = str(price_dt) if price_dt else None
             
         # Aggregate (sum) if multiple rows for same entity in same month
         entry["monthly_data"][month_str]["percent"] += float(percent_nav)
