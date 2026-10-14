@@ -293,7 +293,7 @@ IDAQAB
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("BANDHAN", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def download(self, year: int, month: int) -> Dict:
+    def download(self, year: int, month: int, redo: bool = False) -> Dict:
         start_time = time.time()
         month_name = self.MONTH_NAMES[month]
         
@@ -304,6 +304,10 @@ IDAQAB
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
         
+        if redo and target_dir.exists():
+            logger.info(f"Bandhan: Redo requested. Purging {target_dir}")
+            shutil.rmtree(target_dir, ignore_errors=True)
+
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
@@ -435,7 +439,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     downloader = BandhanDownloader()
-    result = downloader.download(args.year, args.month)
+    result = downloader.download(args.year, args.month, redo=args.redo)
     print(json.dumps(result))
 
     status = result["status"]

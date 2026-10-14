@@ -55,7 +55,7 @@
 
 .fund-inputs-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
     gap: 24px;
     margin-bottom: 24px;
 }
@@ -646,8 +646,41 @@
 
 /* Mobile */
 @media (max-width: 768px) {
+    .sector-exposure-wrapper {
+        padding: 16px 12px;
+    }
+
+    .page-header-premium {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+    }
+
+    .header-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+    }
+
+    .header-text h1 {
+        font-size: 1.5rem;
+    }
+
+    .header-text p {
+        font-size: 0.95rem;
+    }
+
+    .selection-card {
+        padding: 16px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+    }
+
     .fund-inputs-grid {
         grid-template-columns: 1fr;
+        gap: 16px;
     }
 
     .fund-label-wrapper {
@@ -656,5 +689,25 @@
 
     .sticky-col {
         position: relative;
+    }
+
+    .comparison-table-wrapper {
+        -webkit-overflow-scrolling: touch;
+        border-radius: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .sector-exposure-wrapper {
+        padding: 12px 8px;
+    }
+
+    .selection-card {
+        padding: 12px;
+        border-radius: 12px;
+    }
+
+    .search-container .search-input {
+        font-size: 0.9rem;
     }
 }

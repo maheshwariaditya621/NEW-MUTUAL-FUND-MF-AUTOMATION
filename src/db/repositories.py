@@ -381,24 +381,30 @@ def upsert_scheme(
                         (amc_id, original_name, best_match)
                     )
 
+    # Auto-infer website category if not yet categorized
+    from src.scripts.update_website_categories import get_website_category
+    wcat, wsub = get_website_category(final_name)
+
     # Proceed with canonical UPSERT
     cursor.execute(
         """
-        INSERT INTO schemes (amc_id, scheme_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO schemes (amc_id, scheme_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code, website_category, website_sub_category)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (amc_id, scheme_name, plan_type, option_type, is_reinvest) 
         DO UPDATE SET 
             is_reinvest = EXCLUDED.is_reinvest,
             scheme_category = COALESCE(EXCLUDED.scheme_category, schemes.scheme_category),
             scheme_code = COALESCE(EXCLUDED.scheme_code, schemes.scheme_code),
+            website_category = COALESCE(schemes.website_category, EXCLUDED.website_category),
+            website_sub_category = COALESCE(schemes.website_sub_category, EXCLUDED.website_sub_category),
             updated_at = CURRENT_TIMESTAMP
         RETURNING scheme_id
         """,
-        (amc_id, final_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code)
+        (amc_id, final_name, plan_type, option_type, is_reinvest, scheme_category, scheme_code, wcat, wsub)
     )
     
     scheme_id = cursor.fetchone()[0]
-    logger.debug(f"Scheme upserted: {final_name} ({plan_type}/{option_type})")
+    logger.debug(f"Scheme upserted: {final_name} ({plan_type}/{option_type}) [{wcat} | {wsub}]")
     
     return scheme_id
 

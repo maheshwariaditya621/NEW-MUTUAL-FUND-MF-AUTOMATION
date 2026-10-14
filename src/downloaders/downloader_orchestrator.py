@@ -57,8 +57,11 @@ class PipelineOrchestrator:
                 return results
             
             module_path, class_name = downloader_info
-            # Convert module path to file path
-            file_path = module_path.replace(".", "/") + ".py"
+            # Project root directory
+            from pathlib import Path
+            project_root = Path(__file__).resolve().parent.parent.parent
+            rel_file = module_path.replace(".", "/") + ".py"
+            file_path = str(project_root / rel_file)
             
             try:
                 # Redo logic: purge folder
@@ -69,27 +72,28 @@ class PipelineOrchestrator:
                         logger.warning(f"Redo requested: Deleting existing raw folder {target_v}")
                         shutil.rmtree(target_v)
 
-                # Prepare command
-                cmd = [sys.executable, file_path, "--year", str(year), "--month", str(month)]
+                # Prepare command using python -m
+                cmd = [sys.executable, "-m", module_path, "--year", str(year), "--month", str(month)]
                 
                 # Check if script supports dry-run/redo (simple heuristic)
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    target_file = project_root / (module_path.replace(".", "/") + ".py")
+                    with open(target_file, "r", encoding="utf-8") as f:
                         content = f.read()
                         if "--dry-run" in content:
                             if dry_run: cmd.append("--dry-run")
                         if "--redo" in content:
                             if redo: cmd.append("--redo")
                 except Exception:
-                    logger.debug(f"Could not check CLI flags for {file_path}")
+                    logger.debug(f"Could not check CLI flags for {module_path}")
 
-                logger.info(f"Running downloader in subprocess: {' '.join(cmd)}")
+                logger.info(f"Running downloader in subprocess: {' '.join(cmd)} (cwd={project_root})")
                 
                 # Setup environment
                 env = os.environ.copy()
-                env["PYTHONPATH"] = "."
+                env["PYTHONPATH"] = str(project_root)
 
-                process = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, env=env)
+                process = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, env=env, cwd=str(project_root))
                 
                 # Parse JSON result from stdout (even on failure)
                 download_res = {}
@@ -118,12 +122,24 @@ class PipelineOrchestrator:
                     # Fallback if success but no JSON found
                     if not download_res:
                         # Secondary check: see if the target folder exists and has a success marker
-                        target_v = os.path.join("data", "raw", amc_slug, f"{year}_{month:02d}")
-                        if os.path.exists(os.path.join(target_v, "_SUCCESS.json")):
-                            logger.info(f"Found existing success marker for {amc_slug} {year}-{month:02d}. Treating as skipped.")
-                            download_res = {"status": "skipped", "files_downloaded": 1}
+                        target_v = project_root / "data" / "raw" / amc_slug / f"{year}_{month:02d}"
+                        success_file = target_v / "_SUCCESS.json"
+                        if success_file.exists():
+                            try:
+                                with open(success_file, "r", encoding="utf-8") as sf:
+                                    sdata = json.load(sf)
+                                files_count = sdata.get("files_downloaded", 1)
+                            except Exception:
+                                files_count = len(list(target_v.glob("*.xlsx")))
+                            logger.info(f"Found existing success marker for {amc_slug} {year}-{month:02d} ({files_count} files).")
+                            download_res = {"status": "success", "files_downloaded": files_count}
                         else:
-                            download_res = {"status": "success", "files_downloaded": 0, "reason": "No JSON output captured and no success marker found"}
+                            # Count any excel files present in the raw folder
+                            excel_files = list(target_v.glob("*.xlsx")) if target_v.exists() else []
+                            if excel_files:
+                                download_res = {"status": "success", "files_downloaded": len(excel_files)}
+                            else:
+                                download_res = {"status": "success", "files_downloaded": 0, "reason": "No JSON output captured and no files found"}
                     
                     results["steps"]["download"] = download_res
                     
@@ -199,9 +215,13 @@ class PipelineOrchestrator:
                 )
                 results["steps"]["extract"] = extract_res
                 
-                rows_read = extract_res.get("rows_read", 0)
-                loaded = extract_res.get("rows_inserted", 0)
-                self.notifier.alert(f"🎯 <b>[{amc_slug.upper()}]</b> Extracted {rows_read} rows. {'(Dry Run)' if dry_run else f'Loaded {loaded} rows.'}")
+                if extract_res.get("status") != "success":
+                    results["status"] = "failed"
+                    results["reason"] = extract_res.get("reason") or extract_res.get("error") or "Extraction failed"
+                else:
+                    rows_read = extract_res.get("rows_read", 0)
+                    loaded = extract_res.get("rows_inserted", 0)
+                    self.notifier.alert(f"🎯 <b>[{amc_slug.upper()}]</b> Extracted {rows_read} rows. {'(Dry Run)' if dry_run else f'Loaded {loaded} rows.'}")
 
             except Exception as e:
                 logger.error(f"Error during extraction for {amc_slug}: {e}")

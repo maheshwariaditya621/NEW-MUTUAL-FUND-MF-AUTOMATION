@@ -44,8 +44,8 @@ class EdelweissDownloader(BaseDownloader):
     """
 
     AMC_NAME = "edelweiss"
-    SECRET = "5b6714126d3149fbab994747b2633287"
-    HASH_KEY = "r4vcos0ejvndsow95n"
+    SECRET = "97a9497605fa7f0ea64fbcbed6a9b7bea8f06650d771b84db0b5ffa2882d1000"
+    HASH_KEY = "45de59a4bd24ceabe59c52775532e2cf7904f2b7457d73579eafd06bc1e02c41"
     STATIC_IP = "103.0.123.175"
 
     PORTFOLIO_API = "https://api.edelweissmf.com/edelweissmf/api/v1/mf/statutory-menus/single"

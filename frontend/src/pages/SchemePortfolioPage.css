@@ -275,15 +275,16 @@
 }
 
 /* ── Headers ─────────────────────────────────────────────────── */
+/* Note: position:sticky does NOT work on <thead> — only on <th>/<td>.
+   Apply sticky directly to every th, with top: 60px (= .shp-controls-header height). */
 .shp-table thead {
-    position: sticky;
-    top: 60px;
-    /* Locks right under the 60px control bar */
-    z-index: 90;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    position: static;
 }
 
 .shp-th {
+    position: sticky;
+    top: 60px;
+    z-index: 10;
     padding: 10px 12px;
     font-size: 10.5px;
     font-weight: 700;
@@ -293,6 +294,7 @@
     text-align: center;
     background: var(--shp-header-bg);
     color: var(--shp-header-color);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .shp-th.shp-th-name {
@@ -614,7 +616,40 @@
 }
 
 /* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+    .aum-timeline {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
 @media (max-width: 768px) {
+    .scheme-portfolio-page {
+        padding: 16px 0;
+    }
+
+    .aum-timeline {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-top: 16px;
+        padding-top: 16px;
+    }
+
+    .aum-item {
+        padding: 10px;
+    }
+
+    .aum-value {
+        font-size: 15px;
+    }
+
+    .shp-controls-header {
+        height: auto;
+        padding: 10px 12px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
     .shp-controls {
         flex-direction: column;
         align-items: stretch;
@@ -622,6 +657,7 @@
 
     .shp-controls-right {
         flex-wrap: wrap;
+        width: 100%;
     }
 
     .shp-search-input {
@@ -630,14 +666,57 @@
 
     .shp-meta-bar {
         flex-direction: column;
+        padding: 10px 12px;
     }
 
     .shp-meta-item {
         border-right: none;
         border-bottom: 1px solid var(--border-color);
+        padding: 6px 0;
     }
 
     .shp-meta-item:last-child {
         border-bottom: none;
+    }
+
+    .scheme-info h3 {
+        font-size: 1.25rem;
+    }
+
+    .shp-th.shp-th-asset-hdr,
+    .shp-th.shp-th-asset-sub,
+    .shp-td.shp-td-name {
+        min-width: 150px;
+        max-width: 180px;
+        padding-left: 10px;
+        font-size: 11px;
+    }
+
+    .shp-td {
+        padding: 6px 8px;
+        font-size: 11.5px;
+    }
+}
+
+@media (max-width: 480px) {
+    .aum-timeline {
+        grid-template-columns: 1fr;
+    }
+
+    .scheme-info h3 {
+        font-size: 1.1rem;
+    }
+
+    .scheme-info-meta {
+        gap: 6px;
+    }
+
+    .shp-th.shp-th-asset-hdr,
+    .shp-th.shp-th-asset-sub,
+    .shp-td.shp-td-name {
+        min-width: 130px;
+        max-width: 150px;
+        padding-left: 8px;
+        font-size: 10.5px;
     }
 }

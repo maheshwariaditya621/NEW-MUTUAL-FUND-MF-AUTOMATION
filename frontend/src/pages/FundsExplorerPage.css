@@ -211,6 +211,7 @@
     letter-spacing: -0.5px;
     background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
@@ -221,7 +222,8 @@
 
 .header-search {
     position: relative;
-    width: 360px;
+    width: 100%;
+    max-width: 360px;
 }
 
 .header-search input {
@@ -478,5 +480,19 @@
 
     .explorer-content {
         padding: 24px 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .explorer-content {
+        padding: 16px 10px;
+    }
+
+    .card-main-content {
+        padding: 12px 14px;
+    }
+
+    .scheme-title {
+        font-size: 0.95rem !important;
     }
 }

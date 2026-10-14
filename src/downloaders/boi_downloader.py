@@ -191,18 +191,19 @@ class BOIDownloader(BaseDownloader):
             return None
 
         month_upper = month_name.upper()
-        pattern = f"{month_upper}-{target_year}"
+        month_short = month_upper[:3]
+        patterns = [f"{month_upper}-{target_year}", f"{month_short}-{target_year}", f"{month_upper} {target_year}", f"{month_short} {target_year}"]
 
         target_doc = None
         for doc in documents:
             doc_name = (doc.get("DocName") or "").upper()
             folder_url = (doc.get("FolderUrl") or "").upper()
-            if pattern in doc_name or pattern in folder_url:
+            if any(p in doc_name or p in folder_url for p in patterns):
                 target_doc = doc
                 break
 
         if not target_doc:
-            logger.warning(f"No monthly portfolio document found matching {pattern}")
+            logger.warning(f"No monthly portfolio document found matching {patterns}")
             return None
 
         dl_url = target_doc.get("FolderUrl", "").strip()

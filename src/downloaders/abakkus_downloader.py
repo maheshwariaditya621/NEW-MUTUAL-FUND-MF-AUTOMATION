@@ -117,11 +117,29 @@ class AbakkusDownloader(BaseDownloader):
         html = resp.text
         portfolios = []
 
-        # 1. Parse embedded JSON (`const verticals = [...]`)
+        # 1. Parse embedded JSON (`const verticals = [...]` or standalone script tag)
+        verticals = None
         match = re.search(r'const\s+verticals\s*=\s*(\[\{.*?\}\]);', html, re.DOTALL)
         if match:
             try:
                 verticals = json.loads(match.group(1))
+            except Exception:
+                pass
+
+        if not verticals:
+            scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
+            for s in scripts:
+                if 'Monthly Portfolio Disclosures' in s:
+                    try:
+                        s_clean = s.strip()
+                        if s_clean.startswith('[') and s_clean.endswith(']'):
+                            verticals = json.loads(s_clean)
+                            break
+                    except Exception:
+                        continue
+
+        if verticals:
+            try:
                 for v in verticals:
                     title = (v.get("title") or "").strip()
                     subtitle = (v.get("subTitle") or "").strip()

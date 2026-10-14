@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
@@ -151,6 +151,17 @@ export default function StockHoldingsPage() {
     const [showAmcStatus, setShowAmcStatus] = useState(false);
     const [expandedCats, setExpandedCats] = useState({}); // sub_category -> bool
     const [schemeTypeFilter, setSchemeTypeFilter] = useState('all'); // 'all' | 'pure_equity' | 'arbitrage'
+    const tableWrapRef = useRef(null);
+
+    const displayMonths = useMemo(() => {
+        if (selectedMonth) return computeDisplayMonths(selectedMonth, 3);
+        const latest = summary?.holdings?.[0]?.history?.[0]?.month;
+        if (latest) return computeDisplayMonths(latest, 3);
+        return [];
+    }, [selectedMonth, summary]);
+
+    // Note: sticky header top offsets are hardcoded in CSS (row1=38px, row2=top:38px).
+    // No JS measurement needed.
 
     useEffect(() => {
         if (!summary?.holdings?.[0]?.history) return;
@@ -161,13 +172,6 @@ export default function StockHoldingsPage() {
             return merged;
         });
     }, [summary]);
-
-    const displayMonths = useMemo(() => {
-        if (selectedMonth) return computeDisplayMonths(selectedMonth, 3);
-        const latest = summary?.holdings?.[0]?.history?.[0]?.month;
-        if (latest) return computeDisplayMonths(latest, 3);
-        return [];
-    }, [selectedMonth, summary]);
 
     useEffect(() => {
         if (identifierParam) {
@@ -1160,7 +1164,7 @@ export default function StockHoldingsPage() {
                             </>
                         )}
 
-                        <div className="shp-table-wrap">
+                        <div className="shp-table-wrap" ref={tableWrapRef}>
                             {viewMode === 'category' ? (
                                 /* ── CATEGORY-WISE VIEW ── */
                                 <table className="shp-table">

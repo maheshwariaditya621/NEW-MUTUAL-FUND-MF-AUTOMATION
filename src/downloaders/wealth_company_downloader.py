@@ -95,7 +95,7 @@ class WealthCompanyDownloader(BaseDownloader):
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error(AMC_WEALTH, year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
 
-    def download(self, year: int, month: int) -> Dict:
+    def download(self, year: int, month: int, redo: bool = False) -> Dict:
         start_time = time.time()
         month_abbr = self.MONTH_ABBR[month]
         month_full = self.MONTH_FULL[month]
@@ -110,6 +110,10 @@ class WealthCompanyDownloader(BaseDownloader):
             return {"status": "skipped", "reason": "before_inception"}
 
         target_dir = Path(self.get_target_folder(self.AMC_NAME, year, month))
+
+        if redo and target_dir.exists():
+            logger.info(f"{self.AMC_NAME}: Redo requested. Purging {target_dir}")
+            shutil.rmtree(target_dir, ignore_errors=True)
 
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
@@ -333,10 +337,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, required=True)
+    parser.add_argument("--redo", action="store_true", help="Redo mode")
     args = parser.parse_args()
 
     downloader = WealthCompanyDownloader()
-    result = downloader.download(args.year, args.month)
+    result = downloader.download(args.year, args.month, redo=args.redo)
 
     status = result["status"]
     if status == "success":

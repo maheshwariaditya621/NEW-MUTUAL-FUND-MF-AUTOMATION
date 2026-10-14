@@ -5,11 +5,12 @@ import time
 import json
 import shutil
 import re
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import Stealth
+import requests
+from bs4 import BeautifulSoup
 
 from src.downloaders.base_downloader import BaseDownloader
 from src.config import logger
@@ -18,13 +19,12 @@ from src.alerts.telegram_notifier import get_notifier
 # Import downloader config
 try:
     from src.config.downloader_config import (
-        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF, HEADLESS
+        DRY_RUN, MAX_RETRIES, RETRY_BACKOFF
     )
 except ImportError:
     DRY_RUN = False
     MAX_RETRIES = 2
     RETRY_BACKOFF = [5, 15]
-    HEADLESS = True
 
 
 class CanaraDownloader(BaseDownloader):
@@ -32,9 +32,23 @@ class CanaraDownloader(BaseDownloader):
     Canara Robeco Mutual Fund - Portfolio Downloader
     
     URL: https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/scheme-monthly-portfolio/
-    Downloads all scheme-wise monthly portfolio files
+    Downloads all scheme-wise monthly portfolio files via direct HTTP GET requests
+    using portal query-parameter pagination without browser automation.
     """
     
+    BASE_URL = "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/scheme-monthly-portfolio/"
+
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/scheme-monthly-portfolio/",
+    }
+
     MONTH_NAMES = {
         1: "January", 2: "February", 3: "March", 4: "April",
         5: "May", 6: "June", 7: "July", 8: "August",
@@ -55,7 +69,7 @@ class CanaraDownloader(BaseDownloader):
             "files_downloaded": file_count,
             "timestamp": datetime.now().isoformat()
         }
-        with open(marker_path, "w") as f:
+        with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(marker_data, f, indent=2)
         logger.info(f"Created completion marker: {marker_path.name}")
 
@@ -70,7 +84,6 @@ class CanaraDownloader(BaseDownloader):
         logger.warning(f"CANARA: Moving incomplete folder {source_dir} to {corrupt_target} (Reason: {reason})")
         shutil.move(str(source_dir), str(corrupt_target))
         self.notifier.notify_error("CANARA", year, month, "Corruption Recovery", f"Moved to quarantine: {reason}")
-
 
     def download(self, year: int, month: int) -> Dict:
         start_time = time.time()
@@ -87,16 +100,13 @@ class CanaraDownloader(BaseDownloader):
         # Idempotency
         if target_dir.exists():
             if (target_dir / "_SUCCESS.json").exists():
-                # Month already complete - check for missing consolidation
                 logger.info(f"Canara: {year}-{month:02d} files already downloaded.")
                 logger.info("Verifying consolidation/merged files...")
-
-                # Always try consolidation in case it was missed/errored previously
                 self.consolidate_downloads(year, month)
                 
                 duration = time.time() - start_time
                 logger.info("[SUCCESS] Month already complete — UPDATED")
-                logger.info(f"🕒 Duration: {duration:.2f}s")
+                logger.info(f"Duration: {duration:.2f}s")
                 logger.info("=" * 60)
                 return {
                     "status": "skipped", 
@@ -120,7 +130,8 @@ class CanaraDownloader(BaseDownloader):
                 if files_downloaded == 0:
                     logger.warning(f"CANARA: No portfolios found for {month_name} {year}")
                     self.notifier.notify_not_published("CANARA", year, month)
-                    if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir, ignore_errors=True)
                     return {"status": "not_published"}
 
                 # Success
@@ -137,140 +148,106 @@ class CanaraDownloader(BaseDownloader):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt+1} failed: {last_error}")
-                if attempt < MAX_RETRIES: time.sleep(RETRY_BACKOFF[attempt])
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF[attempt])
 
         # Final Failure
-        if target_dir.exists(): shutil.rmtree(target_dir, ignore_errors=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         self.notifier.notify_error("CANARA", year, month, "Download Failure", last_error[:100])
         return {"status": "failed", "reason": last_error}
 
     def _run_download_flow(self, target_year: int, target_month: int, month_idx: str, month_name: str, download_folder: Path) -> int:
-        url = "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/scheme-monthly-portfolio/"
+        """
+        Scrapes and downloads all scheme files across paginated results via direct HTTP requests.
+        """
+        session = requests.Session()
+        session.headers.update(self.DEFAULT_HEADERS)
 
-        pw = None
-        browser = None
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=HEADLESS,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-gpu"]
+        all_discovered = {}  # url -> title
+        page = 1
+        
+        while True:
+            page_url = (
+                f"{self.BASE_URL}?filteryear={target_year}&filtermonth={month_idx}&pagination={page}"
             )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-
-            logger.info(f"Navigating to {url}...")
-            page.goto(url, wait_until="load", timeout=90000)
-            time.sleep(5)
-            logger.info("  [OK] Page loaded")
-
-            # Handle cookie/disclaimer banners
-            try:
-                if "Accept" in page.content():
-                    page.get_by_role("button", name=re.compile("Accept", re.I)).click(timeout=2000)
-                    time.sleep(1)
-            except:
-                pass
-
-            # Select Year and Month
-            logger.info(f"Selecting year: {target_year}, month: {month_idx}...")
-            page.locator("#year").select_option(str(target_year))
-            time.sleep(2)
+            logger.info(f"CANARA: Querying page {page} for {target_year}-{month_idx}...")
             
-            page.locator("#month").select_option(month_idx)
+            resp = session.get(page_url, timeout=30)
+            if resp.status_code != 200:
+                logger.warning(f"CANARA: Page {page} returned status {resp.status_code}")
+                break
+                
+            soup = BeautifulSoup(resp.text, "html.parser")
+            new_files_on_page = 0
+            
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if re.search(r"\.(xlsx?|zip|csv)", href, re.I):
+                    text = a.text.strip()
+                    if href not in all_discovered:
+                        all_discovered[href] = text
+                        new_files_on_page += 1
+                    elif text and text.lower() != "download":
+                        all_discovered[href] = text
+            
+            logger.info(f"  → Found {new_files_on_page} new file links on page {page}")
+            
+            # Check pagination block
+            pag_block = soup.find(class_="custom-pagination")
+            if not pag_block or new_files_on_page == 0:
+                break
+                
+            next_link = pag_block.find("a", class_="next")
+            if not next_link:
+                break
+                
+            page += 1
             time.sleep(1)
 
-            # Submit search
-            logger.info("Submitting search...")
-            submit_btn = page.locator("#customSearchBtn")
-            if submit_btn.count() == 0:
-                submit_btn = page.get_by_role("button", name="Submit")
+        if not all_discovered:
+            return 0
+
+        logger.info(f"CANARA: Discovered total {len(all_discovered)} scheme workbooks. Starting downloads...")
+        downloaded_count = 0
+
+        for idx, (file_url, title) in enumerate(all_discovered.items(), 1):
+            parsed_path = urllib.parse.unquote(urllib.parse.urlparse(file_url).path)
+            orig_name = Path(parsed_path).name
+            ext = Path(orig_name).suffix or ".xlsx"
             
-            submit_btn.click()
-            time.sleep(10)
-            logger.info("  [OK] Search submitted")
-
-            # Download files from all pages
-            total_downloaded = 0
-            page_num = 1
+            if title and title.lower() != "download":
+                clean_title = title.replace("–", "-").replace("—", "-").replace(":", "-")
+                clean_title = re.sub(r'[\\/*?:"<>|]', "", clean_title).strip()
+                dest_filename = f"{clean_title}{ext}" if not clean_title.lower().endswith(ext.lower()) else clean_title
+            else:
+                dest_filename = orig_name
+                
+            dest_filename = re.sub(r'[\\/*?:"<>|]', "", dest_filename)
+            dest_path = download_folder / dest_filename
             
-            while True:
-                logger.info(f"Processing page {page_num}...")
-                
-                # Find all scheme links
-                all_links = page.locator("a").all()
-                scheme_links_indices = []
-                
-                for idx, link in enumerate(all_links):
-                    try:
-                        text = link.text_content().strip()
-                        if "Canara Robeco" in text and ("–" in text or "-" in text):
-                            scheme_links_indices.append(idx)
-                    except:
-                        continue
-
-                logger.info(f"  → Found {len(scheme_links_indices)} scheme links on page {page_num}")
-                
-                for idx in scheme_links_indices:
-                    current_link = page.locator("a").nth(idx)
-                    scheme_text = current_link.text_content().strip()
-                    
-                    logger.info(f"  [{total_downloaded + 1}] Downloading: {scheme_text[:60]}...")
-                    
-                    try:
-                        with page.expect_popup() as popup_info:
-                            with page.expect_download(timeout=60000) as download_info:
-                                current_link.click(force=True, timeout=5000)
-                        
-                        popup_page = popup_info.value
-                        download = download_info.value
-                        
-                        suggested = download.suggested_filename
-                        ext = os.path.splitext(suggested)[1] if suggested else ".xlsx"
-                        
-                        # Clean filename
-                        clean_name = scheme_text.replace("–", "-").replace(":", "")
-                        clean_name = re.sub(r'[\\/*?:"<>|]', "", clean_name)
-                        
-                        save_path = download_folder / f"{clean_name}{ext}"
-                        download.save_as(save_path)
-                        logger.info(f"    [OK] Saved: {save_path.name}")
-                        
-                        popup_page.close()
-                        total_downloaded += 1
-                        time.sleep(1)
-                        
-                    except Exception as e:
-                        logger.warning(f"    [FAIL] Download error: {str(e)[:100]}")
-                        try:
-                            popup_page.close()
-                        except:
-                            pass
-
-                # Check for next page
-                next_page_num = page_num + 1
-                next_link = page.locator(f"a.page-numbers:link:has-text('{next_page_num}')").first
-                if next_link.count() == 0:
-                    next_link = page.get_by_role("link", name=str(next_page_num), exact=True).first
-
-                if next_link.count() > 0 and next_link.is_visible():
-                    logger.info(f"  → Moving to page {next_page_num}...")
-                    next_link.click()
-                    time.sleep(5)
-                    page_num = next_page_num
+            logger.info(f"  [{idx}/{len(all_discovered)}] Downloading: {dest_filename[:60]}...")
+            
+            try:
+                r = session.get(file_url, timeout=60, stream=True)
+                if r.status_code == 200:
+                    content = r.content
+                    # Validate magic bytes for Excel/Zip
+                    if content.startswith(b"PK\x03\x04") or content.startswith(b"\xd0\xcf\x11\xe0"):
+                        with open(dest_path, "wb") as f:
+                            f.write(content)
+                        downloaded_count += 1
+                        logger.info(f"    [OK] Saved ({len(content):,} bytes)")
+                    else:
+                        logger.warning(f"    [SKIP] Invalid magic bytes for {dest_filename}")
                 else:
-                    logger.info(f"  [OK] End reached at page {page_num}")
-                    break
+                    logger.warning(f"    [FAIL] HTTP {r.status_code} for {file_url}")
+            except Exception as e:
+                logger.warning(f"    [FAIL] Download error: {e}")
+                
+            time.sleep(0.5)
 
-            return total_downloaded
-
-        finally:
-            if browser: browser.close()
-            if pw: pw.stop()
+        return downloaded_count
 
 
 if __name__ == "__main__":
@@ -282,6 +259,7 @@ if __name__ == "__main__":
 
     downloader = CanaraDownloader()
     result = downloader.download(args.year, args.month)
+    print(json.dumps(result))
 
     status = result["status"]
     if status == "success":
@@ -289,7 +267,7 @@ if __name__ == "__main__":
     elif status == "skipped":
         logger.success(f"[SUCCESS] Success: Month already complete (Consolidation refreshed)")
     elif status == "not_published":
-        logger.info(f"[INFO]  Info: Month not yet published")
+        logger.info(f"[INFO] Info: Month not yet published")
     else:
         logger.error(f"[ERROR] Failed: {result.get('reason', 'Unknown error')}")
         raise SystemExit(1)

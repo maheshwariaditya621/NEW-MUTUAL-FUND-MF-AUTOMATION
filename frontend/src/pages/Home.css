@@ -342,14 +342,23 @@
 }
 
 @media (max-width: 768px) {
+    .hero-section {
+        padding: 50px 0 40px;
+    }
+
     .hero-title {
-        font-size: 2.5rem;
+        font-size: clamp(2rem, 7vw, 2.5rem);
+    }
+
+    .hero-subtitle {
+        font-size: 1.05rem;
+        margin-bottom: 32px;
     }
 
     .hero-stats {
         flex-direction: column;
-        gap: 24px;
-        padding: 24px;
+        gap: 20px;
+        padding: 20px;
         width: 100%;
         max-width: 300px;
     }
@@ -359,13 +368,65 @@
         height: 1px;
     }
 
+    .features-section {
+        padding: 48px 0;
+    }
+
+    .section-header {
+        margin-bottom: 36px;
+    }
+
+    .section-header h2 {
+        font-size: 2rem;
+    }
+
     .features-grid {
         grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .glass-card {
+        padding: 24px 20px;
+    }
+
+    .trust-section {
+        padding: 40px 0;
     }
 
     .trust-grid {
         flex-direction: column;
         align-items: center;
-        gap: 48px;
+        gap: 36px;
     }
 }
+
+@media (max-width: 480px) {
+    .hero-section {
+        padding: 36px 0 28px;
+    }
+
+    .hero-title {
+        font-size: 1.85rem;
+    }
+
+    .hero-subtitle {
+        font-size: 0.95rem;
+    }
+
+    .hero-stats {
+        padding: 16px;
+        max-width: 100%;
+    }
+
+    .stat-number {
+        font-size: 1.6rem;
+    }
+
+    .section-header h2 {
+        font-size: 1.6rem;
+    }
+
+    .glass-card {
+        padding: 20px 16px;
+    }
+}

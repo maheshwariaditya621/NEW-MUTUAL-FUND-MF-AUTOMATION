@@ -58,6 +58,9 @@ class WealthExtractorV1(BaseExtractor):
                     row_vals = [str(v).strip() for v in df_raw.iloc[i].values if pd.notna(v)]
                     row_text = " ".join(row_vals)
                     if "WEALTH COMPANY" in row_text.upper():
+                        clean_upper = row_text.upper().strip()
+                        if clean_upper in ["THE WEALTH COMPANY MUTUAL FUND", "THE WEALTH COMPANY"]:
+                            continue
                         scheme_raw = row_text
                         break
                 

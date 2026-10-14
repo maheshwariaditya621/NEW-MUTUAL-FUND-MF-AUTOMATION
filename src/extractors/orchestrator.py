@@ -97,6 +97,14 @@ class ExtractionOrchestrator:
 
             holdings = extractor.extract(str(file_path))
             rows_read = len(holdings)
+
+            if rows_read == 0:
+                logger.error(f"Zero holdings extracted from {file_path}. Rejecting load to protect database integrity.")
+                return {
+                    "status": "failed",
+                    "reason": "zero_holdings_extracted",
+                    "error": f"Extracted 0 holdings from {file_path.name}. File may be empty or malformed."
+                }
             
             if dry_run:
                 duration = time.time() - start_time
@@ -138,7 +146,15 @@ class ExtractionOrchestrator:
                 from src.loaders.anomaly_detector import AnomalyDetector
                 AnomalyDetector.run(period_id)
             
-            return {"status": "success", "rows_inserted": rows_inserted, "duration": duration}
+            return {
+                "status": "success",
+                "rows_read": rows_read,
+                "rows_inserted": rows_inserted,
+                "amc_id": amc_id,
+                "period_id": period_id,
+                "file_hash": file_hash,
+                "duration": duration
+            }
 
         except Exception as e:
             logger.exception(f"Unexpected error extracting {file_path}: {e}")

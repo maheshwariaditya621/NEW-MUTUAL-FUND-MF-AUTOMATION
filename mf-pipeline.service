@@ -1,0 +1,18 @@
+[Unit]
+Description=Mutual Fund AMC Master Pipeline Execution Service
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/mf-app
+Environment=PYTHONPATH=/home/ubuntu/mf-app
+ExecStart=/home/ubuntu/mf-app/.venv/bin/python -m src.scheduler.master_pipeline --mode auto --concurrency 2 --trigger-type SCHEDULED
+StandardOutput=journal
+StandardError=journal
+TimeoutSec=7200
+
+[Install]
+WantedBy=multi-user.target

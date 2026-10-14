@@ -155,7 +155,7 @@ class SamcoDownloader(BaseDownloader):
             return []
             
         monthly_toggle = None
-        for a in option2.find_all("a", class_="toggle"):
+        for a in option2.find_all(["button", "a"], class_="toggle"):
             if a.get_text(strip=True).lower() == "monthly":
                 monthly_toggle = a
                 break
@@ -232,7 +232,7 @@ class SamcoDownloader(BaseDownloader):
     def _run_download_flow(self, target_year: int, target_month: int, month_name: str, download_folder: Path) -> int:
         session = requests.Session()
         logger.info(f"Fetching SAMCO statutory disclosures page...")
-        resp = session.get(self.PAGE_URL, headers=self.HEADERS, timeout=30)
+        resp = session.get(self.PAGE_URL, headers=self.HEADERS, timeout=60)
         resp.raise_for_status()
         
         soup = BeautifulSoup(resp.text, "html.parser")

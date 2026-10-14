@@ -168,13 +168,20 @@ class ITIDownloader(BaseDownloader):
         Extract the actual statutory reporting month (1-12) and year (YYYY) from the filename.
         Handles numeric date patterns like 31.07.2026 or month names like AUGUST_2026.
         """
-        # 1. Check for numeric date formats like 31.07.2026 or 30-06-2026
+        # 1. Check for numeric date formats like 31.07.2026 or 30-06-2026 or 30092026
         numeric_match = re.search(r"(\d{1,2})[\._-](\d{1,2})[\._-](20\d{2})", filename)
         if numeric_match:
             month = int(numeric_match.group(2))
             year = int(numeric_match.group(3))
             if 1 <= month <= 12 and 2000 <= year <= 2099:
                 return month, year
+
+        # 1b. Check for compact numeric date formats like 30092026 (DDMMYYYY)
+        compact_match = re.search(r"(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(20\d{2})", filename)
+        if compact_match:
+            month = int(compact_match.group(2))
+            year = int(compact_match.group(3))
+            return month, year
 
         # 2. Check for month name and year in filename
         fname_clean = filename.lower().replace("-", " ").replace("_", " ").replace(".", " ")

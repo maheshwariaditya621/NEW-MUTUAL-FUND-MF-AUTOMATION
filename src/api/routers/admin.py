@@ -20,11 +20,6 @@ from src.services.admin_file_service import admin_file_service
 
 router = APIRouter()
 
-# ─────────────────────────────────────────────
-# In-memory job store for extraction runs
-# ─────────────────────────────────────────────
-_extraction_jobs: Dict[str, Any] = {}
-_cancelled_jobs: set = set()
 
 ALL_AMC_SLUGS = [
     "abakkus", "absl", "angelone", "axis", "bajaj", "bandhan", "baroda",
@@ -398,10 +393,13 @@ async def trigger_pipeline(
     request: PipelineRequest,
     background_tasks: BackgroundTasks,
 ):
-    """Trigger the data pipeline (download, merge, extract) for one or more AMCs."""
-    from src.downloaders.downloader_orchestrator import PipelineOrchestrator
+    """
+    Trigger the data pipeline using the centralized MasterPipelineRunner.
+    Backed 100% by PostgreSQL persistent execution ledger.
+    """
+    from src.scheduler.master_pipeline import MasterPipelineRunner
+    from src.db.ledger_repository import create_pipeline_run, init_ledger_entries
 
-    job_id = str(uuid.uuid4())[:8].upper()
     slugs = ALL_AMC_SLUGS if "all" in request.amc_slugs else request.amc_slugs
 
     # PREVENT FUTURE DATA RUNS
@@ -414,85 +412,67 @@ async def trigger_pipeline(
                    f"Data is only available for completed past months (before {now.year}-{now.month:02d})."
         )
 
-    _extraction_jobs[job_id] = {
-        "job_id": job_id,
-        "status": "queued",
-        "amc_slugs": slugs,
-        "year": request.year,
-        "month": request.month,
-        "steps": request.steps,
-        "dry_run": request.dry_run,
-        "redo": request.redo,
-        "results": {},
-        "started_at": datetime.utcnow().isoformat(),
-        "completed_at": None,
-        "total": len(slugs),
-        "done": 0,
-    }
+    runner = MasterPipelineRunner(
+        year=request.year,
+        month=request.month,
+        amc_slugs=slugs,
+        concurrency=2,
+        dry_run=request.dry_run,
+        redo=request.redo,
+        trigger_type="MANUAL"
+    )
 
-    def run_pipeline():
-        try:
-            orchestrator = PipelineOrchestrator(cancelled_jobs=_cancelled_jobs)
-            _extraction_jobs[job_id]["status"] = "running"
-            for slug in slugs:
-                # CHECK FOR CANCELLATION
-                if job_id in _cancelled_jobs:
-                    logger.warning(f"Job {job_id} cancelled by user. Halting pipeline.")
-                    break
+    # Dispatch to background task
+    background_tasks.add_task(runner.run)
 
-                try:
-                    result = orchestrator.run_pipeline(
-                        amc_slug=slug,
-                        year=request.year,
-                        month=request.month,
-                        steps=request.steps,
-                        dry_run=request.dry_run,
-                        redo=request.redo,
-                        job_id=job_id
-                    )
-                    _extraction_jobs[job_id]["results"][slug] = result
-                except Exception as e:
-                    logger.error(f"Pipeline error for {slug}: {e}")
-                    _extraction_jobs[job_id]["results"][slug] = {
-                        "status": "error", "error": str(e)[:300]
-                    }
-                _extraction_jobs[job_id]["done"] += 1
-        finally:
-            _extraction_jobs[job_id]["status"] = "completed"
-            _extraction_jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
-
-    background_tasks.add_task(run_pipeline)
-    return {"job_id": job_id, "status": "queued", "amc_count": len(slugs)}
+    return {"job_id": runner.run_id, "status": "queued", "amc_count": len(slugs)}
 
 
 @router.get("/extraction-jobs", dependencies=[Depends(verify_admin)])
 async def get_extraction_jobs():
-    """List the 20 most recent extraction jobs."""
-    jobs = sorted(
-        _extraction_jobs.values(),
-        key=lambda x: x["started_at"],
-        reverse=True
-    )[:20]
-    return jobs
+    """List the 20 most recent extraction jobs from PostgreSQL execution ledger."""
+    from src.db.ledger_repository import get_recent_pipeline_runs
+    return get_recent_pipeline_runs(limit=20)
 
 
 @router.post("/cancel-job/{job_id}", dependencies=[Depends(verify_admin)])
-async def cancel_job(job_id: str):
-    """Mark a job as cancelled so the orchestrator stops processing further AMCs."""
-    if job_id not in _extraction_jobs:
+async def cancel_job(job_id: str, cur: cursor = Depends(get_db_cursor)):
+    """Mark a job and pending ledger entries as cancelled in PostgreSQL."""
+    cur.execute(
+        """
+        UPDATE pipeline_runs
+        SET status = 'CANCELLED',
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE run_id = %s;
+        """,
+        (job_id,)
+    )
+    if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    _cancelled_jobs.add(job_id)
-    _extraction_jobs[job_id]["status"] = "cancelled"
-    return {"message": f"Job {job_id} cancellation requested"}
+
+    cur.execute(
+        """
+        UPDATE pipeline_execution_ledger
+        SET status = 'CANCELLED',
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE run_id = %s AND status = 'PENDING';
+        """,
+        (job_id,)
+    )
+    cur.connection.commit()
+    return {"message": f"Job {job_id} cancellation recorded in ledger"}
 
 
 @router.get("/extraction-jobs/{job_id}", dependencies=[Depends(verify_admin)])
 async def get_extraction_job(job_id: str):
-    """Return status and results for a specific job."""
-    if job_id not in _extraction_jobs:
+    """Return status and per-AMC results for a specific job from PostgreSQL execution ledger."""
+    from src.db.ledger_repository import get_pipeline_run_details
+    details = get_pipeline_run_details(job_id)
+    if not details:
         raise HTTPException(status_code=404, detail="Job not found")
-    return _extraction_jobs[job_id]
+    return details
 
 
 # ─────────────────────────────────────────────────────────

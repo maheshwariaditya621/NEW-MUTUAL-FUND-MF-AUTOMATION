@@ -64,7 +64,7 @@
 /* AMC Grid */
 .amc-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
     gap: 24px;
 }
 
@@ -290,5 +290,19 @@
     .scheme-table th:nth-child(3),
     .scheme-table td:nth-child(3) {
         display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .amc-card {
+        padding: 16px;
+    }
+
+    .amc-card-header h3 {
+        font-size: 1rem;
+    }
+
+    .amc-stats {
+        gap: 8px;
     }
 }

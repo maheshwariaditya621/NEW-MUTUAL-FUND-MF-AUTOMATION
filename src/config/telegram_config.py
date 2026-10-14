@@ -4,12 +4,14 @@ Telegram configuration for alerts.
 Set your credentials in environment variables or update here.
 """
 
+import os
+
 # ============================================================================
 # TELEGRAM CREDENTIALS
 # ============================================================================
-# Get these from @BotFather on Telegram
-TELEGRAM_BOT_TOKEN = "8508088144:AAHvwtlu3R1seJJtleM3OPRTZFXv2-Sdq7o"  # Replace with your bot token
-TELEGRAM_CHAT_ID = "1308792142"      # Replace with your chat ID
+# Get these from @BotFather on Telegram or environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8647498516:AAFXHfMga4Men0HzL65ikQF6BbK0JfS2xyY")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1308792142")
 
 # ============================================================================
 # ALERT TYPE FEATURE FLAGS

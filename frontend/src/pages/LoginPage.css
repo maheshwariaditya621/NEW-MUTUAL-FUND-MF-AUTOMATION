@@ -242,3 +242,35 @@
 .loading-text {
     animation: pulse 1.5s infinite;
 }
+
+/* ── Responsive Styling (Mobile 320px+) ── */
+@media (max-width: 480px) {
+    .login-container {
+        padding: 16px 12px;
+    }
+
+    .login-card {
+        padding: 24px 18px;
+        border-radius: 16px;
+    }
+
+    .login-header {
+        margin-bottom: 24px;
+    }
+
+    .login-logo {
+        font-size: 2.2rem;
+    }
+
+    .login-title {
+        font-size: 1.35rem;
+    }
+
+    .login-subtitle {
+        font-size: 0.85rem;
+    }
+
+    .login-footer {
+        margin-top: 20px;
+    }
+}

@@ -79,18 +79,20 @@ class HSBCDownloader(BaseDownloader):
     def __init__(self):
         super().__init__(self.AMC_NAME)
         self.notifier = get_notifier()
+        self.session = requests.Session()
+        self.session.headers.update(self.DEFAULT_HEADERS)
 
     def _fetch_html(self) -> str:
         """
-        Fetch HTML from Information Library page with retries.
+        Fetch HTML from Information Library page with persistent session and retries.
         """
-        max_attempts = 4
-        backoff = [5, 10, 20, 30]
+        max_attempts = 6
+        backoff = [3, 5, 8, 12, 18, 25]
 
         for attempt in range(1, max_attempts + 1):
             try:
                 logger.info(f"Fetching HTML from HSBC Information Library (attempt {attempt}/{max_attempts})...")
-                response = requests.get(self.LIBRARY_URL, headers=self.DEFAULT_HEADERS, timeout=60)
+                response = self.session.get(self.LIBRARY_URL, timeout=(15, 60))
                 response.raise_for_status()
                 html = response.text
 
@@ -189,7 +191,8 @@ class HSBCDownloader(BaseDownloader):
                 continue
 
             href = a["href"].strip()
-            if not any(href.lower().endswith(ext) for ext in [".xlsx", ".xls"]):
+            is_excel = any(href.lower().endswith(ext) for ext in [".xlsx", ".xls"]) or "portfolios/document-" in href.lower()
+            if not is_excel:
                 continue
 
             title = a.get_text(" ", strip=True)
@@ -205,6 +208,9 @@ class HSBCDownloader(BaseDownloader):
                 seen_urls.add(full_url)
 
                 filename = os.path.basename(href.split("?")[0])
+                if not filename.lower().endswith((".xlsx", ".xls")):
+                    filename = f"{filename}.xlsx"
+
                 matching_records.append({
                     "scheme": scheme_name,
                     "title": title,
@@ -217,9 +223,12 @@ class HSBCDownloader(BaseDownloader):
 
     def _download_file(self, url: str, file_path: Path) -> bool:
         """Download single file with retry logic and OpenXML validation."""
-        for attempt in range(MAX_RETRIES + 1):
+        max_attempts = 5
+        backoff = [2, 5, 10, 15, 20]
+
+        for attempt in range(1, max_attempts + 1):
             try:
-                response = requests.get(url, headers=self.DEFAULT_HEADERS, timeout=60)
+                response = self.session.get(url, timeout=(15, 60))
                 response.raise_for_status()
                 content = response.content
 
@@ -241,19 +250,19 @@ class HSBCDownloader(BaseDownloader):
                 return True
 
             except (requests.Timeout, requests.ConnectionError) as e:
-                if attempt < MAX_RETRIES:
-                    wait_time = RETRY_BACKOFF[attempt]
-                    logger.warning(f"Download error: {e}. Retrying in {wait_time}s...")
+                if attempt < max_attempts:
+                    wait_time = backoff[attempt - 1]
+                    logger.warning(f"Download error on {url} (attempt {attempt}/{max_attempts}): {e}. Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"Failed to download after {MAX_RETRIES + 1} attempts")
+                    logger.error(f"Failed to download after {max_attempts} attempts: {e}")
                     return False
             except requests.HTTPError as e:
                 if 400 <= e.response.status_code < 500:
                     logger.error(f"Client error {e.response.status_code} downloading {url}")
                     return False
-                elif attempt < MAX_RETRIES:
-                    wait_time = RETRY_BACKOFF[attempt]
+                elif attempt < max_attempts:
+                    wait_time = backoff[attempt - 1]
                     time.sleep(wait_time)
                 else:
                     return False

@@ -156,7 +156,9 @@ class AngelOneExtractorV1(BaseExtractor):
                 if pd.notna(val):
                     v_str = str(val).strip()
                     v_upper = v_str.upper()
-                    if ("ANGEL ONE" in v_upper or v_upper.startswith("AO ")) and "PORTFOLIO" not in v_upper:
+                    if v_upper in ["ANGEL ONE MUTUAL FUND", "ANGEL ONE MF", "ANGELONE MUTUAL FUND", "ANGEL ONE MUTUAL FUND."]:
+                        continue
+                    if ("ANGEL ONE" in v_upper or "ANGELONE" in v_upper or v_upper.startswith("AO ")) and "PORTFOLIO" not in v_upper:
                         import re
                         # Clean fragments like "(R" at the end
                         v_str = re.sub(r'\s*\(R$', '', v_str)

@@ -49,21 +49,38 @@ class HSBCExtractorV1(BaseExtractor):
                 if df_head.empty:
                     continue
 
-                # 1. Extract Scheme Name (Row 1, Index 1)
-                try:
-                    raw_scheme_name = str(df_head.iloc[1, 0]).strip()
-                    if not raw_scheme_name or raw_scheme_name.lower() == 'nan':
-                        raw_scheme_name = sheet_name
-                except Exception:
+                # 1. Extract Scheme Name robustly (handles multi-line row 0, row 1, and sheet name)
+                header_blacklist = ["NAME OF THE", "INSTRUMENT", "ISIN", "QUANTITY", "PORTFOLIO STATEMENT", "STATEMENT OF", "DISCLAIMER", "NOTES"]
+                r0 = str(df_head.iloc[0, 0]).strip() if len(df_head) > 0 and len(df_head.columns) > 0 else ""
+                r1 = str(df_head.iloc[1, 0]).strip() if len(df_head) > 1 and len(df_head.columns) > 0 else ""
+
+                raw_scheme_name = None
+                # Check multi-line in row 0 (e.g. "HSBC Mutual Fund\nHSBC Midcap Fund\n...")
+                if "\n" in r0:
+                    for line in r0.split("\n"):
+                        l_clean = line.replace("HSBC Mutual Fund", "").strip()
+                        if l_clean and len(l_clean) > 3 and not any(b in l_clean.upper() for b in header_blacklist):
+                            raw_scheme_name = l_clean
+                            break
+
+                # Check single-line in row 0
+                if not raw_scheme_name and r0 and r0.lower() != 'nan' and r0 != "HSBC Mutual Fund":
+                    r0_clean = r0.replace("HSBC Mutual Fund", "").strip()
+                    if r0_clean and not any(b in r0_clean.upper() for b in header_blacklist):
+                        raw_scheme_name = r0_clean
+
+                # Check row 1
+                if not raw_scheme_name and r1 and r1.lower() != 'nan':
+                    r1_clean = r1.replace("HSBC Mutual Fund", "").strip()
+                    if r1_clean and not any(b in r1_clean.upper() for b in header_blacklist):
+                        raw_scheme_name = r1_clean
+
+                # Fallback to sheet name
+                if not raw_scheme_name:
                     raw_scheme_name = sheet_name
 
-                # 2. Extract Date (Row 3, Index 3) - "Portfolio Statement as of December 31, 2025"
-                # For now, we trust the file structure, but could add regex parsing if needed.
-                
                 # Clean Scheme Name
-                # HSBC names are usually clean, but let's be safe
                 cleaned_scheme_name = raw_scheme_name.replace("HSBC Mutual Fund", "").strip()
-                
                 scheme_info = self.parse_verbose_scheme_name(cleaned_scheme_name)
                 
                 # 3. Find Header

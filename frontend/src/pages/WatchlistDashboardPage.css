@@ -222,9 +222,57 @@
     }
 }
 
+@media (max-width: 768px) {
+    .wl-page {
+        padding: 14px 0 40px;
+    }
+
+    .wl-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .wl-toolbar-left {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .wl-toolbar-title {
+        font-size: 1.25rem;
+    }
+
+    .wl-stat-pills {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+    }
+
+    .wl-table-wrap {
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .wl-net-banner {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+}
+
 @media (max-width: 600px) {
     .wl-insight-strip {
         grid-template-columns: 1fr;
+    }
+
+    .wl-drawer-body {
+        padding: 14px;
+    }
+
+    .wl-card-header {
+        padding: 10px 12px;
+        flex-wrap: wrap;
+        gap: 8px;
     }
 }
 

@@ -1132,3 +1132,102 @@
     border-radius: 8px;
     background: var(--bg-primary);
 }
+
+/* ── Responsive Styling (Tablets & Mobile 320px+) ── */
+@media (max-width: 768px) {
+    .ann-page {
+        padding: 14px 0 40px;
+    }
+
+    .ann-page .container {
+        padding: 0 12px;
+    }
+
+    .ann-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .ann-toolbar-left {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .ann-toolbar-right {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .ann-title {
+        font-size: 1.35rem;
+    }
+
+    .ann-stats-bar {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+    }
+
+    .ann-filters-card {
+        padding: 12px 14px;
+    }
+
+    .ann-search-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .ann-search-input-wrap {
+        min-width: 100%;
+        width: 100%;
+    }
+
+    .ann-exchange-toggles {
+        width: 100%;
+        display: flex;
+    }
+
+    .ex-toggle-btn {
+        flex: 1;
+        text-align: center;
+    }
+
+    .ann-revision-toggle {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .ann-category-scroller {
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .pdf-iframe-view {
+        height: 360px;
+    }
+}
+
+@media (max-width: 480px) {
+    .ann-title {
+        font-size: 1.2rem;
+    }
+
+    .ann-stat-chip {
+        font-size: 0.75rem;
+        padding: 4px 8px;
+    }
+
+    .cat-pill {
+        font-size: 0.72rem;
+        padding: 4px 8px;
+    }
+
+    .pdf-iframe-view {
+        height: 280px;
+    }
+}
+

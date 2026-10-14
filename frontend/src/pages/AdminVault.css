@@ -542,3 +542,79 @@
     gap: 1rem;
     margin-top: 2rem;
 }
+
+/* ── Responsive Styling (Tablets & Mobile 320px+) ── */
+@media (max-width: 768px) {
+    .admin-container {
+        padding: 16px 12px;
+    }
+
+    .admin-vault-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 1.5rem;
+    }
+
+    .admin-vault-header h1 {
+        font-size: 1.4rem;
+    }
+
+    .admin-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+        padding: 1rem;
+    }
+
+    .stat-card .value {
+        font-size: 1.4rem;
+    }
+
+    .admin-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        gap: 8px;
+        padding-bottom: 4px;
+        margin-bottom: 1.5rem;
+    }
+
+    .tab-btn {
+        white-space: nowrap;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.88rem;
+    }
+
+    .admin-table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .admin-table th,
+    .admin-table td {
+        padding: 0.6rem 0.75rem;
+        font-size: 0.82rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .admin-stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .permissions-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-footer {
+        flex-direction: column-reverse;
+        gap: 8px;
+    }
+
+    .modal-footer button {
+        width: 100%;
+    }
+}
