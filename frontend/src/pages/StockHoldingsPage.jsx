@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
+import { X } from 'lucide-react';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
 import PageEmptyState from '../components/common/PageEmptyState';
 import ExportButton from '../components/common/ExportButton';
 import WatchButton from '../components/common/WatchButton';
+import FundManagerCard from '../components/FundManagerCard';
 import { getStockHoldings, getStockPrice } from '../api/stocks';
 import { handleApiError } from '../api/client';
 import { formatNumber } from '../utils/helpers';
@@ -471,6 +473,7 @@ export default function StockHoldingsPage() {
     const [showTrajectoryChart, setShowTrajectoryChart] = useState(false);
     const [expandedCats, setExpandedCats] = useState({}); // sub_category -> bool
     const [schemeTypeFilter, setSchemeTypeFilter] = useState('all'); // 'all' | 'pure_equity' | 'arbitrage'
+    const [inspectSchemeId, setInspectSchemeId] = useState(null);
     const tableWrapRef = useRef(null);
 
     const displayMonths = useMemo(() => {
@@ -1667,7 +1670,34 @@ export default function StockHoldingsPage() {
                                                         </div>
                                                         <div className="shp-fund-sub">
                                                             {viewMode === 'scheme'
-                                                                ? item.amc_name
+                                                                ? (
+                                                                    <span>
+                                                                        {item.amc_name}
+                                                                        {item.fund_managers && item.fund_managers.length > 0 && (
+                                                                            <span
+                                                                                style={{
+                                                                                    marginLeft: '8px',
+                                                                                    color: '#10b981',
+                                                                                    cursor: 'pointer',
+                                                                                    display: 'inline-flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: '3px',
+                                                                                    fontWeight: '500',
+                                                                                    background: 'rgba(16, 185, 129, 0.1)',
+                                                                                    padding: '1px 6px',
+                                                                                    borderRadius: '4px'
+                                                                                }}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setInspectSchemeId(item.scheme_id);
+                                                                                }}
+                                                                                title="Click to view fund manager and scheme details"
+                                                                            >
+                                                                                👤 {item.fund_managers[0]}{item.fund_managers.length > 1 ? ` +${item.fund_managers.length - 1}` : ''}
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                )
                                                                 : (
                                                                     schemeTypeFilter === 'all' && item.has_arbitrage
                                                                         ? `${item.scheme_count} schemes (${item.equity_schemes_all} Equity, ${item.arb_schemes_all} Arb) | ${aumViewMode === 'total' ? 'Total' : 'EQ'} AUM: ₹${fmtCr(aumViewMode === 'total' ? item.total_aum_cr : item.equity_aum_cr)} Cr`
@@ -1704,6 +1734,29 @@ export default function StockHoldingsPage() {
                     </>
                 )}
             </div>
+
+            {/* Scheme Manager Inspection Modal */}
+            {inspectSchemeId && (
+                <div className="modal-overlay" onClick={() => setInspectSchemeId(null)}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '640px', padding: '24px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Mutual Fund Manager Details</h3>
+                            <button className="icon-btn" onClick={() => setInspectSchemeId(null)} aria-label="Close modal">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <FundManagerCard schemeId={inspectSchemeId} />
+                        <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                            <button type="button" className="btn-secondary" onClick={() => setInspectSchemeId(null)}>
+                                Close
+                            </button>
+                            <Link to={`/schemes?scheme_id=${inspectSchemeId}`} className="btn-approve" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                Open Full Scheme Portfolio →
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }

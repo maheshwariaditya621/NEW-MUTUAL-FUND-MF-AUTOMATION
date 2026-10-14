@@ -117,4 +117,5 @@ brain/
 oracle/
 *.key
 *.key.pub
+amc_testing/
 

@@ -61,31 +61,33 @@ async def search_schemes(
                     s.option_type,
                     s.website_category,
                     s.website_sub_category,
-                    100 as relevance_score
+                    100 as relevance_score,
+                    COALESCE(mgrs.manager_names, ARRAY[]::varchar[]) as fund_managers
                 FROM schemes s
                 JOIN amcs a ON s.amc_id = a.amc_id
+                LEFT JOIN (
+                    SELECT sfm.scheme_id, ARRAY_AGG(DISTINCT sfm.source_manager_name) as manager_names,
+                           STRING_AGG(DISTINCT sfm.source_manager_name, ' ') as manager_names_str
+                    FROM scheme_fund_managers sfm
+                    WHERE sfm.is_active = TRUE
+                    GROUP BY sfm.scheme_id
+                ) mgrs ON s.scheme_id = mgrs.scheme_id
                 ORDER BY s.scheme_name
                 LIMIT %s
                 """,
                 (limit,)
             )
         else:
-            # Build conditions: Each word must match via ILIKE on scheme or AMC
+            # Build conditions: Each word must match via ILIKE on scheme, AMC, or manager
             placeholders = []
             conditions = []
             for word in words:
                 pattern = f"%{word}%"
-                conditions.append("(s.scheme_name ILIKE %s OR a.amc_name ILIKE %s)")
-                placeholders.extend([pattern, pattern])
+                conditions.append("(s.scheme_name ILIKE %s OR a.amc_name ILIKE %s OR mgrs.manager_names_str ILIKE %s)")
+                placeholders.extend([pattern, pattern, pattern])
             
             conditions_str = " AND ".join(conditions)
             
-            # query_placeholders contains 2 * len(words) entries
-            # query_placeholders order:
-            # 1. CASE ranking (3 %s)
-            # 2. WHERE word conditions (len(placeholders) %s)
-            # 3. WHERE OR condition (2 %s)
-            # 4. LIMIT (1 %s)
             query_placeholders = [
                 q, q + '%', q  # CASE ranking
             ] + placeholders + [
@@ -93,7 +95,6 @@ async def search_schemes(
                 limit          # LIMIT
             ]
 
-            # Original query placeholders for CASE relevance + similarity
             cur.execute(
                 f"""
                 SELECT 
@@ -108,9 +109,17 @@ async def search_schemes(
                         WHEN UPPER(s.scheme_name) = UPPER(%s) THEN 100
                         WHEN s.scheme_name ILIKE %s THEN 85
                         ELSE (similarity(s.scheme_name, %s) * 80)::int
-                    END as relevance_score
+                    END as relevance_score,
+                    COALESCE(mgrs.manager_names, ARRAY[]::varchar[]) as fund_managers
                 FROM schemes s
                 JOIN amcs a ON s.amc_id = a.amc_id
+                LEFT JOIN (
+                    SELECT sfm.scheme_id, ARRAY_AGG(DISTINCT sfm.source_manager_name) as manager_names,
+                           STRING_AGG(DISTINCT sfm.source_manager_name, ' ') as manager_names_str
+                    FROM scheme_fund_managers sfm
+                    WHERE sfm.is_active = TRUE
+                    GROUP BY sfm.scheme_id
+                ) mgrs ON s.scheme_id = mgrs.scheme_id
                 WHERE ({conditions_str}) OR (s.scheme_name %% %s OR s.scheme_name ILIKE %s)
                 ORDER BY 
                     relevance_score DESC,
@@ -132,7 +141,8 @@ async def search_schemes(
                 option_type=row[4],
                 category=None,
                 website_category=row[5],
-                website_sub_category=row[6]
+                website_sub_category=row[6],
+                fund_managers=list(row[8]) if row[8] else []
             ))
         
         return SchemeSearchResponse(

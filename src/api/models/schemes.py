@@ -17,6 +17,7 @@ class SchemeSearchResult(BaseModel):
     category: Optional[str] = Field(None, description="Scheme category (e.g., Equity: Multi Cap)")
     website_category: Optional[str] = Field(None, description="Top-level website category")
     website_sub_category: Optional[str] = Field(None, description="Granular website sub-category")
+    fund_managers: Optional[List[str]] = Field(default_factory=list, description="Verified fund manager names")
 
 
 class MonthlyHoldingSnapshot(BaseModel):

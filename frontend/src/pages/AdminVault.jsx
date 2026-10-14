@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './AdminVault.css';
 import FileManagement from './admin/FileManagement';
+import FundManagerAdmin from './admin/FundManagerAdmin';
 import { useAuth } from '../contexts/AuthContext';
 import { 
     Users, UserPlus, Link as LinkIcon, Shield, Trash2, 
@@ -506,6 +507,7 @@ const AdminVault = () => {
                 <button className={`tab-btn ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>👥 Users & Access</button>
                 <button className={`tab-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>📁 File Manager</button>
                 <button className={`tab-btn ${activeTab === 'extraction' ? 'active' : ''}`} onClick={() => setActiveTab('extraction')}>🚀 Pipeline Control</button>
+                <button className={`tab-btn ${activeTab === 'fund_managers' ? 'active' : ''}`} onClick={() => setActiveTab('fund_managers')}>👔 Fund Managers</button>
             </div>
 
             <div className="tab-content">
@@ -1084,6 +1086,10 @@ const AdminVault = () => {
                             </div>
                         )}
                     </div>
+                )}
+
+                {activeTab === 'fund_managers' && (
+                    <FundManagerAdmin password={password} />
                 )}
             </div>
 

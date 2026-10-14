@@ -63,6 +63,8 @@ class SchemeHolding(BaseModel):
     total_aum_cr: Decimal = Field(..., description="Latest Total Assets Under Management in crores (including Debt/Liquid)")
     website_category: Optional[str] = Field(None, description="Top-level scheme category for display")
     website_sub_category: Optional[str] = Field(None, description="Granular sub-category for grouping")
+    scheme_id: Optional[int] = Field(None, description="Internal scheme ID")
+    fund_managers: Optional[List[str]] = Field(default_factory=list, description="Verified fund manager names")
 
     # Historical data (last N months)
     history: List[HistoricalHolding] = Field(..., description="Monthly holding history for this scheme")

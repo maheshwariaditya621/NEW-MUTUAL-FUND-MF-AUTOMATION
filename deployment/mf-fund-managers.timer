@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly Fund Manager Intelligence Sync Timer
+Requires=mf-fund-managers.service
+
+[Timer]
+Unit=mf-fund-managers.service
+OnCalendar=Mon *-*-* 06:00:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

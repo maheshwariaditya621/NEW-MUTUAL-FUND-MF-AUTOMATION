@@ -68,8 +68,10 @@ const FundsExplorerPage = () => {
         return schemes.filter(s => {
             const matchesCat = s.website_category === (Categories.find(c => c.id === activeCategory)?.label);
             const matchesSub = activeSubCategory === 'All' || s.website_sub_category === activeSubCategory;
-            const matchesSearch = s.scheme_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                s.amc_name.toLowerCase().includes(searchTerm.toLowerCase());
+            const sLower = searchTerm.toLowerCase();
+            const matchesSearch = s.scheme_name.toLowerCase().includes(sLower) ||
+                s.amc_name.toLowerCase().includes(sLower) ||
+                (s.fund_managers && s.fund_managers.some(m => m.toLowerCase().includes(sLower)));
             return matchesCat && matchesSub && matchesSearch;
         });
     }, [schemes, activeCategory, activeSubCategory, searchTerm]);
@@ -208,6 +210,14 @@ const FundsExplorerPage = () => {
                                             <span className="sub-cat-badge">{scheme.website_sub_category}</span>
                                         </div>
                                         <h3 className="scheme-title">{formatSchemeName(scheme.scheme_name)}</h3>
+                                        {scheme.fund_managers && scheme.fund_managers.length > 0 && (
+                                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '5px', margin: '4px 0 8px 0' }}>
+                                                <span style={{ color: '#10b981' }}>👤</span>
+                                                <span style={{ fontWeight: '500' }}>
+                                                    {scheme.fund_managers.slice(0, 2).join(', ')}{scheme.fund_managers.length > 2 ? ` +${scheme.fund_managers.length - 2}` : ''}
+                                                </span>
+                                            </div>
+                                        )}
                                         <div className="card-info-footer">
                                             <span className="plan-type">{scheme.plan_type} • {scheme.option_type}</span>
                                             <Link

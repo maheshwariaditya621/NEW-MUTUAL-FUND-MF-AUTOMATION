@@ -10,6 +10,7 @@ import { searchSchemes, getSchemePortfolio } from '../api/schemes';
 import { getBulkPrices } from '../api/stocks';
 import { handleApiError } from '../api/client';
 import { formatCrores, formatPercent, formatNumber } from '../utils/helpers';
+import FundManagerCard from '../components/FundManagerCard';
 import './SchemePortfolioPage.css';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -325,6 +326,12 @@ export default function SchemePortfolioPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* ── Verified Fund Managers Intelligence ── */}
+                        <FundManagerCard 
+                            schemeId={portfolio.scheme_id || Number(schemeIdParam)} 
+                            onSelectScheme={handleSelectSchemeById} 
+                        />
 
                         {/* ── Collapsible Sector Breakdown Top Banner ── */}
                         {showSectorBanner && sectorAllocation.length > 0 && (

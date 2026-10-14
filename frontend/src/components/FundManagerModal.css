@@ -1,0 +1,207 @@
+.fmm-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: fmmFadeIn 0.2s ease-out;
+}
+
+@keyframes fmmFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.fmm-modal {
+    background: var(--bg-card, #1e293b);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 760px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.fmm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border-color, #334155);
+    background: var(--bg-secondary, #0f172a);
+}
+
+.fmm-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.fmm-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    color: #fff;
+    font-weight: 700;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fmm-title-group h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary, #f8fafc);
+}
+
+.fmm-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.fmm-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #94a3b8);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+
+.fmm-close-btn:hover {
+    background: var(--bg-tertiary, #334155);
+    color: var(--text-primary, #f8fafc);
+}
+
+.fmm-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.fmm-kpi-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.fmm-kpi-card {
+    background: var(--bg-secondary, #0f172a);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 8px;
+    padding: 12px 16px;
+}
+
+.fmm-kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-secondary, #94a3b8);
+    margin-bottom: 4px;
+}
+
+.fmm-kpi-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary, #f8fafc);
+}
+
+.fmm-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary, #f8fafc);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fmm-schemes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.fmm-scheme-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    background: var(--bg-secondary, #0f172a);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 8px;
+    transition: transform 0.15s, border-color 0.15s;
+}
+
+.fmm-scheme-item:hover {
+    border-color: #3b82f6;
+    transform: translateX(2px);
+}
+
+.fmm-scheme-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.fmm-scheme-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary, #f8fafc);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fmm-scheme-sub {
+    font-size: 11px;
+    color: var(--text-secondary, #94a3b8);
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fmm-view-btn {
+    font-size: 12px;
+    font-weight: 600;
+    color: #3b82f6;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: rgba(59, 130, 246, 0.1);
+    transition: background 0.15s;
+    margin-left: 12px;
+    white-space: nowrap;
+}
+
+.fmm-view-btn:hover {
+    background: rgba(59, 130, 246, 0.2);
+}
+
+@media (max-width: 640px) {
+    .fmm-kpi-row {
+        grid-template-columns: 1fr;
+    }
+}

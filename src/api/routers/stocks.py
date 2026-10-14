@@ -726,6 +726,18 @@ async def _get_stock_holdings_aggregated(
             "is_adjusted": mult > 1.001 or mult < 0.999
         }
 
+    # Batch load verified fund managers for all schemes present
+    all_sids = list(schemes_data.keys())
+    managers_by_scheme = {}
+    if all_sids:
+        cur.execute("""
+            SELECT sfm.scheme_id, ARRAY_AGG(DISTINCT sfm.source_manager_name)
+            FROM scheme_fund_managers sfm
+            WHERE sfm.scheme_id = ANY(%s) AND sfm.is_active = TRUE
+            GROUP BY sfm.scheme_id;
+        """, (all_sids,))
+        managers_by_scheme = dict(cur.fetchall())
+
     holdings = []
     for sid, data in schemes_data.items():
         # Pre-resolve qtys for all target periods
@@ -788,6 +800,7 @@ async def _get_stock_holdings_aggregated(
             # We sort by the latest month's percent to nav
             latest_nav = data["monthly_data"].get((latest_yr, latest_mo), {}).get("pnav", Decimal('0'))
             holdings.append((latest_nav, SchemeHolding(
+                scheme_id=sid,
                 scheme_name=data["name"],
                 amc_name=data["amc"],
                 plan_type=data["plan"],
@@ -796,6 +809,7 @@ async def _get_stock_holdings_aggregated(
                 total_aum_cr=data["total_aum_cr"],
                 website_category=data.get("website_category"),
                 website_sub_category=data.get("website_sub_category"),
+                fund_managers=managers_by_scheme.get(sid, []),
                 history=history
             )))
 
