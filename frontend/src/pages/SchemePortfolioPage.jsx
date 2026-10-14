@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
@@ -31,7 +31,7 @@ function dateToLabel(date) {
     return `${MONTH_NAMES[date.getMonth()]}-${String(date.getFullYear()).slice(2)}`;
 }
 
-function computeDisplayMonths(endLabel, n = 4) {
+function computeDisplayMonths(endLabel, n = 3) {
     const end = labelToDate(endLabel);
     const result = [];
     for (let i = 0; i < n; i++) {
@@ -41,14 +41,54 @@ function computeDisplayMonths(endLabel, n = 4) {
     return result;
 }
 
-function TrendIcon({ current, previous }) {
-    if (previous == null || previous === 0) return null;
-    const isUp = current > previous;
-    const isDown = current < previous;
-    if (!isUp && !isDown) return null;
-    const cls = isUp ? 'shp-pos' : 'shp-neg';
-    const char = isUp ? '▲' : '▼';
-    return <span className={`rv-trend ${cls}`}>{char}</span>;
+function ChangeCell({ change, pct }) {
+    if (change == null) return <MissingData inline />;
+    if (change === 0) return <span className="shp-change-neutral">—</span>;
+    const isPos = change > 0;
+    const isNeg = change < 0;
+    const cls = isPos ? 'pos' : isNeg ? 'neg' : 'neutral';
+    const sign = isPos ? '+' : '';
+
+    return (
+        <div className={`shp-change-cell ${cls}`}>
+            <span className="shp-change-val">{sign}{fmt(change)}</span>
+            {pct != null && (
+                <span className="shp-change-pct">
+                    ({sign}{pct.toFixed(2)}%)
+                </span>
+            )}
+        </div>
+    );
+}
+
+function MiniSparkline({ history }) {
+    if (!history || history.length < 2) return null;
+    const vals = history.map(h => h.num_shares).filter(v => v !== null && v !== undefined);
+    if (vals.length < 2) return null;
+    const rev = [...vals].reverse();
+    const min = Math.min(...rev);
+    const max = Math.max(...rev);
+    const range = max - min || 1;
+    const w = 38;
+    const h = 16;
+    const pointsArr = rev.map((val, idx) => {
+        const x = (idx / (rev.length - 1)) * (w - 8) + 4;
+        const y = h - 3 - ((val - min) / range) * (h - 6);
+        return [x, y];
+    });
+    const pointsStr = pointsArr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const lastPoint = pointsArr[pointsArr.length - 1];
+
+    const isGrowing = rev[rev.length - 1] > rev[0];
+    const isFlat = rev[rev.length - 1] === rev[0];
+    const stroke = isGrowing ? '#10b981' : isFlat ? '#94a3b8' : '#f43f5e';
+
+    return (
+        <svg className="shp-sparkline" width={w} height={h} viewBox={`0 0 ${w} ${h}`} title="Holding trend trajectory">
+            <polyline fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" points={pointsStr} />
+            <circle cx={lastPoint[0].toFixed(1)} cy={lastPoint[1].toFixed(1)} r="2" fill={stroke} />
+        </svg>
+    );
 }
 
 export default function SchemePortfolioPage() {
@@ -172,6 +212,16 @@ export default function SchemePortfolioPage() {
                     const bM = b.monthly_data.find(m => m.month === monthLabel);
                     aVal = aM ? aM.percent_to_aum || 0 : 0;
                     bVal = bM ? bM.percent_to_aum || 0 : 0;
+                } else if (sortConfig.key.startsWith('change_')) {
+                    const monthIdx = parseInt(sortConfig.key.split('_')[1]);
+                    const currLabel = displayMonths[monthIdx];
+                    const prevLabel = displayMonths[monthIdx + 1];
+                    const aCurr = a.monthly_data.find(m => m.month === currLabel)?.num_shares || 0;
+                    const aPrev = prevLabel ? (a.monthly_data.find(m => m.month === prevLabel)?.num_shares || 0) : 0;
+                    const bCurr = b.monthly_data.find(m => m.month === currLabel)?.num_shares || 0;
+                    const bPrev = prevLabel ? (b.monthly_data.find(m => m.month === prevLabel)?.num_shares || 0) : 0;
+                    aVal = aCurr - aPrev;
+                    bVal = bCurr - bPrev;
                 }
 
                 if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -322,12 +372,19 @@ export default function SchemePortfolioPage() {
                                                         company_name: h.company_name,
                                                         isin: h.isin,
                                                         sector: h.sector,
-                                                        live_price: h.live_price || livePrices[h.isin] || null,
+                                                        close_price: h.close_price || h.live_price || livePrices[h.isin] || null,
                                                     };
-                                                    displayMonths.forEach(m => {
+                                                    displayMonths.forEach((m, mIdx) => {
                                                         const md = histMap[m];
+                                                        const prevMonth = displayMonths[mIdx + 1];
+                                                        const prevMd = prevMonth ? histMap[prevMonth] : null;
+                                                        const currShares = md?.num_shares ?? null;
+                                                        const prevShares = prevMd?.num_shares ?? null;
+                                                        const chg = (currShares != null && prevShares != null) ? currShares - prevShares : null;
+
                                                         row[`pct_aum_${m}`] = md?.percent_to_aum ?? null;
-                                                        row[`shares_${m}`] = md?.num_shares ?? null;
+                                                        row[`shares_${m}`] = currShares;
+                                                        row[`change_${m}`] = chg;
                                                     });
                                                     return row;
                                                 });
@@ -336,10 +393,11 @@ export default function SchemePortfolioPage() {
                                                 { key: 'company_name', label: 'Company', exportFormat: 'string' },
                                                 { key: 'isin', label: 'ISIN', exportFormat: 'string' },
                                                 { key: 'sector', label: 'Sector', exportFormat: 'string' },
-                                                { key: 'live_price', label: 'LTP (₹)', exportFormat: 'numeric' },
+                                                { key: 'close_price', label: 'EOD Price (₹)', exportFormat: 'numeric' },
                                                 ...displayMonths.flatMap(m => [
                                                     { key: `pct_aum_${m}`, label: `% of AUM (${m})`, exportFormat: 'numeric' },
                                                     { key: `shares_${m}`, label: `Shares Held (${m})`, exportFormat: 'numeric' },
+                                                    { key: `change_${m}`, label: `Net Change (${m})`, exportFormat: 'numeric' },
                                                 ]),
                                             ]}
                                             pdfColumns={[
@@ -348,6 +406,7 @@ export default function SchemePortfolioPage() {
                                                 ...displayMonths.flatMap(m => [
                                                     { key: `pct_aum_${m}`, label: `% AUM (${m})`, exportFormat: 'numeric' },
                                                     { key: `shares_${m}`, label: `Shares (${m})`, exportFormat: 'numeric' },
+                                                    { key: `change_${m}`, label: `Change (${m})`, exportFormat: 'numeric' },
                                                 ]),
                                             ]}
                                             fileNameConfig={{
@@ -373,18 +432,19 @@ export default function SchemePortfolioPage() {
                                 </div>
                                 <table className="shp-table">
                                     <thead>
-                                        <tr className="shp-head-row">
-                                            <th rowSpan="2" className="shp-th shp-th-name" onClick={() => handleSort('company_name')} style={{ cursor: 'pointer' }}>
-                                                COMPANY NAME {renderSortArrow('company_name')}
+                                        <tr className="shp-thead-row-months">
+                                            <th className="shp-th shp-th-asset-hdr sortable" onClick={() => handleSort('company_name')}>
+                                                <div className="shp-th-sort-wrap">
+                                                    <span>Company Name</span>
+                                                    {renderSortArrow('company_name')}
+                                                </div>
                                             </th>
                                             {displayMonths.map((monthLabel, idx) => {
-                                                const mData = portfolio.monthly_aum.find(m => m.month === monthLabel);
+                                                const mData = portfolio.monthly_aum?.find(m => m.month === monthLabel);
                                                 return (
-                                                    <th key={idx} colSpan="2" className={`shp-th shp-th-month-group shp-month-${idx}`}>
-                                                        <div className="shp-sortable" onClick={() => handleSort(`shares_${idx}`)}>
-                                                            {monthLabel} {renderSortArrow(`shares_${idx}`)}
-                                                        </div>
-                                                        <div className="rv-aum-label" style={{ fontSize: '10px', marginTop: '2px', fontWeight: '400', opacity: 0.8 }}>
+                                                    <th key={idx} colSpan={3} className={`shp-th shp-month-group shp-month-${idx}`}>
+                                                        <span className="shp-month-title">{monthLabel}{idx === 0 ? ' (LATEST)' : ''}</span>
+                                                        <div className="rv-aum-label" style={{ fontSize: '10px', marginTop: '2px', fontWeight: '400', opacity: 0.85 }}>
                                                             {mData ? (
                                                                 aumViewMode === 'total'
                                                                     ? (mData.total_aum_cr > 0 ? `TOTAL: ₹ ${formatNumber(mData.total_aum_cr)} (Cr.)` : 'TOTAL: ₹ - (Cr.)')
@@ -395,14 +455,23 @@ export default function SchemePortfolioPage() {
                                                 );
                                             })}
                                         </tr>
-                                        <tr className="shp-head-row">
+                                        <tr className="shp-thead-row-subs">
+                                            <th className="shp-th shp-th-sub shp-th-asset-sub">
+                                                <span>Equity Portfolio Allocation</span>
+                                            </th>
                                             {displayMonths.map((monthLabel, idx) => (
                                                 <React.Fragment key={idx}>
-                                                    <th className={`shp-th shp-th-num shp-th-sub shp-group-start shp-month-${idx} sortable`} onClick={() => handleSort(`pnav_${idx}`)}>
-                                                        % OF AUM {renderSortArrow(`pnav_${idx}`)}
+                                                    <th className={`shp-th shp-th-sub shp-month-${idx} sortable`} onClick={() => handleSort(`pnav_${idx}`)}>
+                                                        <span>% AUM</span>
+                                                        {renderSortArrow(`pnav_${idx}`)}
                                                     </th>
-                                                    <th className={`shp-th shp-th-num shp-th-sub shp-month-${idx} sortable`} onClick={() => handleSort(`shares_${idx}`)}>
-                                                        SHARES HELD {renderSortArrow(`shares_${idx}`)}
+                                                    <th className={`shp-th shp-th-sub shp-month-${idx} sortable`} onClick={() => handleSort(`shares_${idx}`)}>
+                                                        <span>QTY</span>
+                                                        {renderSortArrow(`shares_${idx}`)}
+                                                    </th>
+                                                    <th className={`shp-th shp-th-sub shp-th-change-hdr shp-month-${idx} sortable`} onClick={() => handleSort(`change_${idx}`)}>
+                                                        <span>CHANGE</span>
+                                                        {renderSortArrow(`change_${idx}`)}
                                                     </th>
                                                 </React.Fragment>
                                             ))}
@@ -418,42 +487,58 @@ export default function SchemePortfolioPage() {
                                             return (
                                                 <tr key={hIdx} className="shp-row">
                                                     <td className="shp-td shp-td-name">
-                                                        <div className="shp-fund-name" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                            {holding.company_name}
+                                                        <div className="shp-fund-name" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                            <Link to={`/stocks?isin=${holding.isin}`} className="shp-fund-title-link">
+                                                                {holding.company_name}
+                                                            </Link>
                                                             {(holding.close_price || holding.live_price || livePrices[holding.isin]) && (
-                                                                <span className="rv-live-label" title={holding.price_date ? `NSE Bhavcopy EOD Close as of ${holding.price_date}` : 'NSE Bhavcopy EOD Close'}>
-                                                                    ₹ {formatNumber(holding.close_price || holding.live_price || livePrices[holding.isin])}
-                                                                    <span className="shp-mcap-info">
-                                                                        <span className="rv-info-icon-small" style={{ fontSize: '9px', fontWeight: '800' }}>EOD</span>
-                                                                        <span className="shp-mcap-tooltip" style={{ fontSize: '10px' }}>
-                                                                            End of Day (EOD) Closing Price{holding.price_date ? ` (${holding.price_date})` : ''} via NSE Bhavcopy
-                                                                        </span>
-                                                                    </span>
+                                                                <span className="rv-eod-chip-small" title={holding.price_date ? `NSE Bhavcopy EOD Close as of ${holding.price_date}` : 'NSE Bhavcopy EOD Close'}>
+                                                                    <span className="shp-eod-badge">EOD</span>
+                                                                    <span>₹{formatNumber(holding.close_price || holding.live_price || livePrices[holding.isin])}</span>
                                                                 </span>
                                                             )}
                                                         </div>
                                                         <div className="shp-fund-sub">
-                                                            {holding.isin} {holding.sector && `| ${holding.sector}`}
+                                                            {holding.isin} {holding.sector && `• ${holding.sector}`}
                                                         </div>
                                                     </td>
                                                     {displayMonths.map((monthLabel, mIdx) => {
                                                         const m = histMap[monthLabel];
-                                                        // Previous month is conceptually the next index in our newest-first array
                                                         const prevMonthLabel = displayMonths[mIdx + 1];
                                                         const prevM = prevMonthLabel ? histMap[prevMonthLabel] : null;
 
+                                                        const currShares = m?.num_shares;
+                                                        const prevShares = prevM?.num_shares;
+                                                        let change = null;
+                                                        let changePct = null;
+                                                        if (currShares != null && prevShares != null) {
+                                                            change = currShares - prevShares;
+                                                            if (prevShares > 0) {
+                                                                changePct = ((currShares - prevShares) / prevShares) * 100;
+                                                            } else if (currShares > 0) {
+                                                                changePct = 100;
+                                                            }
+                                                        }
+
                                                         return (
                                                             <React.Fragment key={mIdx}>
-                                                                <td className={`shp-td shp-td-num shp-month-${mIdx} shp-group-start`}>
+                                                                <td className={`shp-td shp-td-num shp-month-${mIdx}`}>
                                                                     {fmtPct(m?.percent_to_aum) || <MissingData />}
                                                                 </td>
                                                                 <td className={`shp-td shp-td-num shp-month-${mIdx}`}>
-                                                                    {m?.num_shares === null || m?.num_shares === undefined ? <MissingData /> : (m.num_shares === 0 ? '-' : (
-                                                                        <div className="rv-shares-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                                                                            <span>{fmt(m.num_shares)}</span>
-                                                                            <TrendIcon current={m.num_shares} previous={prevM?.num_shares} />
+                                                                    {currShares === null || currShares === undefined ? (
+                                                                        <MissingData />
+                                                                    ) : currShares === 0 ? (
+                                                                        '-'
+                                                                    ) : (
+                                                                        <div className="rv-shares-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                                            <span className="tabular-nums">{fmt(currShares)}</span>
+                                                                            {mIdx === 0 && <MiniSparkline history={holding.monthly_data} />}
                                                                         </div>
-                                                                    ))}
+                                                                    )}
+                                                                </td>
+                                                                <td className={`shp-td shp-td-num shp-month-${mIdx} shp-change-col`}>
+                                                                    <ChangeCell change={change} pct={changePct} />
                                                                 </td>
                                                             </React.Fragment>
                                                         );
@@ -463,7 +548,7 @@ export default function SchemePortfolioPage() {
                                         })}
                                         {getHoldingsToRender().length === 0 && (
                                             <tr>
-                                                <td colSpan={1 + displayMonths.length * 2} className="shp-empty">
+                                                <td colSpan={1 + displayMonths.length * 3} className="shp-empty">
                                                     No holdings match your search filters.
                                                 </td>
                                             </tr>

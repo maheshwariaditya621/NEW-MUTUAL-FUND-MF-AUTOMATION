@@ -720,3 +720,198 @@
         font-size: 10.5px;
     }
 }
+
+/* ── 2-Tier Sticky Table Header Overrides (matching StockHoldingsPage) ── */
+.shp-thead-row-months th {
+    position: sticky;
+    top: 0;
+    height: 40px;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: 2px 12px;
+    vertical-align: middle;
+    z-index: 50;
+    background: #090e1c !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-align: center;
+    color: var(--text-secondary, #94a3b8);
+}
+
+[data-theme="light"] .shp-thead-row-months th {
+    background: #f1f5f9 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    color: #475569;
+}
+
+.shp-thead-row-subs th {
+    position: sticky;
+    top: 40px;
+    height: 34px;
+    min-height: 34px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    line-height: 34px;
+    vertical-align: middle;
+    z-index: 49;
+    background: #0d1527 !important;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.16) !important;
+    box-shadow: 0 3px 6px -2px rgba(0, 0, 0, 0.4);
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-align: center;
+    color: #94a3b8;
+}
+
+[data-theme="light"] .shp-thead-row-subs th {
+    background: #ffffff !important;
+    border-bottom: 2px solid #cbd5e1 !important;
+    box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.08);
+    color: #64748b;
+}
+
+.shp-th.shp-th-asset-hdr {
+    position: sticky;
+    left: 0;
+    top: 0;
+    z-index: 60;
+    background: #090e1c !important;
+    text-align: left;
+    min-width: 260px;
+    max-width: 360px;
+    padding-left: 18px;
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+[data-theme="light"] .shp-th.shp-th-asset-hdr {
+    background: #f1f5f9 !important;
+    border-right: 2px solid #cbd5e1 !important;
+}
+
+.shp-th.shp-th-asset-sub {
+    position: sticky;
+    left: 0;
+    top: 40px;
+    z-index: 59;
+    background: #0d1527 !important;
+    text-align: left;
+    min-width: 260px;
+    max-width: 360px;
+    padding-left: 18px;
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
+    font-size: 10px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+[data-theme="light"] .shp-th.shp-th-asset-sub {
+    background: #ffffff !important;
+    border-right: 2px solid #cbd5e1 !important;
+    color: #94a3b8;
+}
+
+.shp-th-sort-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-primary, #f8fafc);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.shp-month-title {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    color: var(--text-primary, #f8fafc);
+}
+
+[data-theme="light"] .shp-month-title {
+    color: #0f172a;
+}
+
+.shp-th.shp-th-change-hdr.shp-month-0 {
+    border-right: 2px solid rgba(56, 189, 248, 0.35) !important;
+}
+
+.shp-th.shp-th-change-hdr.shp-month-1,
+.shp-th.shp-th-change-hdr.shp-month-2 {
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+.shp-td.shp-td-name {
+    position: sticky;
+    left: 0;
+    z-index: 20;
+    text-align: left;
+    min-width: 260px;
+    max-width: 360px;
+    padding-left: 18px;
+    border-right: 2px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+.shp-row:nth-child(odd) .shp-td.shp-td-name {
+    background: #090e1c !important;
+}
+
+.shp-row:nth-child(even) .shp-td.shp-td-name {
+    background: #0c1324 !important;
+}
+
+[data-theme="light"] .shp-row:nth-child(odd) .shp-td.shp-td-name {
+    background: #ffffff !important;
+    border-right: 2px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .shp-row:nth-child(even) .shp-td.shp-td-name {
+    background: #f8fafc !important;
+    border-right: 2px solid #cbd5e1 !important;
+}
+
+.shp-fund-title-link {
+    color: #38bdf8;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 13px;
+    transition: color 0.15s ease;
+}
+
+.shp-fund-title-link:hover {
+    color: #7dd3fc;
+    text-decoration: underline;
+}
+
+[data-theme="light"] .shp-fund-title-link {
+    color: #0284c7;
+}
+
+[data-theme="light"] .shp-fund-title-link:hover {
+    color: #0369a1;
+}
+
+.rv-eod-chip-small {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.shp-sparkline {
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
