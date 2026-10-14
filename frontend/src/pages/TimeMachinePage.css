@@ -1,0 +1,656 @@
+/* ═══════════════════════════════════════════════════════════════
+   TimeMachinePage — Premium Institutional Styling
+   ═══════════════════════════════════════════════════════════════ */
+
+.tm-page {
+    min-height: 100vh;
+    background: var(--bg-primary);
+    padding: 0 0 60px;
+}
+
+.tm-container {
+    max-width: 1540px;
+    margin: 0 auto;
+    padding: 24px 24px 0;
+}
+
+/* ── Hero Card ──────────────────────────────────────────────── */
+.tm-hero-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    position: relative;
+    overflow: hidden;
+}
+
+.tm-hero-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #3b82f6, #8b5cf6, #10b981);
+}
+
+.tm-hero-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.tm-hero-title-group {
+    max-width: 800px;
+}
+
+.tm-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    color: var(--accent-primary);
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+}
+
+.tm-pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #3b82f6;
+    box-shadow: 0 0 8px #3b82f6;
+}
+
+.tm-hero-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin: 0 0 6px 0;
+    letter-spacing: -0.02em;
+}
+
+.tm-hero-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0;
+}
+
+.tm-presets-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-tertiary);
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.tm-presets-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.tm-preset-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tm-preset-btn:hover {
+    background: var(--accent-primary);
+    color: #ffffff;
+    border-color: var(--accent-primary);
+}
+
+/* ── Period Control Deck ────────────────────────────────────── */
+.tm-period-control-deck {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    padding: 14px 18px;
+    border-radius: 10px;
+    flex-wrap: wrap;
+}
+
+.tm-period-block {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    padding: 8px 14px;
+    border-radius: 8px;
+    flex: 1;
+    min-width: 220px;
+}
+
+.tm-period-icon {
+    font-size: 18px;
+}
+
+.tm-period-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.tm-period-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+    margin-bottom: 2px;
+}
+
+.tm-period-select {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    outline: none;
+}
+
+.tm-jump-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 0 4px;
+}
+
+.tm-arrow-icon {
+    font-size: 18px;
+    color: var(--text-secondary);
+}
+
+.tm-gap-badge {
+    font-size: 10px;
+    font-weight: 700;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: #818cf8;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.tm-launch-btn {
+    background: var(--accent-primary);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+    white-space: nowrap;
+}
+
+.tm-launch-btn:hover:not(:disabled) {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+.tm-launch-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Bento Shift Cards ──────────────────────────────────────── */
+.tm-bento-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.tm-bento-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 18px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.tm-card-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+}
+
+.tm-shift-numbers {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.tm-shift-val {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-metric-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.tm-shift-delta-pill {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+.tm-shift-delta-pill.pos {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.tm-shift-delta-pill.neg {
+    background: rgba(244, 63, 94, 0.12);
+    color: #f43f5e;
+    border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.tm-rotation-stats {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    margin-bottom: 12px;
+}
+
+.tm-rot-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.tm-rot-count {
+    font-size: 22px;
+    font-weight: 800;
+}
+
+.tm-rot-count.pos { color: #10b981; }
+.tm-rot-count.neg { color: #f43f5e; }
+
+.tm-rot-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.tm-rot-divider {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.tm-rot-progress {
+    height: 6px;
+    background: rgba(244, 63, 94, 0.3);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.tm-rot-bar.pos {
+    height: 100%;
+    background: #10b981;
+    border-radius: 999px;
+    transition: width 0.4s ease;
+}
+
+.tm-lifecycle-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.tm-lifecycle-item {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.tm-lifecycle-badge {
+    font-size: 16px;
+    font-weight: 800;
+    padding: 6px 12px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+}
+
+.tm-lifecycle-badge.entrants {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.tm-lifecycle-badge.exits {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.tm-lifecycle-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.tm-lifecycle-subtext {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.8;
+}
+
+/* ── Sector Rotation Shift Card ─────────────────────────────── */
+.tm-sector-rotation-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 24px;
+}
+
+.tm-sector-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.tm-sector-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 2px 0 0;
+}
+
+.tm-sector-badge {
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.tm-sector-chips-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tm-sector-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.tm-sec-color-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.tm-sec-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tm-sec-delta {
+    font-weight: 700;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-sec-delta.pos { color: #10b981; }
+.tm-sec-delta.neg { color: #f43f5e; }
+
+/* ── Table Toolbar ──────────────────────────────────────────── */
+.tm-table-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.tm-table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.tm-tabs-group {
+    display: flex;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    padding: 4px;
+    border-radius: 8px;
+    gap: 4px;
+}
+
+.tm-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tm-tab-btn.active {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tm-tab-badge {
+    font-size: 10px;
+    font-weight: 800;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    padding: 1px 6px;
+    border-radius: 999px;
+}
+
+.tm-tab-btn.active .tm-tab-badge {
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--accent-primary);
+}
+
+.tm-filters-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.tm-mcap-pills {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-tertiary);
+    padding: 4px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.tm-mcap-pill {
+    background: transparent;
+    border: none;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.tm-mcap-pill.active {
+    background: var(--accent-primary);
+    color: #ffffff;
+}
+
+.tm-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.tm-search-input {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 7px 28px 7px 12px;
+    border-radius: 6px;
+    width: 220px;
+    outline: none;
+}
+
+.tm-search-input:focus {
+    border-color: var(--accent-primary);
+}
+
+.tm-clear-btn {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 11px;
+}
+
+/* ── Table Cells ────────────────────────────────────────────── */
+.tm-stock-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tm-sector-tag {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.tm-mcap-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.tm-mcap-badge.mcap-large {
+    background: rgba(37, 99, 235, 0.12);
+    color: #3b82f6;
+    border: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+.tm-mcap-badge.mcap-mid {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.tm-mcap-badge.mcap-small {
+    background: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.tm-mcap-badge.mcap-other {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.tm-delta-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-delta-shares {
+    font-weight: 700;
+    font-size: 12px;
+}
+
+.tm-delta-cell.pos .tm-delta-shares { color: #10b981; }
+.tm-delta-cell.neg .tm-delta-shares { color: #f43f5e; }
+.tm-delta-cell.neutral .tm-delta-shares { color: var(--text-secondary); }
+
+.tm-delta-pct {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.tm-funds-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-fund-diff {
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.tm-fund-diff.pos { color: #10b981; }
+.tm-fund-diff.neg { color: #f43f5e; }

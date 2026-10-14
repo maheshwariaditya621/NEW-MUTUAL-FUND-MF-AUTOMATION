@@ -28,6 +28,7 @@ class MonthlyHoldingData(BaseModel):
     ownership_percent: Optional[float] = Field(None, description="Percentage of company shares held by mutual funds in this month")
     month_change: Optional[int] = Field(None, description="Absolute change in shares from previous month")
     percent_change: Optional[float] = Field(None, description="Percentage change in shares from previous month")
+    avg_price: Optional[float] = Field(None, description="Average valuation price per share in this month")
 
 
 class HistoricalHolding(BaseModel):

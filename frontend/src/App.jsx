@@ -24,6 +24,7 @@ import AccessDeniedPage from "./pages/AccessDeniedPage";
 import RegisterInvitePage from "./pages/RegisterInvitePage";
 import WatchlistDashboardPage from "./pages/WatchlistDashboardPage";
 import AnnouncementsPage from "./pages/AnnouncementsPage";
+import TimeMachinePage from "./pages/TimeMachinePage";
 import "./App.css";
 
 const AuthHandler = ({ children }) => {
@@ -197,6 +198,7 @@ const MobileDrawer = ({ isOpen, onClose, hasPermission, user, logout, onOpenSecu
               {toolsExpanded && (
                 <div className="drawer-sub-nav">
                   <NavLink to="/funds-explorer" className={`drawer-sub-link${isActive("/funds-explorer") ? " active" : ""}`}>Funds Explorer</NavLink>
+                  <NavLink to="/time-machine" className={`drawer-sub-link${isActive("/time-machine") ? " active" : ""}`}>Time-Machine Comparison</NavLink>
                   <NavLink to="/sector-exposure" className={`drawer-sub-link${isActive("/sector-exposure") ? " active" : ""}`}>Fund Sector Exposure</NavLink>
                   <NavLink to="/amc-sector-exposure" className={`drawer-sub-link${isActive("/amc-sector-exposure") ? " active" : ""}`}>AMC Sector Exposure</NavLink>
                   <NavLink to="/amcs" className={`drawer-sub-link${isActive("/amcs") ? " active" : ""}`}>AMC Analytics</NavLink>
@@ -280,6 +282,7 @@ const Header = () => {
                     </span>
                     <div className="dropdown-menu">
                       <Link to="/funds-explorer" className="dropdown-item">Funds Explorer</Link>
+                      <Link to="/time-machine" className="dropdown-item">Time-Machine Comparison</Link>
                       <Link to="/sector-exposure" className="dropdown-item">Fund Sector Exposure</Link>
                       <Link to="/amc-sector-exposure" className="dropdown-item">AMC Sector Exposure</Link>
                       <Link to="/amcs" className="dropdown-item">AMC Analytics</Link>
@@ -353,6 +356,7 @@ function AppContent() {
             <Route path="/amcs" element={<ProtectedRoute requiredPermission="view_tools"><AMCExplorerPage /></ProtectedRoute>} />
             <Route path="/funds-explorer" element={<ProtectedRoute requiredPermission="view_tools"><FundsExplorerPage /></ProtectedRoute>} />
             <Route path="/insights" element={<ProtectedRoute requiredPermission="view_insights"><InsightsPage /></ProtectedRoute>} />
+            <Route path="/time-machine" element={<ProtectedRoute requiredPermission="view_insights"><TimeMachinePage /></ProtectedRoute>} />
             <Route path="/sector-exposure" element={<ProtectedRoute requiredPermission="view_tools"><SectorExposurePage /></ProtectedRoute>} />
             <Route path="/amc-sector-exposure" element={<ProtectedRoute requiredPermission="view_tools"><AMCSectorExposurePage /></ProtectedRoute>} />
             <Route path="/admin-vault" element={<ProtectedRoute requiredPermission="admin"><AdminVault /></ProtectedRoute>} />

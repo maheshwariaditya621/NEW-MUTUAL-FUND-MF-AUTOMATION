@@ -39,3 +39,38 @@ class StockActivityResponse(BaseModel):
     total_results: int = Field(..., description="Total count of results")
     activity_type: str = Field(..., description="'buying', 'selling', 'entrants', or 'exits'")
     data_warning: Optional[dict] = Field(None, description="Warning when data is based on a partial/incomplete period")
+
+
+class SectorShiftItem(BaseModel):
+    """Represents institutional shift across an industry sector between two periods."""
+    sector: str = Field(..., description="Sector name")
+    base_shares: int = Field(..., description="Total shares held in base period")
+    target_shares: int = Field(..., description="Total shares held in target period")
+    net_shares: int = Field(..., description="Net share delta")
+    percent_change: float = Field(..., description="Percentage shift in sector holding")
+
+
+class TimeMachineSummary(BaseModel):
+    """High level executive summary of institutional changes between two time periods."""
+    base_period: str = Field(..., description="Base/Origin month (MMM-YY)")
+    target_period: str = Field(..., description="Target/Destination month (MMM-YY)")
+    months_gap: int = Field(..., description="Number of months between base and target")
+    total_shares_base: int = Field(..., description="Total industry equity shares held in base period")
+    total_shares_target: int = Field(..., description="Total industry equity shares held in target period")
+    net_shares_delta: int = Field(..., description="Net change in aggregate shares")
+    net_shares_delta_pct: float = Field(..., description="Percentage change in aggregate shares")
+    accumulated_stocks_count: int = Field(..., description="Number of stocks with net accumulation")
+    distributed_stocks_count: int = Field(..., description="Number of stocks with net distribution")
+    new_entrants_count: int = Field(..., description="Number of brand new additions")
+    complete_exits_count: int = Field(..., description="Number of completely liquidated holdings")
+
+
+class TimeMachineResponse(BaseModel):
+    """Full Time Machine comparison response between two arbitrary historical periods."""
+    summary: TimeMachineSummary
+    top_accumulations: List[StockActivityItem]
+    top_distributions: List[StockActivityItem]
+    new_entrants: List[StockActivityItem]
+    complete_exits: List[StockActivityItem]
+    sector_shifts: List[SectorShiftItem]
+    available_periods: List[str]

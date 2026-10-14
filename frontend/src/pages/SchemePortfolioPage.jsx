@@ -18,6 +18,7 @@ const fmtCr = (n) => (n === null || n === undefined) ? null : (n === 0 ? '-' : N
 const fmtPct = (n, digits = 2) => (n === null || n === undefined) ? null : (n === 0 ? '-' : `${Number(n).toFixed(digits)}%`);
 
 const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const SECTOR_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#f97316', '#64748b', '#a855f7'];
 
 function labelToDate(label) {
     if (!label) return new Date();
@@ -106,6 +107,8 @@ export default function SchemePortfolioPage() {
 
     const [allAvailableMonths, setAllAvailableMonths] = useState([]);
     const [livePrices, setLivePrices] = useState({});
+    const [showSectorBanner, setShowSectorBanner] = useState(false);
+    const [selectedSectorFilter, setSelectedSectorFilter] = useState(null);
 
     useEffect(() => {
         if (!portfolio?.holdings?.[0]?.monthly_data) return;
@@ -124,6 +127,34 @@ export default function SchemePortfolioPage() {
         if (latest) return computeDisplayMonths(latest, 4);
         return [];
     }, [selectedMonth, portfolio]);
+
+    // Aggregate holdings by sector for the top breakdown banner
+    const sectorAllocation = useMemo(() => {
+        if (!portfolio?.holdings) return [];
+        const map = {};
+        let totalWeight = 0;
+
+        portfolio.holdings.forEach(h => {
+            const sec = h.sector || 'Unclassified / Other';
+            const latestData = h.monthly_data?.[0];
+            const weight = parseFloat(latestData?.percent_to_aum || 0);
+            if (!map[sec]) {
+                map[sec] = { sector: sec, weight: 0, count: 0 };
+            }
+            map[sec].weight += weight;
+            map[sec].count += 1;
+            totalWeight += weight;
+        });
+
+        const list = Object.values(map).map(item => ({
+            ...item,
+            weight: Number(item.weight.toFixed(2)),
+            pctOfTotal: totalWeight > 0 ? Number(((item.weight / totalWeight) * 100).toFixed(1)) : 0
+        }));
+
+        list.sort((a, b) => b.weight - a.weight);
+        return list;
+    }, [portfolio]);
 
     useEffect(() => {
         if (schemeIdParam) {
@@ -181,6 +212,10 @@ export default function SchemePortfolioPage() {
         if (!portfolio || !portfolio.holdings) return [];
 
         let items = [...portfolio.holdings];
+
+        if (selectedSectorFilter) {
+            items = items.filter(h => (h.sector || 'Unclassified / Other') === selectedSectorFilter);
+        }
 
         if (filterText) {
             const lowFilter = filterText.toLowerCase();
@@ -265,6 +300,19 @@ export default function SchemePortfolioPage() {
                                     name={portfolio.scheme_name}
                                     size="sm"
                                 />
+                                <button
+                                    type="button"
+                                    className={`shp-sector-toggle-btn ${showSectorBanner ? 'active' : ''}`}
+                                    onClick={() => setShowSectorBanner(v => !v)}
+                                    title="Toggle Scheme Sector Breakdown Banner"
+                                >
+                                    <span>📊 Sector Allocation</span>
+                                    {sectorAllocation[0] && (
+                                        <span className="shp-sec-top-badge">
+                                            Top: {sectorAllocation[0].sector} ({sectorAllocation[0].weight}%)
+                                        </span>
+                                    )}
+                                </button>
                             </div>
                             <div className="shp-identity-right" style={{ display: 'flex', gap: '24px' }}>
                                 <div className="shp-identity-stat" style={{ textAlign: 'right' }}>
@@ -277,6 +325,86 @@ export default function SchemePortfolioPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* ── Collapsible Sector Breakdown Top Banner ── */}
+                        {showSectorBanner && sectorAllocation.length > 0 && (
+                            <div className="shp-sector-collapsible-banner">
+                                <div className="shp-sec-banner-head">
+                                    <div>
+                                        <span className="shp-card-eyebrow">SECTOR ALLOCATION TREEMAP</span>
+                                        <h3 className="shp-sec-banner-title">Scheme Allocation Across Industry Sectors</h3>
+                                    </div>
+                                    <div className="shp-sec-head-actions">
+                                        {selectedSectorFilter && (
+                                            <button 
+                                                type="button" 
+                                                className="shp-sec-clear-filter-btn"
+                                                onClick={() => setSelectedSectorFilter(null)}
+                                            >
+                                                Filter: <strong>{selectedSectorFilter}</strong> (✕ Clear Filter)
+                                            </button>
+                                        )}
+                                        <span className="shp-sec-count-badge">
+                                            {sectorAllocation.length} Sectors Represented
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Proportional Segmented Treemap Bar */}
+                                <div className="shp-sec-treemap-bar">
+                                    {sectorAllocation.map((sec, idx) => {
+                                        const color = SECTOR_COLORS[idx % SECTOR_COLORS.length];
+                                        const isSelected = selectedSectorFilter === sec.sector;
+                                        return (
+                                            <div 
+                                                key={sec.sector}
+                                                className={`shp-sec-bar-segment ${isSelected ? 'selected' : ''}`}
+                                                style={{ 
+                                                    width: `${Math.max(sec.pctOfTotal, 2.5)}%`,
+                                                    backgroundColor: color 
+                                                }}
+                                                title={`${sec.sector}: ${sec.weight}% (${sec.count} stocks) — Click to filter table`}
+                                                onClick={() => setSelectedSectorFilter(prev => prev === sec.sector ? null : sec.sector)}
+                                            >
+                                                {sec.pctOfTotal >= 6 && (
+                                                    <span className="shp-sec-bar-label">
+                                                        {sec.sector.split(' ')[0]} {sec.weight}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Interactive Sector Chips */}
+                                <div className="shp-sec-chips-row">
+                                    <button 
+                                        type="button" 
+                                        className={`shp-sec-chip ${!selectedSectorFilter ? 'active' : ''}`}
+                                        onClick={() => setSelectedSectorFilter(null)}
+                                    >
+                                        All Sectors ({portfolio.holdings.length})
+                                    </button>
+                                    {sectorAllocation.map((sec, idx) => {
+                                        const color = SECTOR_COLORS[idx % SECTOR_COLORS.length];
+                                        const isSelected = selectedSectorFilter === sec.sector;
+                                        return (
+                                            <button 
+                                                key={sec.sector}
+                                                type="button"
+                                                className={`shp-sec-chip ${isSelected ? 'active' : ''}`}
+                                                onClick={() => setSelectedSectorFilter(prev => prev === sec.sector ? null : sec.sector)}
+                                            >
+                                                <span className="shp-sec-chip-dot" style={{ backgroundColor: color }}></span>
+                                                <span className="shp-sec-chip-name">{sec.sector}</span>
+                                                <span className="shp-sec-chip-pct">{sec.weight}%</span>
+                                                <span className="shp-sec-chip-count">({sec.count})</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
 
                         <div className="portfolio-table-section">
                             {/* ── Pending Month Pill ── */}

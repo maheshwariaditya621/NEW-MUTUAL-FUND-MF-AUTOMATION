@@ -149,6 +149,308 @@ function formatEodDate(dateStr) {
     }
 }
 
+// ── Institutional Ownership Trajectory Chart Component ───────────────────────
+function InstitutionalTrajectoryChart({ trendData, closePrice, companyName, onClose }) {
+    const [hoverIdx, setHoverIdx] = useState(null);
+    const [rangeLimit, setRangeLimit] = useState(6);
+
+    // Reverse to chronological order (oldest -> newest, left -> right)
+    const points = useMemo(() => {
+        if (!trendData || trendData.length === 0) return [];
+        const reversed = [...trendData].reverse().slice(-rangeLimit);
+        return reversed.map((d, i) => {
+            const price = d.avg_price || (i === reversed.length - 1 ? closePrice : null);
+            return {
+                month: d.month,
+                shares: d.total_shares || 0,
+                price: price || 0,
+                numFunds: d.num_funds || 0,
+                monthChange: d.month_change || 0,
+                percentChange: d.percent_change || 0
+            };
+        });
+    }, [trendData, closePrice, rangeLimit]);
+
+    if (!points || points.length < 2) {
+        return (
+            <div className="shp-trajectory-empty-card">
+                <div className="shp-traj-header">
+                    <span className="shp-card-eyebrow">INSTITUTIONAL TRAJECTORY</span>
+                    <button type="button" className="shp-traj-close-btn" onClick={onClose}>✕</button>
+                </div>
+                <p className="shp-traj-empty-text">Need at least 2 historical months of data to render trajectory chart.</p>
+            </div>
+        );
+    }
+
+    const width = 880;
+    const height = 240;
+    const padL = 70;
+    const padR = 70;
+    const padT = 25;
+    const padB = 40;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+
+    const sharesArr = points.map(p => p.shares);
+    const minShares = Math.min(...sharesArr) * 0.95;
+    const maxShares = Math.max(...sharesArr) * 1.05;
+    const sharesRange = (maxShares - minShares) || 1;
+
+    const pricesArr = points.map(p => p.price).filter(p => p > 0);
+    const minPrice = pricesArr.length > 0 ? Math.min(...pricesArr) * 0.95 : 0;
+    const maxPrice = pricesArr.length > 0 ? Math.max(...pricesArr) * 1.05 : 100;
+    const priceRange = (maxPrice - minPrice) || 1;
+
+    const coords = points.map((p, i) => {
+        const x = padL + (i / (points.length - 1)) * plotW;
+        const yShares = height - padB - ((p.shares - minShares) / sharesRange) * plotH;
+        const yPrice = p.price > 0 
+            ? height - padB - ((p.price - minPrice) / priceRange) * plotH
+            : height - padB;
+        return { ...p, x, yShares, yPrice, idx: i };
+    });
+
+    const sharesLinePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.yShares.toFixed(1)}`).join(' ');
+    const sharesAreaPath = `${sharesLinePath} L ${coords[coords.length - 1].x.toFixed(1)} ${(height - padB).toFixed(1)} L ${coords[0].x.toFixed(1)} ${(height - padB).toFixed(1)} Z`;
+
+    const validPriceCoords = coords.filter(c => c.price > 0);
+    const priceLinePath = validPriceCoords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.yPrice.toFixed(1)}`).join(' ');
+
+    const activePoint = hoverIdx !== null ? coords[hoverIdx] : coords[coords.length - 1];
+
+    const oldest = coords[0];
+    const newest = coords[coords.length - 1];
+    const netSharesChg = newest.shares - oldest.shares;
+    const netSharesPct = oldest.shares > 0 ? ((netSharesChg / oldest.shares) * 100) : 0;
+    const netPriceChg = (newest.price && oldest.price) ? (newest.price - oldest.price) : 0;
+    const netPricePct = oldest.price > 0 ? ((netPriceChg / oldest.price) * 100) : 0;
+
+    let verdict = "NEUTRAL CONSOLIDATION";
+    let verdictCls = "neutral";
+    let verdictDesc = "Mutual fund aggregate holdings remained stable across the observed historical window.";
+
+    if (netSharesChg > 0 && netPriceChg <= 0) {
+        verdict = "BUYING THE DIP (ACCUMULATION)";
+        verdictCls = "pos";
+        verdictDesc = `Mutual funds actively accumulated shares (+${netSharesPct.toFixed(1)}%) while the stock price softened (${netPricePct.toFixed(1)}%), signaling strong value conviction.`;
+    } else if (netSharesChg < 0 && netPriceChg >= 0) {
+        verdict = "SELLING INTO RALLY (DISTRIBUTION)";
+        verdictCls = "neg";
+        verdictDesc = `Mutual funds booked profits and trimmed holdings (${netSharesPct.toFixed(1)}%) into market strength (+${netPricePct.toFixed(1)}%).`;
+    } else if (netSharesChg > 0 && netPriceChg > 0) {
+        verdict = "MOMENTUM ACCUMULATION";
+        verdictCls = "pos";
+        verdictDesc = `Mutual funds supported the upward price trend (+${netPricePct.toFixed(1)}%) with consistent net buying (+${netSharesPct.toFixed(1)}%).`;
+    } else if (netSharesChg < 0 && netPriceChg < 0) {
+        verdict = "RISK-OFF REDUCTION";
+        verdictCls = "neg";
+        verdictDesc = `Mutual funds trimmed aggregate exposure (${netSharesPct.toFixed(1)}%) alongside price contraction (${netPricePct.toFixed(1)}%).`;
+    }
+
+    return (
+        <div className="shp-trajectory-card">
+            <div className="shp-traj-header">
+                <div className="shp-traj-title-wrap">
+                    <span className="shp-card-eyebrow">INSTITUTIONAL OWNERSHIP TRAJECTORY</span>
+                    <h3 className="shp-traj-title">
+                        Total MF Shares vs EOD Stock Price
+                    </h3>
+                    <div className="shp-traj-sublabel">
+                        Visualizing institutional accumulation/distribution correlation against stock valuation
+                    </div>
+                </div>
+
+                <div className="shp-traj-header-actions">
+                    <div className="shp-traj-legend">
+                        <span className="shp-legend-item shares">
+                            <span className="shp-legend-line shares-line"></span> Total MF Shares (Left)
+                        </span>
+                        <span className="shp-legend-item price">
+                            <span className="shp-legend-line price-line"></span> Stock Price (Right)
+                        </span>
+                    </div>
+
+                    <div className="shp-traj-range-pills">
+                        <button 
+                            type="button" 
+                            className={`shp-traj-pill ${rangeLimit === 6 ? 'active' : ''}`}
+                            onClick={() => setRangeLimit(6)}
+                        >
+                            6M
+                        </button>
+                        <button 
+                            type="button" 
+                            className={`shp-traj-pill ${rangeLimit === 12 ? 'active' : ''}`}
+                            onClick={() => setRangeLimit(12)}
+                        >
+                            12M
+                        </button>
+                    </div>
+
+                    <button 
+                        type="button" 
+                        className="shp-traj-close-btn" 
+                        onClick={onClose}
+                        title="Close Trajectory Chart"
+                    >
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <div className="shp-traj-chart-container">
+                <svg 
+                    className="shp-traj-svg" 
+                    viewBox={`0 0 ${width} ${height}`} 
+                    preserveAspectRatio="xMidYMid meet"
+                    onMouseLeave={() => setHoverIdx(null)}
+                >
+                    <defs>
+                        <linearGradient id="mfSharesGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#10b981" stopOpacity="0.32" />
+                            <stop offset="100%" stopColor="#10b981" stopOpacity="0.01" />
+                        </linearGradient>
+                    </defs>
+
+                    {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
+                        const y = padT + pct * plotH;
+                        const sVal = maxShares - pct * sharesRange;
+                        const pVal = maxPrice - pct * priceRange;
+                        return (
+                            <g key={i}>
+                                <line 
+                                    x1={padL} 
+                                    y1={y} 
+                                    x2={width - padR} 
+                                    y2={y} 
+                                    stroke="var(--border-color)" 
+                                    strokeDasharray="3 3" 
+                                    strokeOpacity="0.45"
+                                />
+                                <text 
+                                    x={padL - 10} 
+                                    y={y + 4} 
+                                    className="shp-traj-axis-text shares" 
+                                    textAnchor="end"
+                                >
+                                    {sVal >= 10000000 ? `${(sVal / 10000000).toFixed(1)}Cr` : `${(sVal / 1000000).toFixed(1)}M`}
+                                </text>
+                                {pVal > 0 && (
+                                    <text 
+                                        x={width - padR + 10} 
+                                        y={y + 4} 
+                                        className="shp-traj-axis-text price" 
+                                        textAnchor="start"
+                                    >
+                                        ₹{Math.round(pVal)}
+                                    </text>
+                                )}
+                            </g>
+                        );
+                    })}
+
+                    <path d={sharesAreaPath} fill="url(#mfSharesGradient)" />
+
+                    <path 
+                        d={sharesLinePath} 
+                        fill="none" 
+                        stroke="#10b981" 
+                        strokeWidth="2.5" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                    />
+
+                    {validPriceCoords.length > 1 && (
+                        <path 
+                            d={priceLinePath} 
+                            fill="none" 
+                            stroke="#f59e0b" 
+                            strokeWidth="2.5" 
+                            strokeDasharray="4 3" 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round" 
+                        />
+                    )}
+
+                    {coords.map((c, i) => (
+                        <g key={c.month}>
+                            <text 
+                                x={c.x} 
+                                y={height - 12} 
+                                className={`shp-traj-x-text ${hoverIdx === i ? 'active' : ''}`}
+                                textAnchor="middle"
+                            >
+                                {c.month}
+                            </text>
+
+                            <circle cx={c.x} cy={c.yShares} r={hoverIdx === i ? 5.5 : 3.5} fill="#10b981" stroke="var(--bg-card)" strokeWidth="1.5" />
+                            {c.price > 0 && (
+                                <circle cx={c.x} cy={c.yPrice} r={hoverIdx === i ? 5.5 : 3.5} fill="#f59e0b" stroke="var(--bg-card)" strokeWidth="1.5" />
+                            )}
+
+                            <rect 
+                                x={c.x - (plotW / points.length) / 2} 
+                                y={padT} 
+                                width={plotW / points.length} 
+                                height={plotH} 
+                                fill="transparent"
+                                style={{ cursor: 'pointer' }}
+                                onMouseEnter={() => setHoverIdx(i)}
+                            />
+                        </g>
+                    ))}
+
+                    {hoverIdx !== null && (
+                        <line 
+                            x1={activePoint.x} 
+                            y1={padT} 
+                            x2={activePoint.x} 
+                            y2={height - padB} 
+                            stroke="rgba(255, 255, 255, 0.4)" 
+                            strokeDasharray="2 2" 
+                        />
+                    )}
+                </svg>
+
+                {activePoint && (
+                    <div 
+                        className="shp-traj-tooltip"
+                        style={{
+                            left: `${(activePoint.x / width) * 100}%`
+                        }}
+                    >
+                        <div className="shp-tt-month">{activePoint.month}</div>
+                        <div className="shp-tt-row shares">
+                            <span>MF Shares:</span>
+                            <strong>{fmt(activePoint.shares)}</strong>
+                        </div>
+                        {activePoint.monthChange !== 0 && (
+                            <div className="shp-tt-sub">
+                                MoM: {activePoint.monthChange > 0 ? '+' : ''}{fmt(activePoint.monthChange)} ({activePoint.percentChange > 0 ? '+' : ''}{activePoint.percentChange.toFixed(2)}%)
+                            </div>
+                        )}
+                        {activePoint.price > 0 && (
+                            <div className="shp-tt-row price">
+                                <span>EOD Price:</span>
+                                <strong>₹{activePoint.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                            </div>
+                        )}
+                        <div className="shp-tt-funds">
+                            {activePoint.numFunds} Mutual Fund Schemes
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className={`shp-traj-verdict-banner ${verdictCls}`}>
+                <div className="shp-verdict-badge">{verdict}</div>
+                <div className="shp-verdict-desc">{verdictDesc}</div>
+            </div>
+        </div>
+    );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -166,6 +468,7 @@ export default function StockHoldingsPage() {
     const [aumViewMode, setAumViewMode] = useState('total'); // 'total' or 'equity'
     const [allAvailableMonths, setAllAvailableMonths] = useState([]);
     const [showAmcStatus, setShowAmcStatus] = useState(false);
+    const [showTrajectoryChart, setShowTrajectoryChart] = useState(false);
     const [expandedCats, setExpandedCats] = useState({}); // sub_category -> bool
     const [schemeTypeFilter, setSchemeTypeFilter] = useState('all'); // 'all' | 'pure_equity' | 'arbitrage'
     const tableWrapRef = useRef(null);
@@ -189,7 +492,7 @@ export default function StockHoldingsPage() {
 
     useEffect(() => {
         if (identifierParam) {
-            handleFetchHoldings(identifierParam, 4, null);
+            handleFetchHoldings(identifierParam, 6, null);
         }
     }, [identifierParam]);
 
@@ -219,7 +522,7 @@ export default function StockHoldingsPage() {
     const handleMonthChange = (monthLabel) => {
         const val = monthLabel || null;
         setSelectedMonth(val);
-        if (identifierParam) handleFetchHoldings(identifierParam, 4, val);
+        if (identifierParam) handleFetchHoldings(identifierParam, 6, val);
     };
 
     const handleSort = (key) => {
@@ -632,9 +935,19 @@ export default function StockHoldingsPage() {
                                         <span className="shp-card-eyebrow">INSTITUTIONAL NET FLOW MOMENTUM</span>
                                         <div className="shp-card-sublabel">MoM Holdings & Accumulation Trajectory</div>
                                     </div>
-                                    <span className="shp-flow-trend-badge">
-                                        {displayMonths.length} Months Trend
-                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <button
+                                            type="button"
+                                            className={`shp-traj-toggle-pill ${showTrajectoryChart ? 'active' : ''}`}
+                                            onClick={() => setShowTrajectoryChart(v => !v)}
+                                            title="Toggle Institutional Ownership Trajectory Chart"
+                                        >
+                                            📈 {showTrajectoryChart ? 'Hide Chart' : 'Trajectory Chart'}
+                                        </button>
+                                        <span className="shp-flow-trend-badge">
+                                            {displayMonths.length} Months Trend
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <div className="shp-flow-months-grid">
@@ -837,6 +1150,16 @@ export default function StockHoldingsPage() {
                                     </div>
                                 )}
                             </div>
+                        )}
+
+                        {/* ── Institutional Ownership Trajectory Chart (Collapsible/View Option) ── */}
+                        {showTrajectoryChart && summary?.monthly_trend && (
+                            <InstitutionalTrajectoryChart
+                                trendData={summary.monthly_trend}
+                                closePrice={summary.close_price || livePrice}
+                                companyName={summary.company_name}
+                                onClose={() => setShowTrajectoryChart(false)}
+                            />
                         )}
 
                         {/* ── Terminal Controls Panel (Deck 1 & Deck 2) ── */}
@@ -1103,6 +1426,14 @@ export default function StockHoldingsPage() {
                                             },
                                         }}
                                     />
+                                    <button
+                                        type="button"
+                                        className={`shp-terminal-chart-btn ${showTrajectoryChart ? 'active' : ''}`}
+                                        onClick={() => setShowTrajectoryChart(v => !v)}
+                                        title="Toggle Institutional Accumulation vs Price Trajectory Chart"
+                                    >
+                                        📈 {showTrajectoryChart ? 'Hide Chart' : 'Trajectory Chart'}
+                                    </button>
                                 </div>
                             </div>
                         </div>

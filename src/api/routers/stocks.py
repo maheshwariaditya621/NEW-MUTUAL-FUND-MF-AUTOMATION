@@ -322,7 +322,7 @@ async def get_bulk_prices(
 @router.get("/holdings", response_model=StockHoldingsSummary)
 async def get_holdings_by_identifier(
     q: str = Query(..., min_length=2, description="Company identifier (ISIN, company name, or NSE symbol)"),
-    months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
+    months: int = Query(6, ge=1, le=24, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     background_tasks: BackgroundTasks = None,
     cur: cursor = Depends(get_db_cursor),
@@ -337,7 +337,7 @@ async def get_holdings_by_identifier(
     
     Args:
         q: Company identifier (ISIN, company name, or NSE symbol)
-        months: Number of months for trend analysis (default: 4)
+        months: Number of months for trend analysis (default: 6)
     
     Returns:
         Detailed holdings summary with scheme-wise breakdown
@@ -368,7 +368,7 @@ async def get_holdings_by_identifier(
 @router.get("/{isin}/holdings", response_model=StockHoldingsSummary)
 async def get_stock_holdings(
     isin: str = Path(..., description="12-character ISIN code"),
-    months: int = Query(4, ge=1, le=12, description="Number of months to show trend"),
+    months: int = Query(6, ge=1, le=24, description="Number of months to show trend"),
     end_month: Optional[str] = Query(None, description="Optional end month in MMM-YY format (e.g. 'NOV-25')"),
     cur: cursor = Depends(get_db_cursor),
     current_user: dict = Depends(get_current_user)
@@ -459,7 +459,7 @@ async def _get_stock_holdings_aggregated(
     prev_close_db: Optional[Decimal] = None,
     price_date_db: Optional[date] = None,
     price_change_pct_db: Optional[Decimal] = None,
-    months: int = 4,
+    months: int = 6,
     end_month: Optional[str] = None,
     cur: cursor = None
 ) -> StockHoldingsSummary:
@@ -467,7 +467,6 @@ async def _get_stock_holdings_aggregated(
     Get holdings data aggregated by Corporate Entity (if available) or by single ISIN.
     Supports multi-month history for each scheme.
     """
-    # Always use exactly 4 months window as requested by user
     # 1. Determine the anchor (latest) period, with partial data detection
     latest_yr, latest_mo = None, None
     user_specified_period = bool(end_month)  # track if user explicitly chose a month
@@ -554,13 +553,14 @@ async def _get_stock_holdings_aggregated(
         filter_clause = "c.isin = %s"
         filter_val = isin
 
-    # 3. Monthly Trend (Summary Level) - Optimized to always show exactly 4 columns
+    # 3. Monthly Trend (Summary Level) - Optimized with market value for valuation trajectory
     cur.execute(
         f"""
         SELECT 
             p.period_id,
             SUM(COALESCE(eh.adj_quantity, eh.quantity)) as total_shares,
-            COUNT(DISTINCT ss.scheme_id) as num_funds
+            COUNT(DISTINCT ss.scheme_id) as num_funds,
+            SUM(eh.market_value_inr) as total_market_value
         FROM equity_holdings eh
         JOIN scheme_snapshots ss ON eh.snapshot_id = ss.snapshot_id
         JOIN periods p ON ss.period_id = p.period_id
@@ -597,8 +597,16 @@ async def _get_stock_holdings_aggregated(
         
         adj_shares = adj_shares_map[(yr, mo)]
         funds = 0
+        tot_market_val = 0
         if pid and pid in summary_data_map:
             funds = summary_data_map[pid][2]
+            if len(summary_data_map[pid]) > 3 and summary_data_map[pid][3] is not None:
+                tot_market_val = summary_data_map[pid][3]
+        
+        # Calculate valuation price per share
+        calculated_price = round(float(tot_market_val) / float(adj_shares), 2) if adj_shares > 0 and tot_market_val else None
+        if (yr, mo) == (latest_yr, latest_mo) and close_price_db:
+            calculated_price = float(close_price_db)
         
         # NOTE: Do NOT use idx==0 for summary stats when data is partial,
         # because idx==0 is the partial month (e.g. FEB-26).
@@ -641,8 +649,10 @@ async def _get_stock_holdings_aggregated(
             is_adjusted=period_multipliers_local.get((yr, mo), 1.0) > 1.001 or period_multipliers_local.get((yr, mo), 1.0) < 0.999,
             ownership_percent=ownership_pct,
             month_change=month_change,
-            percent_change=percent_change
+            percent_change=percent_change,
+            avg_price=calculated_price
         ))
+
     
     # 4. Detailed scheme-wise holdings history
     cur.execute(
