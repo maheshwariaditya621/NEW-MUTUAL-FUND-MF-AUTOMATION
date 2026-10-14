@@ -4,9 +4,9 @@ After=network.target postgresql.service
 
 [Service]
 Type=oneshot
-User=aditya
-WorkingDirectory=/var/www/mf-automation
-ExecStart=/var/www/mf-automation/.venv/bin/python -m src.scheduler.fund_manager_scheduler
+User=ubuntu
+WorkingDirectory=/home/ubuntu/mf-app
+ExecStart=/home/ubuntu/mf-app/.venv/bin/python -m src.scheduler.fund_manager_scheduler
 StandardOutput=journal
 StandardError=journal
 Restart=no
