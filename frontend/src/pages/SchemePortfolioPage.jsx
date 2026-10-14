@@ -279,157 +279,158 @@ export default function SchemePortfolioPage() {
                         </div>
 
                         <div className="portfolio-table-section">
-                            <div className="shp-table-wrap" style={{ borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
-                                {/* ── Pending Month Pill ── */}
-                                {portfolio.pending_month && (
-                                    <div style={{
-                                        display: 'flex', alignItems: 'center', gap: '8px',
-                                        background: 'rgba(99, 102, 241, 0.08)',
-                                        border: '1px solid rgba(99, 102, 241, 0.3)',
-                                        borderRadius: '8px', padding: '10px 14px',
-                                        marginBottom: '10px', fontSize: '12px',
-                                        color: 'var(--text-primary)'
-                                    }}>
-                                        <span style={{ fontSize: '16px' }}>🕐</span>
-                                        <div>
-                                            <strong style={{ color: '#818cf8' }}>{portfolio.pending_month.month} — Data Pending</strong>
-                                            <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                                                {portfolio.pending_month.message}
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* ── Industry Partial Warning ── */}
-                                {portfolio.data_warning && !portfolio.pending_month && (
-                                    <div style={{
-                                        display: 'flex', alignItems: 'center', gap: '8px',
-                                        background: 'rgba(234, 179, 8, 0.08)',
-                                        border: '1px solid rgba(234, 179, 8, 0.3)',
-                                        borderRadius: '8px', padding: '10px 14px',
-                                        marginBottom: '10px', fontSize: '12px',
-                                        color: 'var(--text-primary)'
-                                    }}>
-                                        <span style={{ fontSize: '16px' }}>⚠️</span>
-                                        <div>
-                                            <strong style={{ color: '#eab308' }}>Partial Industry Data — {portfolio.data_warning.latest_label}</strong>
-                                            <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                                                <strong style={{ color: 'var(--text-primary)' }}>
-                                                    {portfolio.data_warning.amcs_uploaded} of {portfolio.data_warning.amcs_expected} AMCs
-                                                </strong> have uploaded. This scheme's data is available.
-                                                {portfolio.data_warning.amcs_pending > 0 && (
-                                                    <span style={{ color: '#f87171' }}> ({portfolio.data_warning.amcs_pending} still pending)</span>
-                                                )}.
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* ── Controls Header ── */}
-                                <div className="shp-controls-header shp-controls-row">
-                                    <div className="shp-section-title" style={{ margin: 0, color: 'var(--shp-header-color)' }}>Equity Holdings</div>
-                                    <div className="shp-controls-right" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                                        <div className="shp-aum-toggle" style={{ display: 'flex', background: 'var(--bg-tertiary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '600' }}>
-                                            <button
-                                                onClick={() => setAumViewMode('total')}
-                                                style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', background: aumViewMode === 'total' ? 'var(--accent-primary)' : 'transparent', color: aumViewMode === 'total' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s' }}
-                                            >
-                                                TOTAL AUM
-                                            </button>
-                                            <button
-                                                onClick={() => setAumViewMode('equity')}
-                                                style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', background: aumViewMode === 'equity' ? 'var(--accent-primary)' : 'transparent', color: aumViewMode === 'equity' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s' }}
-                                            >
-                                                EQUITY AUM
-                                            </button>
-                                        </div>
-                                        <div className="shp-month-picker">
-                                            <span className="shp-picker-label">Period</span>
-                                            <select
-                                                className="shp-picker-select"
-                                                value={selectedMonth || ''}
-                                                onChange={(e) => handleMonthChange(e.target.value)}
-                                            >
-                                                <option value="">Latest</option>
-                                                {allAvailableMonths.map(m => (
-                                                    <option key={m} value={m}>{m}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <input
-                                            type="text"
-                                            className="shp-search-input"
-                                            placeholder="Filter by Name, ISIN, Sector..."
-                                            value={filterText}
-                                            onChange={(e) => setFilterText(e.target.value)}
-                                        />
-                                        <ExportButton
-                                            getData={() => {
-                                                const holdings = getHoldingsToRender();
-                                                return holdings.map(h => {
-                                                    const histMap = h.monthly_data.reduce((acc, m) => { acc[m.month] = m; return acc; }, {});
-                                                    const row = {
-                                                        company_name: h.company_name,
-                                                        isin: h.isin,
-                                                        sector: h.sector,
-                                                        close_price: h.close_price || h.live_price || livePrices[h.isin] || null,
-                                                    };
-                                                    displayMonths.forEach((m, mIdx) => {
-                                                        const md = histMap[m];
-                                                        const prevMonth = displayMonths[mIdx + 1];
-                                                        const prevMd = prevMonth ? histMap[prevMonth] : null;
-                                                        const currShares = md?.num_shares ?? null;
-                                                        const prevShares = prevMd?.num_shares ?? null;
-                                                        const chg = (currShares != null && prevShares != null) ? currShares - prevShares : null;
-
-                                                        row[`pct_aum_${m}`] = md?.percent_to_aum ?? null;
-                                                        row[`shares_${m}`] = currShares;
-                                                        row[`change_${m}`] = chg;
-                                                    });
-                                                    return row;
-                                                });
-                                            }}
-                                            columns={[
-                                                { key: 'company_name', label: 'Company', exportFormat: 'string' },
-                                                { key: 'isin', label: 'ISIN', exportFormat: 'string' },
-                                                { key: 'sector', label: 'Sector', exportFormat: 'string' },
-                                                { key: 'close_price', label: 'EOD Price (₹)', exportFormat: 'numeric' },
-                                                ...displayMonths.flatMap(m => [
-                                                    { key: `pct_aum_${m}`, label: `% of AUM (${m})`, exportFormat: 'numeric' },
-                                                    { key: `shares_${m}`, label: `Shares Held (${m})`, exportFormat: 'numeric' },
-                                                    { key: `change_${m}`, label: `Net Change (${m})`, exportFormat: 'numeric' },
-                                                ]),
-                                            ]}
-                                            pdfColumns={[
-                                                { key: 'company_name', label: 'Company', exportFormat: 'string' },
-                                                { key: 'sector', label: 'Sector', exportFormat: 'string' },
-                                                ...displayMonths.flatMap(m => [
-                                                    { key: `pct_aum_${m}`, label: `% AUM (${m})`, exportFormat: 'numeric' },
-                                                    { key: `shares_${m}`, label: `Shares (${m})`, exportFormat: 'numeric' },
-                                                    { key: `change_${m}`, label: `Change (${m})`, exportFormat: 'numeric' },
-                                                ]),
-                                            ]}
-                                            fileNameConfig={{
-                                                page: 'scheme-portfolio',
-                                                filters: {
-                                                    scheme: portfolio?.scheme_name,
-                                                    period: displayMonths[0],
-                                                },
-                                            }}
-                                            metadata={{
-                                                title: `Scheme Portfolio — ${portfolio?.scheme_name || ''}`,
-                                                filters: {
-                                                    Scheme: portfolio?.scheme_name,
-                                                    AMC: portfolio?.amc_name,
-                                                    Plan: portfolio?.plan_type,
-                                                    Option: portfolio?.option_type,
-                                                    Period: displayMonths[0],
-                                                    Search: filterText || undefined,
-                                                },
-                                            }}
-                                        />
+                            {/* ── Pending Month Pill ── */}
+                            {portfolio.pending_month && (
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: '8px',
+                                    background: 'rgba(99, 102, 241, 0.08)',
+                                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                                    borderRadius: '8px', padding: '10px 14px',
+                                    marginBottom: '10px', fontSize: '12px',
+                                    color: 'var(--text-primary)'
+                                }}>
+                                    <span style={{ fontSize: '16px' }}>🕐</span>
+                                    <div>
+                                        <strong style={{ color: '#818cf8' }}>{portfolio.pending_month.month} — Data Pending</strong>
+                                        <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                                            {portfolio.pending_month.message}
+                                        </span>
                                     </div>
                                 </div>
+                            )}
+
+                            {/* ── Industry Partial Warning ── */}
+                            {portfolio.data_warning && !portfolio.pending_month && (
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: '8px',
+                                    background: 'rgba(234, 179, 8, 0.08)',
+                                    border: '1px solid rgba(234, 179, 8, 0.3)',
+                                    borderRadius: '8px', padding: '10px 14px',
+                                    marginBottom: '10px', fontSize: '12px',
+                                    color: 'var(--text-primary)'
+                                }}>
+                                    <span style={{ fontSize: '16px' }}>⚠️</span>
+                                    <div>
+                                        <strong style={{ color: '#eab308' }}>Partial Industry Data — {portfolio.data_warning.latest_label}</strong>
+                                        <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                                            <strong style={{ color: 'var(--text-primary)' }}>
+                                                {portfolio.data_warning.amcs_uploaded} of {portfolio.data_warning.amcs_expected} AMCs
+                                            </strong> have uploaded. This scheme's data is available.
+                                            {portfolio.data_warning.amcs_pending > 0 && (
+                                                <span style={{ color: '#f87171' }}> ({portfolio.data_warning.amcs_pending} still pending)</span>
+                                            )}.
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ── Controls Header ── */}
+                            <div className="shp-controls-header shp-controls-row">
+                                <div className="shp-section-title" style={{ margin: 0, color: 'var(--shp-header-color)' }}>Equity Holdings</div>
+                                <div className="shp-controls-right" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                                    <div className="shp-aum-toggle" style={{ display: 'flex', background: 'var(--bg-tertiary)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '600' }}>
+                                        <button
+                                            onClick={() => setAumViewMode('total')}
+                                            style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', background: aumViewMode === 'total' ? 'var(--accent-primary)' : 'transparent', color: aumViewMode === 'total' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s' }}
+                                        >
+                                            TOTAL AUM
+                                        </button>
+                                        <button
+                                            onClick={() => setAumViewMode('equity')}
+                                            style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', background: aumViewMode === 'equity' ? 'var(--accent-primary)' : 'transparent', color: aumViewMode === 'equity' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s' }}
+                                        >
+                                            EQUITY AUM
+                                        </button>
+                                    </div>
+                                    <div className="shp-month-picker">
+                                        <span className="shp-picker-label">Period</span>
+                                        <select
+                                            className="shp-picker-select"
+                                            value={selectedMonth || ''}
+                                            onChange={(e) => handleMonthChange(e.target.value)}
+                                        >
+                                            <option value="">Latest</option>
+                                            {allAvailableMonths.map(m => (
+                                                <option key={m} value={m}>{m}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        className="shp-search-input"
+                                        placeholder="Filter by Name, ISIN, Sector..."
+                                        value={filterText}
+                                        onChange={(e) => setFilterText(e.target.value)}
+                                    />
+                                    <ExportButton
+                                        getData={() => {
+                                            const holdings = getHoldingsToRender();
+                                            return holdings.map(h => {
+                                                const histMap = h.monthly_data.reduce((acc, m) => { acc[m.month] = m; return acc; }, {});
+                                                const row = {
+                                                    company_name: h.company_name,
+                                                    isin: h.isin,
+                                                    sector: h.sector,
+                                                    close_price: h.close_price || h.live_price || livePrices[h.isin] || null,
+                                                };
+                                                displayMonths.forEach((m, mIdx) => {
+                                                    const md = histMap[m];
+                                                    const prevMonth = displayMonths[mIdx + 1];
+                                                    const prevMd = prevMonth ? histMap[prevMonth] : null;
+                                                    const currShares = md?.num_shares ?? null;
+                                                    const prevShares = prevMd?.num_shares ?? null;
+                                                    const chg = (currShares != null && prevShares != null) ? currShares - prevShares : null;
+
+                                                    row[`pct_aum_${m}`] = md?.percent_to_aum ?? null;
+                                                    row[`shares_${m}`] = currShares;
+                                                    row[`change_${m}`] = chg;
+                                                });
+                                                return row;
+                                            });
+                                        }}
+                                        columns={[
+                                            { key: 'company_name', label: 'Company', exportFormat: 'string' },
+                                            { key: 'isin', label: 'ISIN', exportFormat: 'string' },
+                                            { key: 'sector', label: 'Sector', exportFormat: 'string' },
+                                            { key: 'close_price', label: 'EOD Price (₹)', exportFormat: 'numeric' },
+                                            ...displayMonths.flatMap(m => [
+                                                { key: `pct_aum_${m}`, label: `% of AUM (${m})`, exportFormat: 'numeric' },
+                                                { key: `shares_${m}`, label: `Shares Held (${m})`, exportFormat: 'numeric' },
+                                                { key: `change_${m}`, label: `Net Change (${m})`, exportFormat: 'numeric' },
+                                            ]),
+                                        ]}
+                                        pdfColumns={[
+                                            { key: 'company_name', label: 'Company', exportFormat: 'string' },
+                                            { key: 'sector', label: 'Sector', exportFormat: 'string' },
+                                            ...displayMonths.flatMap(m => [
+                                                { key: `pct_aum_${m}`, label: `% AUM (${m})`, exportFormat: 'numeric' },
+                                                { key: `shares_${m}`, label: `Shares (${m})`, exportFormat: 'numeric' },
+                                                { key: `change_${m}`, label: `Change (${m})`, exportFormat: 'numeric' },
+                                            ]),
+                                        ]}
+                                        fileNameConfig={{
+                                            page: 'scheme-portfolio',
+                                            filters: {
+                                                scheme: portfolio?.scheme_name,
+                                                period: displayMonths[0],
+                                            },
+                                        }}
+                                        metadata={{
+                                            title: `Scheme Portfolio — ${portfolio?.scheme_name || ''}`,
+                                            filters: {
+                                                Scheme: portfolio?.scheme_name,
+                                                AMC: portfolio?.amc_name,
+                                                Plan: portfolio?.plan_type,
+                                                Option: portfolio?.option_type,
+                                                Period: displayMonths[0],
+                                                Search: filterText || undefined,
+                                            },
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="shp-table-wrap">
                                 <table className="shp-table">
                                     <thead>
                                         <tr className="shp-thead-row-months">

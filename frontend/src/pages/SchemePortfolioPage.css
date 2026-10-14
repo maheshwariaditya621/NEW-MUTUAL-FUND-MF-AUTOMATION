@@ -185,25 +185,30 @@
 
 /* ── Merged Header Controls Toolbar ── */
 .shp-controls-header {
-    height: 60px;
-    /* Force consistent height for sticky math */
-    padding: 0 16px;
+    min-height: 52px;
+    padding: 10px 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: var(--shp-header-bg);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    position: sticky;
-    top: 0;
-    z-index: 100 !important;
-    /* Highest absolute layer */
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--bg-card, #0a0f1d);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-radius: 12px;
+    margin-bottom: 14px;
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .shp-controls-header {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
 }
 
 .shp-controls-header .shp-picker-label {
-    color: var(--shp-header-color);
-    opacity: 0.9;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
 }
 
 .shp-controls-header .shp-view-toggle {
@@ -228,42 +233,52 @@
 
 .shp-controls-header .shp-picker-select,
 .shp-controls-header .shp-search-input {
-    background: rgba(255, 255, 255, 0.95);
-    border-color: transparent;
-    color: #111827;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border-radius: 8px;
+    color: var(--text-primary);
+    padding: 6px 12px;
+    font-size: 12px;
 }
 
 .shp-controls-header .shp-search-input::placeholder {
-    color: #6b7280;
+    color: var(--text-secondary);
 }
 
 [data-theme="dark"] .shp-controls-header .shp-picker-select,
 [data-theme="dark"] .shp-controls-header .shp-search-input {
     background: rgba(0, 0, 0, 0.35);
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.15);
     color: #f8fafc;
 }
 
 [data-theme="dark"] .shp-controls-header .shp-search-input::placeholder {
-    color: #cbd5e1;
+    color: #94a3b8;
 }
 
 .shp-section-title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 10px;
 }
 
 /* ══════════════════════════════════════════════════════════════
    TABLE
    ══════════════════════════════════════════════════════════════ */
 .shp-table-wrap {
+    position: relative;
     overflow: auto;
-    max-height: 75vh;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: var(--shadow-md);
+    max-height: 72vh;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-radius: 12px;
+    box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.35);
+    background: var(--bg-card, #0a0f1d);
+}
+
+[data-theme="light"] .shp-table-wrap {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
 }
 
 .shp-table {
@@ -275,54 +290,23 @@
 }
 
 /* ── Headers ─────────────────────────────────────────────────── */
-/* Note: position:sticky does NOT work on <thead> — only on <th>/<td>.
-   Apply sticky directly to every th, with top: 60px (= .shp-controls-header height). */
 .shp-table thead {
     position: static;
+    background: #090e1c;
+}
+
+[data-theme="light"] .shp-table thead {
+    background: #f1f5f9;
 }
 
 .shp-th {
-    position: sticky;
-    top: 60px;
-    z-index: 10;
-    padding: 10px 12px;
+    box-sizing: border-box;
     font-size: 10.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     white-space: nowrap;
     text-align: center;
-    background: var(--shp-header-bg);
-    color: var(--shp-header-color);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-}
-
-.shp-th.shp-th-name {
-    text-align: left;
-    min-width: 200px;
-    max-width: 270px;
-}
-
-.shp-th.shp-th-num {
-    min-width: 80px;
-}
-
-.shp-th.shp-th-month-group {
-    font-size: 11.5px;
-    letter-spacing: 1px;
-    padding: 0 12px;
-    height: 48px;
-    /* Slimmed down while still fitting AUM label */
-    border-bottom: 1.5px solid rgba(255, 255, 255, 0.18);
-}
-
-.shp-th.shp-th-sub {
-    font-size: 9.5px;
-    letter-spacing: 0.4px;
-    padding: 7px 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    font-weight: 600;
-    color: var(--shp-subheader-color);
 }
 
 /* ── Month group tints — header cells ────────────────────────── */
@@ -725,10 +709,10 @@
 .shp-thead-row-months th {
     position: sticky;
     top: 0;
-    height: 40px;
-    min-height: 40px;
+    height: 48px;
+    min-height: 48px;
     box-sizing: border-box;
-    padding: 2px 12px;
+    padding: 6px 12px;
     vertical-align: middle;
     z-index: 50;
     background: #090e1c !important;
@@ -750,7 +734,7 @@
 
 .shp-thead-row-subs th {
     position: sticky;
-    top: 40px;
+    top: 48px;
     height: 34px;
     min-height: 34px;
     box-sizing: border-box;
@@ -781,6 +765,9 @@
     position: sticky;
     left: 0;
     top: 0;
+    height: 48px;
+    min-height: 48px;
+    box-sizing: border-box;
     z-index: 60;
     background: #090e1c !important;
     text-align: left;
@@ -798,7 +785,11 @@
 .shp-th.shp-th-asset-sub {
     position: sticky;
     left: 0;
-    top: 40px;
+    top: 48px;
+    height: 34px;
+    min-height: 34px;
+    box-sizing: border-box;
+    line-height: 34px;
     z-index: 59;
     background: #0d1527 !important;
     text-align: left;

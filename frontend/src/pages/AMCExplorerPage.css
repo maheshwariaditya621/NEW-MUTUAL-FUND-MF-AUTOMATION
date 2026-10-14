@@ -216,10 +216,12 @@
 }
 
 .scheme-list-container {
+    position: relative;
     background: var(--bg-card, #0a0f1d);
     border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
     border-radius: 12px;
     overflow: auto;
+    max-height: 72vh;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
