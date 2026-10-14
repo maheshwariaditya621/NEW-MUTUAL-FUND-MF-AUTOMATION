@@ -162,19 +162,28 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
     """
 
     # Try exact ISIN match first
-    cur.execute(query_base + " WHERE c.isin = %s", (identifier.upper(),))
+    clean_id = identifier.strip()
+    cur.execute(query_base + " WHERE c.isin = %s", (clean_id.upper(),))
     result = cur.fetchone()
     if result:
         return result
     
     # Try exact NSE symbol match
-    cur.execute(query_base + " WHERE c.nse_symbol = %s", (identifier.upper(),))
+    cur.execute(query_base + " WHERE c.nse_symbol = %s", (clean_id.upper(),))
     result = cur.fetchone()
     if result:
         return result
+
+    # Try symbol without spaces (e.g. 'HDFC Bank' -> 'HDFCBANK')
+    no_space = clean_id.replace(" ", "").upper()
+    if no_space != clean_id.upper():
+        cur.execute(query_base + " WHERE c.nse_symbol = %s", (no_space,))
+        result = cur.fetchone()
+        if result:
+            return result
     
     # Try fuzzy company name match
-    search_pattern = f"%{identifier}%"
+    search_pattern = f"%{clean_id}%"
     cur.execute(
         """
         SELECT DISTINCT ON (relevance_score, COALESCE(c.entity_id::text, c.company_id::text))
@@ -188,20 +197,20 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
             c.shares_last_updated_at,
             c.entity_id,
             CASE 
-                WHEN UPPER(c.company_name) = UPPER(%s) THEN 1
-                WHEN c.company_name ILIKE %s THEN 2
+                WHEN UPPER(COALESCE(ce.canonical_name, c.company_name)) = UPPER(%s) THEN 1
+                WHEN COALESCE(ce.canonical_name, c.company_name) ILIKE %s THEN 2
                 ELSE 3
             END as relevance_score
         FROM companies c
         LEFT JOIN corporate_entities ce ON c.entity_id = ce.entity_id
-        WHERE c.company_name ILIKE %s
+        WHERE c.company_name ILIKE %s OR ce.canonical_name ILIKE %s
         ORDER BY 
             relevance_score,
             COALESCE(c.entity_id::text, c.company_id::text),
             c.updated_at DESC
         LIMIT 2
         """,
-        (identifier, identifier + '%', search_pattern)
+        (clean_id, clean_id + '%', search_pattern, search_pattern)
     )
     results = cur.fetchall()
     
@@ -219,7 +228,8 @@ def _resolve_company_isin(identifier: str, cur: cursor) -> tuple[str, str, Optio
             detail=f"Multiple companies match '{identifier}': {', '.join(matches)}. Please use exact ISIN or NSE symbol."
         )
     
-    return results[0]
+    # Return exactly the 9 company metadata columns (exclude relevance_score at index 9)
+    return results[0][:9]
 
 
 @router.get("/{isin}/price")

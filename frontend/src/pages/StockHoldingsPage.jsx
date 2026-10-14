@@ -135,7 +135,7 @@ function MiniSparkline({ history }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
-    const identifierParam = searchParams.get('isin');
+    const identifierParam = searchParams.get('isin') || searchParams.get('identifier');
     const filterParam = searchParams.get('filter'); // 'entrants' | 'exits'
 
     const [summary, setSummary] = useState(null);
