@@ -29,7 +29,7 @@ export default function StockDealsSection({ companyId, symbol, isin, companyName
     const [displayLimit, setDisplayLimit] = useState(10);
 
     useEffect(() => {
-        if (!companyId && !symbol && !isin) return;
+        if (!companyId && !symbol && !isin && !companyName) return;
 
         let isMounted = true;
         setLoading(true);
@@ -40,14 +40,15 @@ export default function StockDealsSection({ companyId, symbol, isin, companyName
             sort_by: 'trade_date',
             sort_order: 'desc'
         };
+        if (isin) params.isin = isin;
         if (companyId) params.company_id = companyId;
-        else if (isin) params.isin = isin;
-        else if (symbol) params.symbol = symbol;
+        if (symbol) params.symbol = symbol;
 
         fetchDeals(params)
             .then(res => {
                 if (isMounted) {
-                    setDeals(res?.items || []);
+                    const dealsData = res?.deals || res?.items || [];
+                    setDeals(dealsData);
                 }
             })
             .catch(err => {
@@ -61,7 +62,7 @@ export default function StockDealsSection({ companyId, symbol, isin, companyName
             });
 
         return () => { isMounted = false; };
-    }, [symbol, isin]);
+    }, [companyId, symbol, isin, companyName]);
 
     // Aggregate statistics
     const stats = useMemo(() => {
@@ -167,7 +168,7 @@ export default function StockDealsSection({ companyId, symbol, isin, companyName
                     <p className="sds-empty-sub">
                         No bulk (&gt;0.5% equity) or block window trades have been recorded for {companyName || symbol} in our historical archives.
                     </p>
-                    <Link to="/deals" className="sds-explorer-link" style={{ marginTop: '8px' }}>
+                    <Link to={`/deals?search=${encodeURIComponent(symbol || isin || companyName || '')}`} className="sds-explorer-link" style={{ marginTop: '8px' }}>
                         Open Market Deals Explorer <ExternalLink size={13} />
                     </Link>
                 </div>
@@ -189,7 +190,7 @@ export default function StockDealsSection({ companyId, symbol, isin, companyName
                     </p>
                 </div>
                 <div className="sds-header-actions">
-                    <Link to={`/deals?search=${encodeURIComponent(symbol || '')}`} className="sds-explorer-link">
+                    <Link to={`/deals?search=${encodeURIComponent(symbol || isin || companyName || '')}`} className="sds-explorer-link">
                         Full Deals Hub <ExternalLink size={13} />
                     </Link>
                 </div>

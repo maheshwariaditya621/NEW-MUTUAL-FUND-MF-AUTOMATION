@@ -98,8 +98,14 @@ async def get_deals(
         stock_filters.append("d.symbol = %s")
         params.append(symbol.strip().upper())
     if isin:
-        stock_filters.append("(d.isin = %s OR (d.company_id IS NOT NULL AND d.company_id = (SELECT company_id FROM companies WHERE isin = %s LIMIT 1)))")
-        params.extend([isin.strip().upper(), isin.strip().upper()])
+        clean_isin = isin.strip().upper()
+        stock_filters.append("""(
+            d.isin = %s 
+            OR (d.company_id IS NOT NULL AND d.company_id = (SELECT company_id FROM companies WHERE isin = %s LIMIT 1))
+            OR (d.symbol IS NOT NULL AND d.symbol = (SELECT nse_symbol FROM companies WHERE isin = %s AND nse_symbol IS NOT NULL LIMIT 1))
+            OR (d.symbol IS NOT NULL AND d.symbol = (SELECT bse_code FROM companies WHERE isin = %s AND bse_code IS NOT NULL LIMIT 1))
+        )""")
+        params.extend([clean_isin, clean_isin, clean_isin, clean_isin])
     if company_id:
         stock_filters.append("d.company_id = %s")
         params.append(company_id)
@@ -200,7 +206,8 @@ async def get_deals(
         "limit": limit,
         "total": total_count,
         "total_pages": (total_count + limit - 1) // limit if limit > 0 else 1,
-        "deals": deals_list
+        "deals": deals_list,
+        "items": deals_list
     }
 
 
