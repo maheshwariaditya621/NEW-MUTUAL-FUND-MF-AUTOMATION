@@ -116,26 +116,37 @@ class NSESource(BaseDealSource):
             return collected_deals
 
     def _fetch_by_type(self, deal_type: str, from_date: date, to_date: date) -> List[NormalizedDeal]:
-        """Fetch either bulk or block deals."""
-        # 1. Try Historical JSON API if prime succeeds
-        if not self._session_primed:
-            self._prime_session()
-
-        deals = self._fetch_historical_json(deal_type, from_date, to_date)
-        if deals:
-            return deals
-
-        # 2. Try Daily CSV Archive fallback (especially valid for recent/today's date)
+        """Fetch either bulk or block deals across the date range."""
+        collected: Dict[str, NormalizedDeal] = {}
         today = date.today()
+
+        # 1. Daily CSV Archive (authoritative source for today's market session)
         if from_date <= today <= to_date or (to_date - from_date).days <= 3:
             logger.info(f"Checking NSE daily archive CSV for {deal_type} deals...")
             csv_deals = self._fetch_daily_csv(deal_type)
-            if csv_deals:
-                # Filter by date range
-                filtered = [d for d in csv_deals if from_date <= d.trade_date <= to_date]
-                return filtered
+            for d in csv_deals:
+                if from_date <= d.trade_date <= to_date:
+                    collected[d.source_fingerprint] = d
 
-        return []
+        # 2. Historical JSON API
+        if not self._session_primed:
+            self._prime_session()
+
+        # If range is within 14 days, iterate day-by-day because NSE's historical API truncates multi-day queries to the first day
+        day_diff = (to_date - from_date).days
+        if day_diff <= 14:
+            curr = from_date
+            while curr <= to_date:
+                h_deals = self._fetch_historical_json(deal_type, curr, curr)
+                for d in h_deals:
+                    collected[d.source_fingerprint] = d
+                curr += timedelta(days=1)
+        else:
+            h_deals = self._fetch_historical_json(deal_type, from_date, to_date)
+            for d in h_deals:
+                collected[d.source_fingerprint] = d
+
+        return list(collected.values())
 
     def _fetch_historical_json(self, deal_type: str, from_date: date, to_date: date) -> List[NormalizedDeal]:
         """Query NSE historical API endpoint."""
