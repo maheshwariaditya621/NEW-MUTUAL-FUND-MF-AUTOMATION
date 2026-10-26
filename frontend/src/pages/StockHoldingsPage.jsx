@@ -8,6 +8,7 @@ import PageEmptyState from '../components/common/PageEmptyState';
 import ExportButton from '../components/common/ExportButton';
 import WatchButton from '../components/common/WatchButton';
 import FundManagerCard from '../components/FundManagerCard';
+import StockDealsSection from '../components/StockDealsSection';
 import { getStockHoldings, getStockPrice } from '../api/stocks';
 import { fetchCompanyEarningsTimeline } from '../api/earnings';
 import { handleApiError } from '../api/client';
@@ -457,7 +458,7 @@ function InstitutionalTrajectoryChart({ trendData, closePrice, companyName, onCl
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function StockHoldingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
-    const identifierParam = searchParams.get('isin') || searchParams.get('identifier');
+    const identifierParam = searchParams.get('isin') || searchParams.get('identifier') || searchParams.get('symbol') || searchParams.get('search');
     const filterParam = searchParams.get('filter'); // 'entrants' | 'exits'
 
     const [summary, setSummary] = useState(null);
@@ -1763,6 +1764,14 @@ export default function StockHoldingsPage() {
                                 </table>
                                 )}
                             </div>
+
+                            {/* ── Institutional Large Deals (Bulk & Block) ── */}
+                            <StockDealsSection
+                                companyId={summary.company_id}
+                                symbol={summary.symbol}
+                                isin={summary.isin}
+                                companyName={summary.company_name}
+                            />
                     </>
                 )}
             </div>

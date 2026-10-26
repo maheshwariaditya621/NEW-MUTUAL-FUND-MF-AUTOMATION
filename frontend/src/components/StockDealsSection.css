@@ -1,0 +1,426 @@
+/* ==========================================================================
+   StockDealsSection.css — Institutional Deals Activity on Stock Holdings Page
+   ========================================================================== */
+
+.stock-deals-container {
+    margin-top: 36px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg, 14px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    padding: 24px;
+    transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .stock-deals-container {
+    background: #111827;
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* Header Area */
+.sds-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sds-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sds-title {
+    margin: 0;
+    font-size: 1.18rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+}
+
+.sds-title-icon {
+    color: var(--accent-primary, #3b82f6);
+}
+
+.sds-subtitle {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary, #94a3b8);
+}
+
+.sds-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.sds-explorer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent-primary, #3b82f6);
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    transition: all 0.2s ease;
+}
+
+.sds-explorer-link:hover {
+    background: rgba(59, 130, 246, 0.16);
+    transform: translateY(-1px);
+}
+
+/* Flow Metrics Bar */
+.sds-flow-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.sds-stat-card {
+    background: var(--bg-primary, #0a0f1d);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+[data-theme="light"] .sds-stat-card {
+    background: #f8fafc;
+}
+
+.sds-stat-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary, #94a3b8);
+}
+
+.sds-stat-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sds-stat-value.positive {
+    color: #10b981;
+}
+
+.sds-stat-value.negative {
+    color: #ef4444;
+}
+
+.sds-stat-sub {
+    font-size: 0.72rem;
+    color: var(--text-tertiary, #64748b);
+}
+
+/* Filter Controls */
+.sds-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.sds-type-tabs {
+    display: flex;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 4px;
+    border-radius: 9px;
+    border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .sds-type-tabs {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.sds-type-btn {
+    border: none;
+    background: transparent;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.sds-type-btn:hover {
+    color: var(--text-primary);
+}
+
+.sds-type-btn.active {
+    background: var(--accent-primary, #3b82f6);
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
+}
+
+.sds-search-input {
+    min-width: 220px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.sds-search-input:focus {
+    border-color: var(--accent-primary, #3b82f6);
+}
+
+/* Table Area */
+.sds-table-wrapper {
+    overflow-x: auto;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+}
+
+.sds-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    text-align: left;
+}
+
+.sds-table th {
+    background: var(--bg-primary, #0a0f1d);
+    color: var(--text-secondary, #94a3b8);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+[data-theme="light"] .sds-table th {
+    background: #f1f5f9;
+}
+
+.sds-table td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.sds-table tr:last-child td {
+    border-bottom: none;
+}
+
+.sds-table tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="light"] .sds-table tr:hover td {
+    background: rgba(0, 0, 0, 0.015);
+}
+
+/* Badges */
+.sds-badge-type {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.sds-badge-type.bulk {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.sds-badge-type.block {
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.sds-badge-exch {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-color);
+}
+
+.sds-badge-side {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.sds-badge-side.buy {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.sds-badge-side.sell {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.sds-client-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sds-client-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sds-cat-pill {
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.sds-cat-mf {
+    background: rgba(37, 99, 235, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+.sds-cat-fii {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.sds-cat-aif {
+    background: rgba(14, 165, 233, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.sds-cat-promoter {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.sds-cat-other {
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.sds-num {
+    text-align: right;
+    font-family: var(--font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+}
+
+.sds-val-strong {
+    font-weight: 700;
+}
+
+/* Empty State */
+.sds-empty {
+    padding: 32px 20px;
+    text-align: center;
+    background: var(--bg-primary);
+    border-radius: 10px;
+    border: 1px dashed var(--border-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+[data-theme="light"] .sds-empty {
+    background: #f8fafc;
+}
+
+.sds-empty-icon {
+    color: var(--text-tertiary);
+    opacity: 0.7;
+    margin-bottom: 4px;
+}
+
+.sds-empty-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.sds-empty-sub {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin: 0;
+    max-width: 440px;
+}
+
+/* Footer Pagination */
+.sds-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 14px;
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+}
+
+.sds-more-btn {
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary);
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sds-more-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}

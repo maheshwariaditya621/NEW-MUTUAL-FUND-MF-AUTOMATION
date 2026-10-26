@@ -52,6 +52,7 @@ async def get_deals(
     to_date: Optional[str] = None,
     symbol: Optional[str] = None,
     isin: Optional[str] = None,
+    company_id: Optional[int] = None,
     client_name: Optional[str] = None,
     search: Optional[str] = None,
     sort_by: str = Query("trade_date", pattern="^(trade_date|trade_value_inr|quantity|trade_price|pct_equity_traded|symbol|client_name)$"),
@@ -91,13 +92,19 @@ async def get_deals(
         conditions.append("d.trade_date <= %s")
         params.append(to_date)
 
+    # Group stock identifier filters with OR so records with missing ISIN or alternate symbol match
+    stock_filters = []
     if symbol:
-        conditions.append("d.symbol = %s")
+        stock_filters.append("d.symbol = %s")
         params.append(symbol.strip().upper())
-
     if isin:
-        conditions.append("d.isin = %s")
-        params.append(isin.strip().upper())
+        stock_filters.append("(d.isin = %s OR (d.company_id IS NOT NULL AND d.company_id = (SELECT company_id FROM companies WHERE isin = %s LIMIT 1)))")
+        params.extend([isin.strip().upper(), isin.strip().upper()])
+    if company_id:
+        stock_filters.append("d.company_id = %s")
+        params.append(company_id)
+    if stock_filters:
+        conditions.append(f"({' OR '.join(stock_filters)})")
 
     if client_name:
         conditions.append("d.client_name ILIKE %s")
