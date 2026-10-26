@@ -2715,4 +2715,41 @@
     color: var(--text-secondary);
     margin: 10px 0 0;
 }
+
+/* ── Earnings Integration Pills ── */
+.shp-earnings-pill {
+    background: rgba(59, 130, 246, 0.15) !important;
+    color: #60a5fa !important;
+    border: 1px solid rgba(59, 130, 246, 0.3) !important;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.shp-earnings-pill:hover {
+    background: rgba(59, 130, 246, 0.25) !important;
+    color: #93c5fd !important;
+    transform: translateY(-1px);
+}
+
+.shp-earnings-published-pill {
+    background: rgba(16, 185, 129, 0.15) !important;
+    color: #34d399 !important;
+    border: 1px solid rgba(16, 185, 129, 0.3) !important;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.shp-earnings-published-pill:hover {
+    background: rgba(16, 185, 129, 0.25) !important;
+    color: #6ee7b7 !important;
+    transform: translateY(-1px);
+}
 

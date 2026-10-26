@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { X, Calendar, CheckCircle2 } from 'lucide-react';
 import Loading from '../components/common/Loading';
 import ErrorMessage from '../components/common/ErrorMessage';
 import MissingData from '../components/common/MissingData';
@@ -9,6 +9,7 @@ import ExportButton from '../components/common/ExportButton';
 import WatchButton from '../components/common/WatchButton';
 import FundManagerCard from '../components/FundManagerCard';
 import { getStockHoldings, getStockPrice } from '../api/stocks';
+import { fetchCompanyEarningsTimeline } from '../api/earnings';
 import { handleApiError } from '../api/client';
 import { formatNumber } from '../utils/helpers';
 import './StockHoldingsPage.css';
@@ -474,6 +475,7 @@ export default function StockHoldingsPage() {
     const [expandedCats, setExpandedCats] = useState({}); // sub_category -> bool
     const [schemeTypeFilter, setSchemeTypeFilter] = useState('all'); // 'all' | 'pure_equity' | 'arbitrage'
     const [inspectSchemeId, setInspectSchemeId] = useState(null);
+    const [earningsInfo, setEarningsInfo] = useState(null);
     const tableWrapRef = useRef(null);
 
     const displayMonths = useMemo(() => {
@@ -506,6 +508,16 @@ export default function StockHoldingsPage() {
         try {
             const data = await getStockHoldings(identifier, months, endMonth);
             setSummary(data);
+
+            if (data?.company_id) {
+                fetchCompanyEarningsTimeline(data.company_id).then(res => {
+                    const nextEv = res?.upcoming_events?.[0];
+                    const latestF = res?.filings?.[0];
+                    setEarningsInfo({ nextEvent: nextEv, latestFiling: latestF });
+                }).catch(e => console.warn("Earnings timeline fetch error:", e));
+            } else {
+                setEarningsInfo(null);
+            }
 
             const p = data.close_price || data.live_price;
             if (p) {
@@ -910,6 +922,26 @@ export default function StockHoldingsPage() {
                                         <span className="shp-meta-pill shp-shares-pill">
                                             O/S: {fmt(summary.shares_outstanding)}
                                         </span>
+                                    )}
+                                    {earningsInfo?.nextEvent && (
+                                        <Link 
+                                            to="/earnings"
+                                            className="shp-meta-pill shp-earnings-pill"
+                                            title={`Board meeting to consider results on ${earningsInfo.nextEvent.meeting_date}`}
+                                        >
+                                            <Calendar size={12} />
+                                            <span>Earnings: {earningsInfo.nextEvent.meeting_date}</span>
+                                        </Link>
+                                    )}
+                                    {earningsInfo?.latestFiling && (
+                                        <Link 
+                                            to="/earnings"
+                                            className="shp-meta-pill shp-earnings-published-pill"
+                                            title={`Results Disseminated: ${earningsInfo.latestFiling.filing_title}`}
+                                        >
+                                            <CheckCircle2 size={12} />
+                                            <span>Results Published ({earningsInfo.latestFiling.fiscal_period || 'Latest'})</span>
+                                        </Link>
                                     )}
                                 </div>
 

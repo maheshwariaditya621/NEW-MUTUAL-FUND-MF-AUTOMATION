@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
-import { LogOut, User, X, ChevronDown, Lock, TrendingUp, PieChart, BarChart3, Bookmark, Bell, Layers, Menu, ChevronRight, Shield } from "lucide-react";
+import { LogOut, User, X, ChevronDown, Lock, TrendingUp, PieChart, BarChart3, Bookmark, Bell, Layers, Menu, ChevronRight, Shield, Calendar, Activity } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { WatchlistProvider } from "./contexts/WatchlistContext";
@@ -24,6 +24,8 @@ import AccessDeniedPage from "./pages/AccessDeniedPage";
 import RegisterInvitePage from "./pages/RegisterInvitePage";
 import WatchlistDashboardPage from "./pages/WatchlistDashboardPage";
 import AnnouncementsPage from "./pages/AnnouncementsPage";
+import EarningsPage from "./pages/EarningsPage";
+import DealsPage from "./pages/DealsPage";
 import TimeMachinePage from "./pages/TimeMachinePage";
 import "./App.css";
 
@@ -184,6 +186,16 @@ const MobileDrawer = ({ isOpen, onClose, hasPermission, user, logout, onOpenSecu
               <Bell size={18} className="drawer-nav-icon" /><span>Announcements</span>
             </NavLink>
           )}
+          {(hasPermission("view_earnings") || hasPermission("view_announcements")) && (
+            <NavLink to="/earnings" className={`drawer-nav-link${isActive("/earnings") ? " active" : ""}`}>
+              <Calendar size={18} className="drawer-nav-icon" /><span>Earnings Desk</span>
+            </NavLink>
+          )}
+          {(hasPermission("view_deals") || hasPermission("view_stocks")) && (
+            <NavLink to="/deals" className={`drawer-nav-link${isActive("/deals") ? " active" : ""}`}>
+              <Activity size={18} className="drawer-nav-icon" /><span>Bulk & Block Deals</span>
+            </NavLink>
+          )}
           {hasPermission("view_tools") && (
             <div className="drawer-nav-section">
               <button
@@ -274,6 +286,16 @@ const Header = () => {
                     <Bell size={14} className="nav-icon" /><span>Announcements</span>
                   </NavLink>
                 )}
+                {(hasPermission("view_earnings") || hasPermission("view_announcements")) && (
+                  <NavLink to="/earnings" className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
+                    <Calendar size={14} className="nav-icon" /><span>Earnings</span>
+                  </NavLink>
+                )}
+                {(hasPermission("view_deals") || hasPermission("view_stocks")) && (
+                  <NavLink to="/deals" className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
+                    <Activity size={14} className="nav-icon" /><span>Deals</span>
+                  </NavLink>
+                )}
                 {hasPermission("view_tools") && (
                   <div className="nav-dropdown">
                     <span className="nav-link dropdown-toggle">
@@ -362,6 +384,8 @@ function AppContent() {
             <Route path="/admin-vault" element={<ProtectedRoute requiredPermission="admin"><AdminVault /></ProtectedRoute>} />
             <Route path="/watchlist" element={<ProtectedRoute requiredPermission="view_watchlist"><WatchlistDashboardPage /></ProtectedRoute>} />
             <Route path="/announcements" element={<ProtectedRoute requiredPermission="view_announcements"><AnnouncementsPage /></ProtectedRoute>} />
+            <Route path="/earnings" element={<ProtectedRoute><EarningsPage /></ProtectedRoute>} />
+            <Route path="/deals" element={<ProtectedRoute><DealsPage /></ProtectedRoute>} />
           </Routes>
         </main>
         {showShell && (

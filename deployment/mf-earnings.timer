@@ -1,0 +1,11 @@
+[Unit]
+Description=Continuous Earnings Calendar & Results Sync Timer (Every 15 min during market & post-market hours)
+Requires=mf-earnings.service
+
+[Timer]
+Unit=mf-earnings.service
+OnCalendar=Mon..Sat 08..23:00,15,30,45:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

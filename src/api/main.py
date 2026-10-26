@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import logger
 
 # Import routers
-from src.api.routers import health, stocks, schemes, chatbot, insights, admin, amcs, auth, comparison, watchlist, announcements, fund_managers
+from src.api.routers import health, stocks, schemes, chatbot, insights, admin, amcs, auth, comparison, watchlist, announcements, fund_managers, earnings, deals
 
 # Create FastAPI app
 app = FastAPI(
@@ -50,6 +50,8 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(comparison.router, prefix="/api/v1/comparison", tags=["Comparison"])
 app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["Watchlist"])
 app.include_router(announcements.router, prefix="/api/v1/announcements", tags=["Announcements"])
+app.include_router(earnings.router, prefix="/api/v1/earnings", tags=["Earnings"])
+app.include_router(deals.router, prefix="/api/v1/deals", tags=["Bulk & Block Deals"])
 
 
 @app.on_event("startup")
